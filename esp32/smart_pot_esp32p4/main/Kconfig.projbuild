@@ -44,12 +44,12 @@ menu "Smart Pot"
 
     config SMART_POT_MQTT_URI
         string "MQTT broker URI"
-        default "mqtt://192.168.1.2:1883"
+        default "mqtt://103.236.87.90:1883"
         depends on SMART_POT_CLOUD_ENABLE
 
     config SMART_POT_MQTT_USERNAME
         string "MQTT username (optional)"
-        default ""
+        default "smartpot"
         depends on SMART_POT_CLOUD_ENABLE
 
     config SMART_POT_MQTT_PASSWORD
@@ -63,12 +63,12 @@ menu "Smart Pot"
 
     config SMART_POT_LLM_ENDPOINT
         string "Server OpenAI-compatible chat endpoint"
-        default "http://192.168.1.2:8080/v1/chat/completions"
+        default "http://103.236.87.90:18080/v1/chat/completions"
         depends on SMART_POT_LLM_ENABLE
 
     config SMART_POT_DEEPSEEK_API_KEY
         string "Smart Pot server bearer token"
-        default "smart-pot-demo-token"
+        default ""
         depends on SMART_POT_LLM_ENABLE
 
     config SMART_POT_DEEPSEEK_MODEL

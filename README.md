@@ -49,9 +49,11 @@ cd kotlin
 
 1. 设置 Wi-Fi SSID 和密码。
 2. 启用 `SMART_POT_CLOUD_ENABLE`，设置唯一 `SMART_POT_DEVICE_ID`。
-3. 将 MQTT URI 设为服务端所在电脑的局域网地址，例如 `mqtt://192.168.1.2:1883`。
-4. 将 LLM endpoint 设为 `http://192.168.1.2:8080/v1/chat/completions`，bearer token 与服务端 `DEMO_TOKEN` 一致。
+3. MQTT URI 默认已设为 `mqtt://103.236.87.90:1883`，用户名为 `smartpot`；填入服务器 `.env` 中的 `MQTT_PASSWORD`。
+4. LLM endpoint 默认已设为 `http://103.236.87.90:18080/v1/chat/completions`；bearer token 填服务器 `.env` 中的 `DEMO_TOKEN`。
 5. `idf.py build flash monitor`。
+
+Wi-Fi 密码、MQTT 密码和 bearer token 不提交到公开仓库；每台构建设备需要在 `menuconfig` 中单独填写。
 
 设备主题约定为 `smartpot/v1/devices/{deviceId}/...`，包含 `telemetry`、`reported`、`desired`、`commands`、`acks`、`events` 和 `online`。固件每 2 秒上传传感器数据；服务端按分钟覆盖聚合，降低数据库写入和历史数据体积。
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sdkconfig.h"
 #include "app_types.h"
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
 #include "app_motion.h"
