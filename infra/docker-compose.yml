@@ -8,7 +8,7 @@ services:
     volumes:
       - smartpot_postgres:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -22,7 +22,7 @@ services:
       - ./mosquitto.conf:/mosquitto-no-auth.conf:ro
       - smartpot_mosquitto:/mosquitto/data
     ports:
-      - "1883:1883"
+      - "${BIND_ADDRESS:-127.0.0.1}:1883:1883"
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1"]
       interval: 5s
@@ -52,7 +52,7 @@ services:
       mqtt:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
     restart: unless-stopped
 
 volumes:
