@@ -44,6 +44,8 @@ services:
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-smartpot}
       MQTT_HOST: mqtt
       MQTT_PORT: 1883
+      MQTT_USERNAME: ${MQTT_USERNAME:-smartpot}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
       MQTT_ENABLED: "true"
       DEEPSEEK_ENDPOINT: ${DEEPSEEK_ENDPOINT:-https://api.deepseek.com/chat/completions}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
