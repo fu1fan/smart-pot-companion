@@ -23,7 +23,7 @@ services:
       MQTT_PASSWORD: ${MQTT_PASSWORD}
     volumes:
       - ./mosquitto.conf:/mosquitto-no-auth.conf:ro
-      - ./mosquitto.passwd:/mosquitto/config/password_file:ro
+      - ./mosquitto.passwd:/mosquitto/config/password_file
       - smartpot_mosquitto:/mosquitto/data
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:1883:1883"
@@ -62,6 +62,8 @@ services:
   watchtower:
     image: dockerproxy.net/containrrr/watchtower:1.7.1
     command: ["--interval", "60", "--cleanup", "--label-enable"]
+    environment:
+      DOCKER_API_VERSION: "1.44"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
