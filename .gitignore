@@ -40,3 +40,4 @@ esp32/tmp/
 
 # Docker runtime data
 infra/data/
+infra/mosquitto.passwd

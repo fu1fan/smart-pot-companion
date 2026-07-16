@@ -20,6 +20,7 @@ services:
     command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
     volumes:
       - ./mosquitto.conf:/mosquitto-no-auth.conf:ro
+      - ./mosquitto.passwd:/mosquitto/config/password_file:ro
       - smartpot_mosquitto:/mosquitto/data
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:1883:1883"
