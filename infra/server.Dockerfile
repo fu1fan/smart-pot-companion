@@ -1,7 +1,7 @@
 FROM gradle:9.4.1-jdk21 AS build
 WORKDIR /workspace
 COPY kotlin/ ./
-RUN gradle --no-daemon :server:installDist
+RUN gradle --no-daemon -Dorg.gradle.jvmargs=-Xmx1536m :server:installDist
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
