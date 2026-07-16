@@ -18,6 +18,9 @@ services:
   mqtt:
     image: dockerproxy.net/library/eclipse-mosquitto:2.0
     command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-smartpot}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
     volumes:
       - ./mosquitto.conf:/mosquitto-no-auth.conf:ro
       - ./mosquitto.passwd:/mosquitto/config/password_file:ro
@@ -25,15 +28,13 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:1883:1883"
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -u \"$$MQTT_USERNAME\" -P \"$$MQTT_PASSWORD\" -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1"]
       interval: 5s
       timeout: 4s
       retries: 20
 
   server:
-    build:
-      context: ..
-      dockerfile: infra/server.Dockerfile
+    image: ${SERVER_IMAGE:-ghcr.io/fu1fan/smart-pot-companion-server:latest}
     environment:
       PORT: 8080
       DEMO_TOKEN: ${DEMO_TOKEN:-smart-pot-demo-token}
@@ -54,6 +55,15 @@ services:
         condition: service_healthy
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    restart: unless-stopped
+
+  watchtower:
+    image: dockerproxy.net/containrrr/watchtower:1.7.1
+    command: ["--interval", "60", "--cleanup", "--label-enable"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
 volumes:

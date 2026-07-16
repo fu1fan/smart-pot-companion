@@ -55,6 +55,16 @@ cd kotlin
 
 设备主题约定为 `smartpot/v1/devices/{deviceId}/...`，包含 `telemetry`、`reported`、`desired`、`commands`、`acks`、`events` 和 `online`。固件每 2 秒上传传感器数据；服务端按分钟覆盖聚合，降低数据库写入和历史数据体积。
 
+## 服务器镜像与自动更新
+
+服务端镜像由 GitHub Actions 构建并发布到 GitHub Container Registry：
+`ghcr.io/fu1fan/smart-pot-companion-server:latest`。生产环境 Compose 中的
+Watchtower 仅监控带标签的服务端容器，每分钟检查一次；发现新镜像后会
+自动拉取并重启服务端，因此部署服务器不需要执行 Gradle 构建。
+
+PostgreSQL 只绑定回环地址。公网防火墙和云安全组只需开放 HTTP API 的
+8080 端口与启用认证的 MQTT 1883 端口。
+
 ## 构建验证
 
 ```powershell
