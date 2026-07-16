@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: dockerproxy.net/library/postgres:17-alpine
     environment:
       POSTGRES_DB: smartpot
       POSTGRES_USER: ${POSTGRES_USER:-smartpot}
@@ -16,7 +16,7 @@ services:
       retries: 20
 
   mqtt:
-    image: eclipse-mosquitto:2.0
+    image: dockerproxy.net/library/eclipse-mosquitto:2.0
     command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
     volumes:
       - ./mosquitto.conf:/mosquitto-no-auth.conf:ro
