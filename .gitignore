@@ -1,0 +1,38 @@
+# Local agent/tool metadata
+.agents/
+.codex/
+**/.vscode/
+
+# Reference material and temporary working files
+esp32/_waveshare_official/
+esp32/_volc_tts_protocols/
+esp32/_volc_tts_protocols.zip
+esp32/docx_work/
+esp32/tmp/
+
+# ESP-IDF generated and machine-local files
+**/build/
+**/build_*/
+**/managed_components/
+**/flash_package/
+**/sdkconfig
+**/sdkconfig.old
+**/dependencies.lock
+**/_codex_build.ps1
+**/__pycache__/
+*.pyc
+
+# Kotlin/Gradle generated and machine-local files
+**/.gradle/
+**/build/
+**/local.properties
+*.jks
+*.keystore
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key

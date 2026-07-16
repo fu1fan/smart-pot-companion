@@ -1,0 +1,267 @@
+menu "Smart Pot"
+
+    config SMART_POT_WIFI_ENABLE
+        bool "Enable Wi-Fi station"
+        default y
+
+    config SMART_POT_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        depends on SMART_POT_WIFI_ENABLE
+
+    config SMART_POT_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        depends on SMART_POT_WIFI_ENABLE
+
+    config SMART_POT_WIFI_MAXIMUM_RETRY
+        int "Wi-Fi maximum retry count"
+        default 5
+        depends on SMART_POT_WIFI_ENABLE
+
+    config SMART_POT_LLM_ENABLE
+        bool "Enable DeepSeek dialog"
+        default y
+
+    config SMART_POT_LLM_ENDPOINT
+        string "DeepSeek chat completions endpoint"
+        default "https://api.deepseek.com/chat/completions"
+        depends on SMART_POT_LLM_ENABLE
+
+    config SMART_POT_DEEPSEEK_API_KEY
+        string "DeepSeek API key"
+        default ""
+        depends on SMART_POT_LLM_ENABLE
+
+    config SMART_POT_DEEPSEEK_MODEL
+        string "DeepSeek model"
+        default "deepseek-v4-flash"
+        depends on SMART_POT_LLM_ENABLE
+
+    config SMART_POT_ASR_ENABLE
+        bool "Enable Volcengine streaming speech-to-text"
+        default n
+
+    config SMART_POT_VOLC_API_KEY
+        string "Volcengine Speech API key"
+        default ""
+        depends on SMART_POT_ASR_ENABLE || SMART_POT_TTS_ENABLE
+
+    config SMART_POT_ASR_ENDPOINT
+        string "Volcengine streaming ASR WebSocket endpoint"
+        default "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+        depends on SMART_POT_ASR_ENABLE
+
+    config SMART_POT_VOLC_ASR_RESOURCE_ID
+        string "Volcengine ASR resource ID"
+        default "volc.seedasr.sauc.duration"
+        depends on SMART_POT_ASR_ENABLE
+
+    config SMART_POT_ASR_MAX_RECORD_MS
+        int "Maximum streaming ASR utterance time in milliseconds"
+        default 8000
+        range 2000 30000
+        depends on SMART_POT_ASR_ENABLE
+
+    config SMART_POT_ASR_END_WINDOW_MS
+        int "Server VAD silence window in milliseconds"
+        default 700
+        range 200 3000
+        depends on SMART_POT_ASR_ENABLE
+
+    config SMART_POT_TTS_ENABLE
+        bool "Enable Volcengine Seed-TTS streaming playback"
+        default n
+
+    config SMART_POT_TTS_ENDPOINT
+        string "Volcengine bidirectional TTS WebSocket endpoint"
+        default "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+        depends on SMART_POT_TTS_ENABLE
+
+    config SMART_POT_VOLC_TTS_RESOURCE_ID
+        string "Volcengine TTS resource ID"
+        default "seed-tts-2.0"
+        depends on SMART_POT_TTS_ENABLE
+
+    config SMART_POT_VOLC_TTS_SPEAKER
+        string "Volcengine Seed-TTS speaker ID"
+        default "zh_female_yingtaowanzi_uranus_bigtts"
+        depends on SMART_POT_TTS_ENABLE
+
+    config SMART_POT_VOLC_TTS_SAMPLE_RATE
+        int "Seed-TTS PCM sample rate"
+        default 24000
+        range 16000 48000
+        depends on SMART_POT_TTS_ENABLE
+
+    config SMART_POT_TTS_STARTUP_TEST
+        bool "Play a startup TTS test phrase"
+        default n
+        depends on SMART_POT_TTS_ENABLE
+
+    config SMART_POT_VOICE_WAKE_ENABLE
+        bool "Enable voice wake by microphone energy"
+        default y
+
+    config SMART_POT_VOICE_WAKE_THRESHOLD
+        int "Voice wake RMS threshold"
+        default 1800
+        depends on SMART_POT_VOICE_WAKE_ENABLE
+
+    config SMART_POT_VOICE_WAKE_COOLDOWN_MS
+        int "Voice wake cooldown in milliseconds"
+        default 1500
+        depends on SMART_POT_VOICE_WAKE_ENABLE
+
+    menu "Expansion board sensors"
+
+        config SMART_POT_SENSOR_HARDWARE_ENABLE
+            bool "Enable expansion-board hardware sensors"
+            default n
+            help
+                Enable BH1750 light, TTP223 touch, and TLC555 soil-frequency inputs.
+                Leave disabled while the expansion board is not connected; the app will
+                keep using simulated readings.
+
+        config SMART_POT_SENSOR_UPDATE_MS
+            int "Sensor update period in milliseconds"
+            default 2000
+
+        config SMART_POT_BH1750_ENABLE
+            bool "Enable BH1750 light sensor"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+            help
+                The schematic routes BH1750 SCL/SDA to the expansion connector and uses
+                ADDR to select 0x23 or 0x5c.
+
+        config SMART_POT_BH1750_ADDR_SELECT
+            int "BH1750 ADDR switch value"
+            default 0
+            range 0 1
+            depends on SMART_POT_BH1750_ENABLE
+            help
+                0 maps to I2C address 0x23. 1 maps to I2C address 0x5c.
+
+        config SMART_POT_BH1750_USE_BSP_I2C
+            bool "Use BSP I2C bus for BH1750"
+            default y
+            depends on SMART_POT_BH1750_ENABLE
+            help
+                Use the board I2C bus already initialized by the Waveshare BSP.
+                Disable this only if the expansion board SCL/SDA are wired to other GPIOs.
+
+        config SMART_POT_BH1750_I2C_PORT
+            int "Custom BH1750 I2C port"
+            default 1
+            depends on SMART_POT_BH1750_ENABLE && !SMART_POT_BH1750_USE_BSP_I2C
+
+        config SMART_POT_BH1750_SDA_GPIO
+            int "Custom BH1750 SDA GPIO"
+            default -1
+            depends on SMART_POT_BH1750_ENABLE && !SMART_POT_BH1750_USE_BSP_I2C
+
+        config SMART_POT_BH1750_SCL_GPIO
+            int "Custom BH1750 SCL GPIO"
+            default -1
+            depends on SMART_POT_BH1750_ENABLE && !SMART_POT_BH1750_USE_BSP_I2C
+
+        config SMART_POT_BH1750_MAX_LUX
+            int "Lux value mapped to 100 percent light"
+            default 1200
+            depends on SMART_POT_BH1750_ENABLE
+
+        config SMART_POT_MPU6050_ENABLE
+            bool "Enable MPU-6050 posture sensor"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+            help
+                Use the Waveshare BSP I2C bus (SDA GPIO7, SCL GPIO8) to sample
+                acceleration and angular velocity and detect tap, movement,
+                and persistent tilt events.
+
+        config SMART_POT_MPU6050_ADDRESS
+            hex "MPU-6050 I2C address"
+            default 0x68
+            range 0x68 0x69
+            depends on SMART_POT_MPU6050_ENABLE
+            help
+                The new expansion board pulls AD0 low, so its default address is 0x68.
+
+        config SMART_POT_TTP223_ENABLE
+            bool "Enable TTP223 touch input"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+
+        config SMART_POT_TTP223_GPIO
+            int "GPIO connected to Q_OUT"
+            default -1
+            depends on SMART_POT_TTP223_ENABLE
+            help
+                Set this after the expansion connector pin mapping is confirmed.
+
+        config SMART_POT_TTP223_ACTIVE_HIGH
+            bool "Q_OUT is active high"
+            default y
+            depends on SMART_POT_TTP223_ENABLE
+
+        config SMART_POT_SOIL_555_ENABLE
+            bool "Enable TLC555 soil moisture frequency input"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+
+        config SMART_POT_SOIL_555_GPIO
+            int "GPIO connected to 555_OUT"
+            default -1
+            depends on SMART_POT_SOIL_555_ENABLE
+            help
+                Set this after the expansion connector pin mapping is confirmed.
+
+        config SMART_POT_SOIL_555_SAMPLE_MS
+            int "555 frequency sample window in milliseconds"
+            default 250
+            depends on SMART_POT_SOIL_555_ENABLE
+
+        config SMART_POT_SOIL_555_DRY_HZ
+            int "Dry-soil calibration frequency"
+            default 2500
+            depends on SMART_POT_SOIL_555_ENABLE
+
+        config SMART_POT_SOIL_555_WET_HZ
+            int "Wet-soil calibration frequency"
+            default 500
+            depends on SMART_POT_SOIL_555_ENABLE
+
+        config SMART_POT_SOIL_MODULE_ENABLE
+            bool "Enable 4-wire soil module ADC input"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+
+        config SMART_POT_SOIL_MODULE_DO_GPIO
+            int "GPIO connected to soil module DO"
+            default 47
+            depends on SMART_POT_SOIL_MODULE_ENABLE
+
+        config SMART_POT_SOIL_MODULE_AO_GPIO
+            int "GPIO connected to soil module AO"
+            default 22
+            depends on SMART_POT_SOIL_MODULE_ENABLE
+
+        config SMART_POT_SOIL_ADC_SAMPLES
+            int "Soil ADC samples per reading"
+            default 8
+            depends on SMART_POT_SOIL_MODULE_ENABLE
+
+        config SMART_POT_SOIL_ADC_DRY_RAW
+            int "Dry-soil ADC raw calibration"
+            default 4095
+            depends on SMART_POT_SOIL_MODULE_ENABLE
+
+        config SMART_POT_SOIL_ADC_WET_RAW
+            int "Wet-soil ADC raw calibration"
+            default 0
+            depends on SMART_POT_SOIL_MODULE_ENABLE
+
+    endmenu
+
+endmenu
