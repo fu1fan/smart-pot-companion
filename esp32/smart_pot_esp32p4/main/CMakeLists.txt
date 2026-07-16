@@ -13,6 +13,7 @@ set(SMART_POT_SRCS
         app_asr.c
         app_tts.c
         app_voice.c
+        app_cloud.c
 )
 
 if(CONFIG_SMART_POT_MPU6050_ENABLE)
@@ -22,6 +23,6 @@ endif()
 idf_component_register(
     SRCS ${SMART_POT_SRCS}
     INCLUDE_DIRS .
-    PRIV_REQUIRES esp_http_client esp_websocket_client json esp_wifi esp_netif esp_event esp-tls nvs_flash driver esp_timer esp_adc espressif__esp-sr esp32_p4_wifi6_touch_lcd_4_3
+    PRIV_REQUIRES esp_http_client esp_websocket_client mqtt json esp_wifi esp_netif esp_event esp-tls nvs_flash driver esp_timer esp_adc espressif__esp-sr esp32_p4_wifi6_touch_lcd_4_3
     EMBED_FILES assets/NotoSansSC-GB2312.ttf assets/Inkfree-ToDo.ttf
 )

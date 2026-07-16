@@ -9,6 +9,7 @@
 #include "bsp/display.h"
 
 #include "app_llm.h"
+#include "app_cloud.h"
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
 #include "app_motion.h"
 #endif
@@ -32,6 +33,7 @@ static void motion_event_cb(app_motion_event_t event,
     ESP_LOGI(TAG, "Motion event=%d roll=%.1f pitch=%.1f moving=%d tilt=%u",
              event, state->roll_deg, state->pitch_deg,
              state->moving, state->tilt_level);
+    app_cloud_update_motion(event, state);
 }
 #endif
 
@@ -55,6 +57,7 @@ static void sensor_update_cb(const app_plant_state_t *state, void *user_ctx)
 
     app_ui_update(state);
     app_llm_update_plant_state(state);
+    app_cloud_update_plant_state(state);
 
     if (state->touch_count != last_touch_count) {
         int64_t now_us = esp_timer_get_time();
@@ -112,6 +115,7 @@ void app_main(void)
     init_display();
 
     app_wifi_start();
+    app_cloud_start();
     app_time_start();
     app_tts_start();
     app_llm_start();

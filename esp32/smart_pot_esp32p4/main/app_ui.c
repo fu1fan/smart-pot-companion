@@ -91,6 +91,7 @@ static lv_obj_t *s_cat_drop_left;
 static lv_obj_t *s_cat_zzz_label;
 static lv_obj_t *s_cat_heart;
 static lv_timer_t *s_touch_blink_timer;
+static lv_timer_t *s_remote_content_timer;
 static lv_timer_t *s_heart_hide_timer;
 static lv_timer_t *s_idle_blink_timer;
 static lv_timer_t *s_schedule_blink_timer;
@@ -2220,6 +2221,30 @@ void app_ui_set_dialog_status(const char *status)
         lv_label_set_text(s_dialog_label, status);
         bsp_display_unlock();
     }
+}
+
+static void remote_content_hide_cb(lv_timer_t *timer)
+{
+    if (s_dialog_label != NULL) lv_obj_add_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
+    s_remote_content_timer = NULL;
+    lv_timer_delete(timer);
+}
+
+void app_ui_show_remote_content(const char *text, uint32_t duration_ms)
+{
+    if (text == NULL || text[0] == '\0' || s_dialog_label == NULL) return;
+    if (bsp_display_lock(200) != ESP_OK) return;
+    lv_label_set_text(s_dialog_label, text);
+    lv_obj_set_width(s_dialog_label, 500);
+    lv_obj_set_style_text_align(s_dialog_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_dialog_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_dialog_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_align(s_dialog_label, LV_ALIGN_BOTTOM_MID, 0, -62);
+    lv_obj_remove_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
+    if (s_remote_content_timer != NULL) lv_timer_delete(s_remote_content_timer);
+    s_remote_content_timer = lv_timer_create(remote_content_hide_cb, duration_ms > 0 ? duration_ms : 20000, NULL);
+    lv_timer_set_repeat_count(s_remote_content_timer, 1);
+    bsp_display_unlock();
 }
 
 void app_ui_set_voice_status(const char *status)

@@ -26,6 +26,7 @@ esp32/tmp/
 **/.gradle/
 **/build/
 **/local.properties
+.tools/
 *.jks
 *.keystore
 
@@ -36,3 +37,6 @@ esp32/tmp/
 *.pem
 *.p12
 *.key
+
+# Docker runtime data
+infra/data/

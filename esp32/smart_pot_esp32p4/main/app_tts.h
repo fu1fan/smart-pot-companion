@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum {
     APP_TTS_TONE_CHEERFUL = 0,
@@ -22,3 +23,5 @@ bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone);
 bool app_tts_speak_stream_segment(const char *text);
 bool app_tts_finish_stream(void);
 bool app_tts_play_success_chime(void);
+void app_tts_set_volume(uint8_t volume_percent);
+uint8_t app_tts_get_volume(void);

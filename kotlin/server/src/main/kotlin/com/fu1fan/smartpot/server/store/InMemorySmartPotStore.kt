@@ -1,0 +1,111 @@
+package com.fu1fan.smartpot.server.store
+
+import com.fu1fan.smartpot.protocol.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
+
+class InMemorySmartPotStore : SmartPotStore {
+    private val lock = Mutex()
+    private val species = linkedMapOf<String, PlantSpecies>()
+    private val pots = linkedMapOf<String, PotProfile>()
+    private val telemetry = ConcurrentHashMap<String, MutableList<DeviceTelemetry>>()
+    private val states = ConcurrentHashMap<String, StoredDeviceState>()
+    private val alerts = ConcurrentHashMap<String, MutableList<PlantAlert>>()
+    private val careLogs = ConcurrentHashMap<String, MutableList<CareLog>>()
+    private val reminders = ConcurrentHashMap<String, MutableList<CareReminder>>()
+    private val memories = ConcurrentHashMap<String, MutableList<UserMemory>>()
+    private val messages = ConcurrentHashMap<String, MutableList<ChatMessage>>()
+    private val affinities = ConcurrentHashMap<String, AffinityState>()
+    private val affinityEventKeys = ConcurrentHashMap.newKeySet<String>()
+    private val diaries = ConcurrentHashMap<String, MutableList<PlantDiary>>()
+    private val shares = ConcurrentHashMap<String, Pair<String, ShareCode>>()
+
+    override suspend fun seedSpecies(species: List<PlantSpecies>) = lock.withLock {
+        species.forEach { this.species.putIfAbsent(it.id, it) }
+    }
+
+    override suspend fun listSpecies() = lock.withLock { species.values.toList() }
+    override suspend fun findSpecies(id: String) = lock.withLock { species[id] }
+    override suspend fun listPots() = lock.withLock { pots.values.toList() }
+    override suspend fun findPot(id: String) = lock.withLock { pots[id] }
+    override suspend fun findPotByDevice(deviceId: String) = lock.withLock { pots.values.firstOrNull { it.deviceId == deviceId } }
+    override suspend fun savePot(pot: PotProfile) = lock.withLock { pots[pot.id] = pot; pot }
+
+    override suspend fun saveTelemetry(potId: String, telemetry: DeviceTelemetry) {
+        val list = this.telemetry.computeIfAbsent(potId) { mutableListOf() }
+        synchronized(list) {
+            list += telemetry
+            if (list.size > 1_440) list.removeFirst()
+        }
+    }
+
+    override suspend fun latestTelemetry(potId: String) = telemetry[potId]?.let { synchronized(it) { it.lastOrNull() } }
+    override suspend fun telemetryHistory(potId: String, limit: Int) = telemetry[potId]?.let { synchronized(it) { it.takeLast(limit) } } ?: emptyList()
+    override suspend fun pruneTelemetryBefore(cutoff: String) {
+        val cutoffInstant = Instant.parse(cutoff)
+        telemetry.values.forEach { list ->
+            synchronized(list) { list.removeAll { Instant.parse(it.recordedAt).isBefore(cutoffInstant) } }
+        }
+    }
+
+    override suspend fun saveReportedState(state: DeviceReportedState) {
+        states.compute(state.deviceId) { _, old -> (old ?: StoredDeviceState()).copy(reported = state, lastSeenAt = state.reportedAt) }
+    }
+
+    override suspend fun saveDesiredState(state: DeviceDesiredState) {
+        states.compute(state.deviceId) { _, old -> (old ?: StoredDeviceState()).copy(desired = state) }
+    }
+
+    override suspend fun setOnline(deviceId: String, online: Boolean, changedAt: String) {
+        states.compute(deviceId) { _, old -> (old ?: StoredDeviceState()).copy(online = online, lastSeenAt = changedAt) }
+    }
+
+    override suspend fun deviceState(deviceId: String) = states[deviceId] ?: StoredDeviceState()
+
+    override suspend fun listAlerts(potId: String, activeOnly: Boolean): List<PlantAlert> =
+        alerts[potId]?.let { synchronized(it) { it.filter { alert -> !activeOnly || alert.status == AlertStatus.ACTIVE } } } ?: emptyList()
+
+    override suspend fun saveAlert(alert: PlantAlert) {
+        val list = alerts.computeIfAbsent(alert.potId) { mutableListOf() }
+        synchronized(list) { list.removeAll { it.id == alert.id }; list += alert }
+    }
+
+    override suspend fun listCareLogs(potId: String) = careLogs[potId]?.let { synchronized(it) { it.sortedByDescending(CareLog::occurredAt) } } ?: emptyList()
+    override suspend fun saveCareLog(log: CareLog) { careLogs.computeIfAbsent(log.potId) { mutableListOf() }.add(log) }
+    override suspend fun listReminders(potId: String) = reminders[potId]?.let { synchronized(it) { it.sortedBy(CareReminder::dueAt) } } ?: emptyList()
+    override suspend fun saveReminder(reminder: CareReminder) {
+        val list = reminders.computeIfAbsent(reminder.potId) { mutableListOf() }
+        synchronized(list) { list.removeAll { it.id == reminder.id }; list += reminder }
+    }
+
+    override suspend fun listMemories(potId: String) = memories[potId]?.let { synchronized(it) { it.toList() } } ?: emptyList()
+    override suspend fun saveMemory(memory: UserMemory) { memories.computeIfAbsent(memory.potId) { mutableListOf() }.add(memory) }
+    override suspend fun listMessages(potId: String, limit: Int) = messages[potId]?.let { synchronized(it) { it.takeLast(limit) } } ?: emptyList()
+    override suspend fun saveMessage(message: ChatMessage) { messages.computeIfAbsent(message.potId) { mutableListOf() }.add(message) }
+
+    override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState()
+    override suspend fun saveAffinity(potId: String, affinity: AffinityState) { affinities[potId] = affinity }
+    override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean =
+        affinityEventKeys.add("$potId:$eventKey")
+
+    override suspend fun listDiaries(potId: String) = diaries[potId]?.let { synchronized(it) { it.sortedByDescending(PlantDiary::diaryDate) } } ?: emptyList()
+    override suspend fun saveDiary(diary: PlantDiary): Boolean {
+        val list = diaries.computeIfAbsent(diary.potId) { mutableListOf() }
+        synchronized(list) {
+            if (list.any { it.diaryDate == diary.diaryDate }) return false
+            list += diary
+        }
+        return true
+    }
+
+    override suspend fun saveShareCode(code: ShareCode, potId: String) { shares[code.code] = potId to code }
+
+    override suspend fun redeemShareCode(code: String, actorName: String, now: String): Pair<String, ShareCode>? {
+        val value = shares[code] ?: return null
+        if (Instant.parse(value.second.expiresAt).isBefore(Instant.parse(now))) return null
+        shares.remove(code)
+        return value
+    }
+}

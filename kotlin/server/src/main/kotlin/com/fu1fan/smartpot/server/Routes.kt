@@ -1,0 +1,155 @@
+package com.fu1fan.smartpot.server
+
+import com.fu1fan.smartpot.protocol.*
+import com.fu1fan.smartpot.server.service.*
+import com.fu1fan.smartpot.server.store.SmartPotStore
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.auth.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
+import kotlinx.coroutines.flow.collect
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.JsonObject
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.util.UUID
+
+data class ServerServices(
+    val config: AppConfig,
+    val store: SmartPotStore,
+    val pots: PotService,
+    val care: CareService,
+    val ai: CloudAiService,
+    val diary: DiaryService,
+    val commands: CommandService,
+    val realtime: RealtimeHub,
+    val shares: ShareTokenService,
+)
+
+fun Application.configureRoutes(services: ServerServices) {
+    routing {
+        get("/health") { call.respond(mapOf("status" to "ok", "service" to "smart-pot-server")) }
+        post("/api/v1/share/redeem") {
+            val request = call.receive<RedeemShareRequest>()
+            require(request.actorName.isNotBlank() && request.actorName.length <= 24) { "访客昵称应为 1-24 个字符" }
+            val now = Instant.now()
+            val redeemed = requireNotNull(services.store.redeemShareCode(request.code.trim(), request.actorName.trim(), now.toString())) { "分享码无效或已过期" }
+            val expires = now.plus(7, ChronoUnit.DAYS)
+            call.respond(ShareSession(services.shares.issue(redeemed.first, request.actorName.trim(), expires), redeemed.first, request.actorName.trim(), expires.toString()))
+        }
+
+        authenticate("access") {
+            post("/v1/chat/completions") {
+                call.requireOwner(services)
+                val request = call.receive<JsonObject>()
+                call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+                    services.ai.proxyOpenAi(request, this)
+                }
+            }
+            route("/api/v1") {
+                get("/species") { call.respond(services.store.listSpecies()) }
+                get("/pots") {
+                    val access = call.accessIdentity(services)
+                    call.respond(services.store.listPots().filter { access.owner || access.allowedPotId == it.id })
+                }
+                post("/pots") {
+                    call.requireOwner(services)
+                    call.respond(HttpStatusCode.Created, services.pots.create(call.receive()))
+                }
+                route("/pots/{potId}") {
+                    get {
+                        val pot = call.requirePot(services)
+                        call.respond(pot)
+                    }
+                    patch {
+                        val pot = call.requirePot(services, ownerOnly = true)
+                        call.respond(services.pots.update(pot.id, call.receive()))
+                    }
+                    get("/snapshot") {
+                        val pot = call.requirePot(services)
+                        call.respond(services.pots.snapshot(pot.id))
+                    }
+                    get("/telemetry") {
+                        val pot = call.requirePot(services)
+                        val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 10_080) ?: 1_440
+                        call.respond(services.store.telemetryHistory(pot.id, limit))
+                    }
+                    get("/alerts") { call.respond(services.store.listAlerts(call.requirePot(services).id)) }
+                    get("/care") { call.respond(services.store.listCareLogs(call.requirePot(services).id)) }
+                    post("/care") {
+                        val pot = call.requirePot(services)
+                        call.respond(HttpStatusCode.Created, services.care.add(pot, call.receive(), call.accessIdentity(services).actorName))
+                    }
+                    get("/reminders") { call.respond(services.store.listReminders(call.requirePot(services).id)) }
+                    get("/memories") { call.respond(services.store.listMemories(call.requirePot(services).id)) }
+                    post("/memories") {
+                        val pot = call.requirePot(services)
+                        val request = call.receive<CreateMemoryRequest>()
+                        require(request.content.isNotBlank() && request.content.length <= 500) { "记忆内容应为 1-500 个字符" }
+                        val memory = UserMemory(UUID.randomUUID().toString(), pot.id, request.content.trim(), Instant.now().toString())
+                        services.store.saveMemory(memory)
+                        call.respond(HttpStatusCode.Created, memory)
+                    }
+                    get("/chat") { call.respond(services.store.listMessages(call.requirePot(services).id, 100)) }
+                    post("/chat") {
+                        val pot = call.requirePot(services)
+                        val request = call.receive<ChatRequest>()
+                        call.respond(services.ai.chat(pot, request.text, request.source))
+                    }
+                    get("/diaries") { call.respond(services.store.listDiaries(call.requirePot(services).id)) }
+                    post("/diaries/generate") {
+                        val pot = call.requirePot(services)
+                        call.respond(services.diary.generate(pot.id))
+                    }
+                    post("/control") {
+                        val pot = call.requirePot(services)
+                        call.respond(HttpStatusCode.Accepted, services.commands.submit(pot, call.receive()))
+                    }
+                    post("/share") {
+                        val pot = call.requirePot(services, ownerOnly = true)
+                        val request = call.receive<CreateShareRequest>()
+                        val expires = Instant.now().plus(request.validMinutes.coerceIn(5, 1_440).toLong(), ChronoUnit.MINUTES)
+                        val code = ShareCode((100000..999999).random().toString(), expires.toString())
+                        services.store.saveShareCode(code, pot.id)
+                        call.respond(code)
+                    }
+                    webSocket("/realtime") {
+                        val pot = call.requirePot(services)
+                        send(Frame.Text(appJson.encodeToString(RealtimeEvent(RealtimeEventType.SNAPSHOT, pot.id, appJson.encodeToJsonElement(services.pots.snapshot(pot.id))))))
+                        services.realtime.stream(pot.id).collect { send(Frame.Text(appJson.encodeToString(it))) }
+                    }
+                }
+                post("/device/{deviceId}/chat") {
+                    call.requireOwner(services)
+                    val deviceId = requireNotNull(call.parameters["deviceId"])
+                    val pot = services.pots.ensureForDevice(deviceId)
+                    val request = call.receive<ChatRequest>()
+                    call.respond(services.ai.chat(pot, request.text, "DEVICE"))
+                }
+            }
+        }
+    }
+}
+
+private fun ApplicationCall.accessIdentity(services: ServerServices): AccessIdentity {
+    val token = request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")?.trim().orEmpty()
+    return if (token == services.config.demoToken) AccessIdentity("主人", owner = true)
+    else requireNotNull(services.shares.verify(token)) { "访问令牌无效或已过期" }
+}
+
+private fun ApplicationCall.requireOwner(services: ServerServices) {
+    require(accessIdentity(services).owner) { "仅主人可以执行此操作" }
+}
+
+private suspend fun ApplicationCall.requirePot(services: ServerServices, ownerOnly: Boolean = false): PotProfile {
+    val access = accessIdentity(services)
+    if (ownerOnly) require(access.owner) { "仅主人可以执行此操作" }
+    val id = requireNotNull(parameters["potId"]) { "缺少盆栽 ID" }
+    require(access.owner || access.allowedPotId == id) { "无权访问该盆栽" }
+    return requireNotNull(services.store.findPot(id)) { "盆栽不存在" }
+}

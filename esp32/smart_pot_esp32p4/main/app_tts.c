@@ -59,6 +59,23 @@
 #define CHIME_SAMPLE_RATE 22050
 #define CHIME_CHUNK_SAMPLES 128
 
+static uint8_t s_user_volume = 100;
+
+static uint8_t apply_user_volume(uint8_t base)
+{
+    return (uint8_t)(((uint16_t)base * s_user_volume) / 100U);
+}
+
+void app_tts_set_volume(uint8_t volume_percent)
+{
+    s_user_volume = volume_percent > 100 ? 100 : volume_percent;
+}
+
+uint8_t app_tts_get_volume(void)
+{
+    return s_user_volume;
+}
+
 #define TTS_EVENT_WS_CONNECTED BIT0
 #define TTS_EVENT_CONNECTION_STARTED BIT1
 #define TTS_EVENT_SESSION_STARTED BIT2
@@ -745,7 +762,7 @@ static bool queue_one_shot(const char *text, bool followup, bool complete,
         .command = TTS_CMD_ONE_SHOT,
         .enable_followup = followup,
         .complete_conversation = complete,
-        .volume = volume,
+        .volume = apply_user_volume(volume),
         .speech_rate = rate,
         .pitch = pitch,
     };
@@ -791,7 +808,7 @@ bool app_tts_stream_begin(const char *voice_instruction, bool enable_followup)
     tts_msg_t msg = {
         .command = TTS_CMD_STREAM_BEGIN,
         .enable_followup = enable_followup,
-        .volume = TTS_VOLUME_CONVERSATION,
+        .volume = apply_user_volume(TTS_VOLUME_CONVERSATION),
         .speech_rate = 5,
         .pitch = 1,
     };

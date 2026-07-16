@@ -1,0 +1,10 @@
+.git
+.tools
+.agents
+.codex
+.env
+esp32
+**/.gradle
+**/build
+**/local.properties
+**/sdkconfig

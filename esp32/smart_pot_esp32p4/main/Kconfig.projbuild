@@ -1,3 +1,16 @@
+# This Waveshare board always uses its on-board ESP32-C6 as the Wi-Fi slave.
+# esp-wifi-remote 0.14.x does not expand its versioned Kconfig source under
+# every 5.5 patch release, so keep the board choice explicit at project level.
+config SLAVE_IDF_TARGET_ESP32C6
+    bool
+    default y
+
+# Load the matching Wi-Fi-remote capability/buffer defaults explicitly. The
+# upstream component uses a patch-version-dependent orsource which is skipped
+# by kconfiglib for IDF 5.5.4 on this installation.
+rsource "../managed_components/espressif__esp_wifi_remote/idf_v5.5/Kconfig.soc_wifi_caps.in"
+rsource "../managed_components/espressif__esp_wifi_remote/idf_v5.5/Kconfig.wifi.in"
+
 menu "Smart Pot"
 
     config SMART_POT_WIFI_ENABLE
@@ -19,23 +32,48 @@ menu "Smart Pot"
         default 5
         depends on SMART_POT_WIFI_ENABLE
 
+    config SMART_POT_CLOUD_ENABLE
+        bool "Enable Smart Pot MQTT cloud connection"
+        default n
+        depends on SMART_POT_WIFI_ENABLE
+
+    config SMART_POT_DEVICE_ID
+        string "Cloud device ID"
+        default "smartpot-p4-001"
+        depends on SMART_POT_CLOUD_ENABLE
+
+    config SMART_POT_MQTT_URI
+        string "MQTT broker URI"
+        default "mqtt://192.168.1.2:1883"
+        depends on SMART_POT_CLOUD_ENABLE
+
+    config SMART_POT_MQTT_USERNAME
+        string "MQTT username (optional)"
+        default ""
+        depends on SMART_POT_CLOUD_ENABLE
+
+    config SMART_POT_MQTT_PASSWORD
+        string "MQTT password (optional)"
+        default ""
+        depends on SMART_POT_CLOUD_ENABLE
+
     config SMART_POT_LLM_ENABLE
         bool "Enable DeepSeek dialog"
         default y
 
     config SMART_POT_LLM_ENDPOINT
-        string "DeepSeek chat completions endpoint"
-        default "https://api.deepseek.com/chat/completions"
+        string "Server OpenAI-compatible chat endpoint"
+        default "http://192.168.1.2:8080/v1/chat/completions"
         depends on SMART_POT_LLM_ENABLE
 
     config SMART_POT_DEEPSEEK_API_KEY
-        string "DeepSeek API key"
-        default ""
+        string "Smart Pot server bearer token"
+        default "smart-pot-demo-token"
         depends on SMART_POT_LLM_ENABLE
 
     config SMART_POT_DEEPSEEK_MODEL
         string "DeepSeek model"
-        default "deepseek-v4-flash"
+        default "deepseek-chat"
         depends on SMART_POT_LLM_ENABLE
 
     config SMART_POT_ASR_ENABLE
