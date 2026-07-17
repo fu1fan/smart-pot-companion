@@ -6,8 +6,6 @@
 typedef enum {
     APP_MOTION_EVENT_TAP = 0,
     APP_MOTION_EVENT_SHAKE,
-    APP_MOTION_EVENT_MOVE_STARTED,
-    APP_MOTION_EVENT_MOVE_STOPPED,
     APP_MOTION_EVENT_FALLEN,
     APP_MOTION_EVENT_FALL_RECOVERED,
 } app_motion_event_t;
@@ -22,7 +20,6 @@ typedef struct {
     float roll_deg;
     float pitch_deg;
     float tilt_delta_deg;
-    bool moving;
     uint8_t tilt_level;
 } app_motion_state_t;
 

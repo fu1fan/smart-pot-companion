@@ -42,6 +42,8 @@
 #define LLM_TTS_SEGMENT_CAPACITY 240
 #define LLM_TTS_FIRST_SEGMENT_BYTES 36
 #define LLM_TTS_NEXT_SEGMENT_BYTES 72
+#define SCHEDULE_CONFIDENCE_MIN 0.50
+#define SCHEDULE_PENDING_TIMEOUT_US 90000000LL
 
 static const char *TAG = "app_llm";
 
@@ -58,8 +60,18 @@ static app_plant_state_t s_latest_state = {
     .mood = APP_MOOD_HAPPY,
 };
 static SemaphoreHandle_t s_state_lock;
+static SemaphoreHandle_t s_schedule_pending_lock;
 static bool s_request_running;
 static esp_http_client_handle_t s_http_client;
+
+typedef struct {
+    bool active;
+    char event[96];
+    char datetime[64];
+    int64_t updated_us;
+} pending_schedule_t;
+
+static pending_schedule_t s_pending_schedule;
 
 typedef struct {
     char *buf;
@@ -513,6 +525,7 @@ done:
 void app_llm_start(void)
 {
     s_state_lock = xSemaphoreCreateMutex();
+    s_schedule_pending_lock = xSemaphoreCreateMutex();
     app_memory_init();
     if (CONFIG_SMART_POT_LLM_ENABLE) {
         app_ui_set_dialog_status("DeepSeek: ready");
@@ -720,6 +733,9 @@ static char *find_first_text(char *text, const char *const *needles, size_t need
 
 static bool text_contains_any_token(const char *text, const char *const *tokens, size_t token_count)
 {
+    if (text == NULL) {
+        return false;
+    }
     for (size_t i = 0; i < token_count; i++) {
         if (strstr(text, tokens[i]) != NULL) {
             return true;
@@ -737,6 +753,101 @@ static bool text_has_schedule_time_hint(const char *text)
     };
     return text_contains_any_token(text, time_hint_tokens,
                                    sizeof(time_hint_tokens) / sizeof(time_hint_tokens[0]));
+}
+
+static bool text_cancels_pending_schedule(const char *text)
+{
+    static const char *const cancel_tokens[] = {
+        "取消", "算了", "不用了", "不要了", "先不", "别提醒", "取消日程", "取消提醒",
+    };
+    return text_contains_any_token(text, cancel_tokens,
+                                   sizeof(cancel_tokens) / sizeof(cancel_tokens[0]));
+}
+
+static void schedule_pending_clear(void)
+{
+    if (s_schedule_pending_lock == NULL ||
+        xSemaphoreTake(s_schedule_pending_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+    memset(&s_pending_schedule, 0, sizeof(s_pending_schedule));
+    xSemaphoreGive(s_schedule_pending_lock);
+}
+
+static bool schedule_pending_is_active(void)
+{
+    if (s_schedule_pending_lock == NULL ||
+        xSemaphoreTake(s_schedule_pending_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return false;
+    }
+    bool active = s_pending_schedule.active &&
+                  esp_timer_get_time() - s_pending_schedule.updated_us <= SCHEDULE_PENDING_TIMEOUT_US;
+    xSemaphoreGive(s_schedule_pending_lock);
+    return active;
+}
+
+static void schedule_pending_store(const char *event, const char *datetime)
+{
+    if (s_schedule_pending_lock == NULL ||
+        ((event == NULL || event[0] == '\0') && (datetime == NULL || datetime[0] == '\0')) ||
+        xSemaphoreTake(s_schedule_pending_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return;
+    }
+    memset(&s_pending_schedule, 0, sizeof(s_pending_schedule));
+    s_pending_schedule.active = true;
+    utf8_strlcpy(s_pending_schedule.event, event != NULL ? event : "",
+                 sizeof(s_pending_schedule.event));
+    utf8_strlcpy(s_pending_schedule.datetime, datetime != NULL ? datetime : "",
+                 sizeof(s_pending_schedule.datetime));
+    s_pending_schedule.updated_us = esp_timer_get_time();
+    ESP_LOGI(TAG, "Pending schedule saved: event=%s datetime=%s",
+             s_pending_schedule.event, s_pending_schedule.datetime);
+    xSemaphoreGive(s_schedule_pending_lock);
+}
+
+static bool schedule_pending_build_request(const char *user_text, char *out, size_t out_size)
+{
+    if (user_text == NULL || out == NULL || out_size == 0 ||
+        s_schedule_pending_lock == NULL) {
+        return false;
+    }
+    out[0] = '\0';
+    if (text_cancels_pending_schedule(user_text)) {
+        schedule_pending_clear();
+        return false;
+    }
+
+    pending_schedule_t pending = { 0 };
+    if (xSemaphoreTake(s_schedule_pending_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return false;
+    }
+    if (s_pending_schedule.active &&
+        esp_timer_get_time() - s_pending_schedule.updated_us <= SCHEDULE_PENDING_TIMEOUT_US) {
+        pending = s_pending_schedule;
+    } else if (s_pending_schedule.active) {
+        memset(&s_pending_schedule, 0, sizeof(s_pending_schedule));
+    }
+    xSemaphoreGive(s_schedule_pending_lock);
+
+    if (!pending.active) {
+        return false;
+    }
+
+    bool has_time = text_has_schedule_time_hint(user_text);
+    if (pending.event[0] != '\0' && pending.datetime[0] == '\0' && has_time) {
+        snprintf(out, out_size, "提醒我%s，时间%s", pending.event, user_text);
+        return true;
+    }
+    if (pending.datetime[0] != '\0' && pending.event[0] == '\0' && !has_time) {
+        snprintf(out, out_size, "提醒我%s，时间%s", user_text, pending.datetime);
+        return true;
+    }
+    if (pending.event[0] != '\0' && pending.datetime[0] != '\0') {
+        snprintf(out, out_size, "提醒我%s，时间%s。补充说明：%s",
+                 pending.event, pending.datetime, user_text);
+        return true;
+    }
+    return false;
 }
 
 static char *previous_utf8_char(char *start, char *pos)
@@ -1134,6 +1245,7 @@ static char *make_schedule_extract_body(const char *user_text, const struct tm *
              "\"clarification\":\"缺信息时的简短追问\"}。"
              "规则：event必须删除提醒词和全部时间词；datetime必须把今天、明天、后天、周几、"
              "过几小时等换算为未来的北京时间。只说几点且今天已过时取次日。"
+             "如果事件和时间都清楚，confidence至少0.85；如果只有ASR同音小错但可纠正，confidence至少0.70。"
              "没有明确事件或无法确定具体时间时，datetime或event留空并填写clarification，禁止猜测。",
              now_text, user_text != NULL ? user_text : "");
 
@@ -1288,13 +1400,16 @@ static void schedule_extract_task(void *arg)
     free(body);
     free(response);
 
-    if (cloud_success && confidence >= 0.65 && event[0] != '\0' && validate_schedule_datetime(datetime)) {
+    bool datetime_valid = validate_schedule_datetime(datetime);
+    if (cloud_success && confidence >= SCHEDULE_CONFIDENCE_MIN && event[0] != '\0' && datetime_valid) {
+        schedule_pending_clear();
         app_ui_add_schedule(event, datetime);
         app_ui_set_dialog_status("Schedule: smart added");
         finish_local_command_with_voice("好的，已经帮你安排好了。 ");
         goto done;
     }
     if (cloud_success) {
+        schedule_pending_store(event, datetime_valid ? datetime : "");
         finish_local_command_with_voice(clarification[0] != '\0' ? clarification :
                                         "你想让我在什么时候提醒什么事情呢？");
         goto done;
@@ -1303,12 +1418,16 @@ static void schedule_extract_task(void *arg)
     /* Network/model failure: retain the deterministic parser as an offline fallback. */
     char fallback_item[96] = "";
     char fallback_deadline[64] = "";
-    if (parse_schedule_command(user_text, fallback_item, sizeof(fallback_item),
-                               fallback_deadline, sizeof(fallback_deadline)) &&
-        fallback_deadline[0] != '\0') {
+    bool fallback_parsed = parse_schedule_command(user_text, fallback_item, sizeof(fallback_item),
+                                                  fallback_deadline, sizeof(fallback_deadline));
+    if (fallback_parsed && fallback_deadline[0] != '\0') {
+        schedule_pending_clear();
         app_ui_add_schedule(fallback_item, fallback_deadline);
         app_ui_set_dialog_status("Schedule: local fallback");
         finish_local_command_with_voice("网络有点慢，我先按本地识别帮你添加了。 ");
+    } else if (fallback_parsed && fallback_item[0] != '\0') {
+        schedule_pending_store(fallback_item, "");
+        finish_local_command_with_voice("我听到了事情，还差提醒时间。你可以直接说八点、明天上午八点这样。 ");
     } else {
         finish_local_command_with_voice("我没能确定具体时间和事情，请再说完整一点。 ");
     }
@@ -1327,12 +1446,25 @@ static bool looks_like_schedule_add_command(const char *text)
         "加入日程", "加到日程", "放进日程", "添加待办", "新增待办",
         "别忘了", "不要忘了", "到时候提醒", "到点提醒",
     };
+    static const char *const task_markers[] = {
+        "报告", "口头报告", "作业", "考试", "会议", "开会", "实验", "论文",
+        "答辩", "项目", "PPT", "ppt", "课程", "复习", "浇花", "浇水",
+        "吃药", "起床", "出门", "打卡", "运动", "取快递",
+    };
+    static const char *const question_markers[] = {
+        "吗", "呢", "是不是", "有没有", "多少", "几号", "几点", "？", "?",
+    };
     if (text == NULL || strstr(text, "番茄") != NULL || strstr(text, "查看日程") != NULL ||
         strstr(text, "打开日程") != NULL || strstr(text, "显示日程") != NULL) {
         return false;
     }
     if (text_contains_any(text, explicit_markers,
                           sizeof(explicit_markers) / sizeof(explicit_markers[0]))) {
+        return true;
+    }
+    if (text_has_schedule_time_hint(text) &&
+        text_contains_any(text, task_markers, sizeof(task_markers) / sizeof(task_markers[0])) &&
+        !text_contains_any(text, question_markers, sizeof(question_markers) / sizeof(question_markers[0]))) {
         return true;
     }
     return text_has_schedule_time_hint(text) &&
@@ -1381,6 +1513,23 @@ static bool handle_voice_mode_command(const char *user_text)
         "show schedule", "open schedule", "view schedule", "schedule page",
     };
 
+    if (text_cancels_pending_schedule(user_text) && schedule_pending_is_active()) {
+        schedule_pending_clear();
+        app_ui_set_dialog_status("Schedule: pending canceled");
+        finish_local_command_with_voice("好的，这条日程先不加了。");
+        return true;
+    }
+
+    char pending_schedule_request[256];
+    if (schedule_pending_build_request(user_text, pending_schedule_request,
+                                       sizeof(pending_schedule_request))) {
+        ESP_LOGI(TAG, "Schedule pending merged: %s", pending_schedule_request);
+        if (!start_schedule_extract_request(pending_schedule_request)) {
+            finish_local_command_with_voice("我还在处理上一条指令，请稍等一下。 ");
+        }
+        return true;
+    }
+
     if (looks_like_schedule_add_command(user_text)) {
         if (!start_schedule_extract_request(user_text)) {
             finish_local_command_with_voice("我还在处理上一条指令，请稍等一下。 ");
@@ -1393,6 +1542,7 @@ static bool handle_voice_mode_command(const char *user_text)
     if (parse_schedule_command(user_text, schedule_item, sizeof(schedule_item),
                                schedule_deadline, sizeof(schedule_deadline))) {
         ESP_LOGI(TAG, "Schedule command parsed: item=%s deadline=%s", schedule_item, schedule_deadline);
+        schedule_pending_clear();
         app_ui_add_schedule(schedule_item, schedule_deadline);
         app_ui_set_dialog_status("Schedule: added");
         finish_local_command_with_voice("已添加日程。");
@@ -1405,6 +1555,7 @@ static bool handle_voice_mode_command(const char *user_text)
          strstr(user_text, "日程") != NULL || strstr(user_text, "待办") != NULL ||
          strstr(user_text, "任务") != NULL)) {
         ESP_LOGI(TAG, "Schedule command fallback: item=口头报告 text=%s", user_text);
+        schedule_pending_clear();
         app_ui_add_schedule("口头报告", "");
         app_ui_set_dialog_status("Schedule: added");
         finish_local_command_with_voice("已添加日程。");

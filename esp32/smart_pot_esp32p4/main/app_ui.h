@@ -26,7 +26,6 @@ typedef struct {
     float tilt_delta_deg;
     float tilt_trigger_deg;
     uint32_t event_count;
-    bool moving;
     uint8_t tilt_level;
 } app_ui_motion_debug_state_t;
 

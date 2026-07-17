@@ -1795,8 +1795,7 @@ void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
         lv_label_set_text(s_motion_mag_label, text);
     }
     if (s_motion_state_label != NULL) {
-        snprintf(text, sizeof(text), "%s L%u E%lu",
-                 state->moving ? "moving" : "stable",
+        snprintf(text, sizeof(text), "fall L%u E%lu",
                  (unsigned int)state->tilt_level,
                  (unsigned long)state->event_count);
         lv_label_set_text(s_motion_state_label, text);

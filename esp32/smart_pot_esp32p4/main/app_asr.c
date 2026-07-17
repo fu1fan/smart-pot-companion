@@ -33,10 +33,10 @@
 #define CONFIG_SMART_POT_VOLC_ASR_RESOURCE_ID "volc.seedasr.sauc.duration"
 #endif
 #ifndef CONFIG_SMART_POT_ASR_MAX_RECORD_MS
-#define CONFIG_SMART_POT_ASR_MAX_RECORD_MS 8000
+#define CONFIG_SMART_POT_ASR_MAX_RECORD_MS 12000
 #endif
 #ifndef CONFIG_SMART_POT_ASR_END_WINDOW_MS
-#define CONFIG_SMART_POT_ASR_END_WINDOW_MS 700
+#define CONFIG_SMART_POT_ASR_END_WINDOW_MS 900
 #endif
 
 #define ASR_SAMPLE_RATE 16000
@@ -45,15 +45,15 @@
 #define ASR_RESULT_CAP 768
 #define ASR_ERROR_CAP 384
 #define ASR_CONNECT_TIMEOUT_MS 8000
-#define ASR_FINAL_TIMEOUT_MS 3500
-#define ASR_SPEECH_START_LEVEL 30
-#define ASR_SPEECH_CONTINUE_LEVEL 15
+#define ASR_FINAL_TIMEOUT_MS 5000
+#define ASR_SPEECH_START_LEVEL 25
+#define ASR_SPEECH_CONTINUE_LEVEL 12
 #define ASR_SPEECH_START_PACKETS 2
 #define ASR_SPEECH_CONTINUE_PACKETS 2
-#define ASR_LOCAL_SHORT_END_SILENCE_MS 700
-#define ASR_LOCAL_LONG_END_SILENCE_MS 900
+#define ASR_LOCAL_SHORT_END_SILENCE_MS 900
+#define ASR_LOCAL_LONG_END_SILENCE_MS 1200
 #define ASR_SHORT_UTTERANCE_MS 1800
-#define ASR_NO_SPEECH_TIMEOUT_MS 2800
+#define ASR_NO_SPEECH_TIMEOUT_MS 3500
 
 #define ASR_EVENT_CONNECTED BIT0
 #define ASR_EVENT_FINAL BIT1
@@ -285,7 +285,8 @@ static char *make_full_request_json(void)
     cJSON *data = cJSON_AddArrayToObject(context, "context_data");
     cJSON *words = cJSON_CreateObject();
     cJSON_AddStringToObject(words, "text",
-                            "智能盆栽小麦，浇花，浇水，土壤湿度，光照，提醒我，添加日程，番茄钟，口头报告");
+                            "智能盆栽小麦，浇花，浇水，土壤湿度，光照，提醒我，添加日程，待办，任务，番茄钟，口头报告，"
+                            "今天，明天，后天，上午，下午，晚上，八点，九点，十点，半点，点半，开会，作业，考试，报告");
     cJSON_AddItemToArray(data, words);
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

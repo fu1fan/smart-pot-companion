@@ -278,7 +278,6 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
     cJSON_AddNumberToObject(motion, "rollDeg", s_motion.roll_deg);
     cJSON_AddNumberToObject(motion, "pitchDeg", s_motion.pitch_deg);
     cJSON_AddNumberToObject(motion, "tiltDeltaDeg", s_motion.tilt_delta_deg);
-    cJSON_AddBoolToObject(motion, "moving", s_motion.moving);
     cJSON_AddNumberToObject(motion, "tiltLevel", s_motion.tilt_level);
     cJSON_AddBoolToObject(motion, "fallen", s_motion.tilt_level > 0);
     cJSON_AddItemToObject(root, "motion", motion);
@@ -301,8 +300,6 @@ void app_cloud_update_motion(app_motion_event_t event, const app_motion_state_t 
     static const char *types[] = {
         "PHYSICAL_TAP",
         "SHAKE",
-        "MOVE_STARTED",
-        "MOVE_STOPPED",
         "FALLEN",
         "FALL_RECOVERED",
     };

@@ -27,8 +27,13 @@
 #define CONFIG_SMART_POT_VOICE_WAKE_COOLDOWN_MS 1500
 #endif
 
+#ifndef CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT
+#define CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT 55
+#endif
+
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
+#define VOICE_REARM_DRAIN_FRAMES 4
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -74,8 +79,34 @@ static bool open_microphone(esp_codec_dev_handle_t mic)
         ESP_LOGE(TAG, "Failed to open microphone codec");
         return false;
     }
-    esp_codec_dev_set_in_gain(mic, 24.0f);
+    esp_codec_dev_set_in_gain(mic, 28.0f);
     return true;
+}
+
+static void drain_microphone_frames(esp_codec_dev_handle_t mic, int16_t *samples,
+                                    size_t bytes, int frames)
+{
+    if (mic == NULL || samples == NULL || bytes == 0) {
+        return;
+    }
+    for (int i = 0; i < frames; i++) {
+        (void)esp_codec_dev_read(mic, samples, bytes);
+    }
+}
+
+static int apply_wakenet_threshold(const esp_afe_sr_iface_t *afe_handle,
+                                   esp_afe_sr_data_t *afe_data)
+{
+    if (afe_handle == NULL || afe_data == NULL || afe_handle->set_wakenet_threshold == NULL) {
+        return -1;
+    }
+    float threshold = (float)CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT / 100.0f;
+    if (threshold < 0.4f) {
+        threshold = 0.4f;
+    } else if (threshold > 0.9999f) {
+        threshold = 0.9999f;
+    }
+    return afe_handle->set_wakenet_threshold(afe_data, 1, threshold);
 }
 
 static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_t *afe_data)
@@ -85,8 +116,9 @@ static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_
     int enable_result = afe_handle->enable_wakenet != NULL ? afe_handle->enable_wakenet(afe_data) : -1;
     int threshold_result = afe_handle->reset_wakenet_threshold != NULL ?
                            afe_handle->reset_wakenet_threshold(afe_data, 1) : -1;
-    ESP_LOGI(TAG, "WakeNet rearmed: buffer=%d disable=%d enable=%d threshold=%d",
-             reset_result, disable_result, enable_result, threshold_result);
+    int custom_threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
+    ESP_LOGI(TAG, "WakeNet rearmed: buffer=%d disable=%d enable=%d reset_threshold=%d set_threshold=%d",
+             reset_result, disable_result, enable_result, threshold_result, custom_threshold_result);
 }
 
 static void transcribe_and_reply(esp_codec_dev_handle_t mic)
@@ -175,7 +207,7 @@ static void voice_task(void *arg)
     afe_config->agc_init = true;
     afe_config->wakenet_init = true;
     afe_config->wakenet_model_name = wn_name;
-    afe_config->wakenet_mode = DET_MODE_90;
+    afe_config->wakenet_mode = DET_MODE_95;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
     const esp_afe_sr_iface_t *afe_handle = esp_afe_handle_from_config(afe_config);
@@ -201,8 +233,11 @@ static void voice_task(void *arg)
 
     TickType_t last_wake_tick = 0;
     s_voice_ready = true;
+    int threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
     app_ui_set_voice_status(VOICE_WAKE_HINT);
-    ESP_LOGI(TAG, "WakeNet ready: model=%s, chunks=%d, channels=%d", wn_name, feed_chunksize, feed_channels);
+    ESP_LOGI(TAG, "WakeNet ready: model=%s, chunks=%d, channels=%d threshold=%d%% result=%d",
+             wn_name, feed_chunksize, feed_channels,
+             CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT, threshold_result);
 
     while (true) {
         if (s_pause_requested) {
@@ -224,7 +259,11 @@ static void voice_task(void *arg)
                 vTaskDelay(pdMS_TO_TICKS(200));
                 continue;
             }
+            drain_microphone_frames(mic, samples,
+                                    feed_chunksize * feed_channels * sizeof(int16_t),
+                                    VOICE_REARM_DRAIN_FRAMES);
             s_mic_paused = false;
+            s_wakenet_rearm_requested = true;
             app_ui_set_voice_status(VOICE_WAKE_HINT);
             ESP_LOGI(TAG, "Microphone resumed after speaker playback");
         }

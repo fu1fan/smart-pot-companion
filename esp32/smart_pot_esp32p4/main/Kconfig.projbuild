@@ -97,13 +97,13 @@ menu "Smart Pot"
 
     config SMART_POT_ASR_MAX_RECORD_MS
         int "Maximum streaming ASR utterance time in milliseconds"
-        default 8000
+        default 12000
         range 2000 30000
         depends on SMART_POT_ASR_ENABLE
 
     config SMART_POT_ASR_END_WINDOW_MS
         int "Server VAD silence window in milliseconds"
-        default 700
+        default 900
         range 200 3000
         depends on SMART_POT_ASR_ENABLE
 
@@ -150,6 +150,14 @@ menu "Smart Pot"
         int "Voice wake cooldown in milliseconds"
         default 1500
         depends on SMART_POT_VOICE_WAKE_ENABLE
+
+    config SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT
+        int "WakeNet detection threshold percent"
+        default 55
+        range 40 95
+        depends on SMART_POT_VOICE_WAKE_ENABLE
+        help
+            Lower values make "你好小麦" easier to trigger but may increase false wakes.
 
     menu "Expansion board sensors"
 
@@ -254,13 +262,13 @@ menu "Smart Pot"
 
         config SMART_POT_MPU6050_SHAKE_ACCEL_MG
             int "Shake acceleration magnitude threshold (mg)"
-            default 1800
+            default 1550
             range 500 5000
             depends on SMART_POT_MPU6050_ENABLE
 
         config SMART_POT_MPU6050_SHAKE_GYRO_DPS
             int "Shake gyro threshold (deg/s)"
-            default 150
+            default 115
             range 20 1000
             depends on SMART_POT_MPU6050_ENABLE
 
@@ -268,18 +276,6 @@ menu "Smart Pot"
             int "Shake event cooldown (ms)"
             default 1500
             range 200 10000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_MOVE_Z_DELTA_MG
-            int "Movement start Z-axis acceleration delta threshold (mg)"
-            default 280
-            range 50 2000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG
-            int "Movement stop reverse Z-axis acceleration delta threshold (mg)"
-            default 220
-            range 50 2000
             depends on SMART_POT_MPU6050_ENABLE
 
         config SMART_POT_MPU6050_FALL_DEG

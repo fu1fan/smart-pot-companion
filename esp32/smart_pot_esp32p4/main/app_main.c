@@ -40,10 +40,6 @@ static const char *motion_event_name(app_motion_event_t event)
         return "tap";
     case APP_MOTION_EVENT_SHAKE:
         return "shake";
-    case APP_MOTION_EVENT_MOVE_STARTED:
-        return "carried";
-    case APP_MOTION_EVENT_MOVE_STOPPED:
-        return "stable";
     case APP_MOTION_EVENT_FALLEN:
         return "fallen";
     case APP_MOTION_EVENT_FALL_RECOVERED:
@@ -60,10 +56,6 @@ static const char *motion_reaction_name(app_motion_event_t event)
         return "voice only";
     case APP_MOTION_EVENT_SHAKE:
         return "swirl eyes";
-    case APP_MOTION_EVENT_MOVE_STARTED:
-        return "voice only";
-    case APP_MOTION_EVENT_MOVE_STOPPED:
-        return "voice only";
     case APP_MOTION_EVENT_FALLEN:
         return "voice only";
     case APP_MOTION_EVENT_FALL_RECOVERED:
@@ -80,10 +72,6 @@ static const char *motion_voice_text(app_motion_event_t event)
         return "轻轻敲到我啦。";
     case APP_MOTION_EVENT_SHAKE:
         return "有点晕啦，慢一点。";
-    case APP_MOTION_EVENT_MOVE_STARTED:
-        return "我被拿起来啦。";
-    case APP_MOTION_EVENT_MOVE_STOPPED:
-        return "我放稳啦。";
     case APP_MOTION_EVENT_FALLEN:
         return "我摔倒啦快把我扶起来！";
     case APP_MOTION_EVENT_FALL_RECOVERED:
@@ -113,7 +101,6 @@ static void motion_debug_task(void *arg)
             ui_state.tilt_delta_deg = motion.tilt_delta_deg;
             ui_state.tilt_trigger_deg = (float)CONFIG_SMART_POT_MPU6050_FALL_DEG;
             ui_state.event_count = s_motion_event_count;
-            ui_state.moving = motion.moving;
             ui_state.tilt_level = motion.tilt_level;
             ui_state.accel_mag_g = sqrtf(motion.accel_x_g * motion.accel_x_g +
                                          motion.accel_y_g * motion.accel_y_g +
@@ -133,9 +120,9 @@ static void motion_event_cb(app_motion_event_t event,
 {
     (void)user_ctx;
     uint32_t event_count = ++s_motion_event_count;
-    ESP_LOGI(TAG, "Motion event=%d count=%lu roll=%.1f pitch=%.1f tiltDelta=%.1f moving=%d tilt=%u",
+    ESP_LOGI(TAG, "Motion event=%d count=%lu roll=%.1f pitch=%.1f tiltDelta=%.1f tilt=%u",
              event, (unsigned long)event_count, state->roll_deg, state->pitch_deg,
-             state->tilt_delta_deg, state->moving, state->tilt_level);
+             state->tilt_delta_deg, state->tilt_level);
 
     switch (event) {
     case APP_MOTION_EVENT_TAP:
@@ -145,14 +132,6 @@ static void motion_event_cb(app_motion_event_t event,
     case APP_MOTION_EVENT_SHAKE:
         app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_SHAKE, 2400);
         app_ui_set_dialog_status("Motion: shake");
-        break;
-    case APP_MOTION_EVENT_MOVE_STARTED:
-        app_ui_clear_motion_reaction();
-        app_ui_set_dialog_status("Motion: carried");
-        break;
-    case APP_MOTION_EVENT_MOVE_STOPPED:
-        app_ui_clear_motion_reaction();
-        app_ui_set_dialog_status("Motion: stable");
         break;
     case APP_MOTION_EVENT_FALLEN:
         app_ui_clear_motion_reaction();

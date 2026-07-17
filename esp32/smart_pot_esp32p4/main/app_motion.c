@@ -39,20 +39,12 @@
 #define CONFIG_SMART_POT_MPU6050_TAP_COOLDOWN_MS 120
 #endif
 
-#ifndef CONFIG_SMART_POT_MPU6050_MOVE_Z_DELTA_MG
-#define CONFIG_SMART_POT_MPU6050_MOVE_Z_DELTA_MG 280
-#endif
-
-#ifndef CONFIG_SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG
-#define CONFIG_SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG 220
-#endif
-
 #ifndef CONFIG_SMART_POT_MPU6050_SHAKE_ACCEL_MG
-#define CONFIG_SMART_POT_MPU6050_SHAKE_ACCEL_MG 1800
+#define CONFIG_SMART_POT_MPU6050_SHAKE_ACCEL_MG 1550
 #endif
 
 #ifndef CONFIG_SMART_POT_MPU6050_SHAKE_GYRO_DPS
-#define CONFIG_SMART_POT_MPU6050_SHAKE_GYRO_DPS 150
+#define CONFIG_SMART_POT_MPU6050_SHAKE_GYRO_DPS 115
 #endif
 
 #ifndef CONFIG_SMART_POT_MPU6050_SHAKE_COOLDOWN_MS
@@ -90,12 +82,12 @@
 #define MPU6050_TAP_GYRO_MAX_DPS       ((float)CONFIG_SMART_POT_MPU6050_TAP_GYRO_MAX_DPS)
 #define MPU6050_SHAKE_ACCEL_G          ((float)CONFIG_SMART_POT_MPU6050_SHAKE_ACCEL_MG / 1000.0f)
 #define MPU6050_SHAKE_GYRO_DPS         ((float)CONFIG_SMART_POT_MPU6050_SHAKE_GYRO_DPS)
-#define MPU6050_MOVE_Z_DELTA_G         ((float)CONFIG_SMART_POT_MPU6050_MOVE_Z_DELTA_MG / 1000.0f)
-#define MPU6050_MOVE_STOP_Z_DELTA_G    ((float)CONFIG_SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG / 1000.0f)
 #define MPU6050_FALL_DEG               ((float)CONFIG_SMART_POT_MPU6050_FALL_DEG)
 #define MPU6050_FALL_RECOVER_DEG       ((float)CONFIG_SMART_POT_MPU6050_FALL_RECOVER_DEG)
 #define MPU6050_DEBUG_LOG_PERIOD_US    1000000LL
-#define MPU6050_MOVE_MIN_US            300000LL
+#define MPU6050_TAP_CONFIRM_US         160000LL
+#define MPU6050_SHAKE_WINDOW_US        220000LL
+#define MPU6050_SHAKE_BLOCK_TAP_US     500000LL
 
 typedef struct {
     i2c_master_bus_handle_t bus;
@@ -109,18 +101,16 @@ typedef struct {
     float pitch;
     float base_roll;
     float base_pitch;
-    float last_accel_z_g;
-    float move_z_direction;
     int64_t last_sample_us;
     int64_t last_log_us;
     int64_t last_impact_us;
     int64_t last_shake_us;
-    int64_t move_since_us;
-    int64_t last_move_event_us;
+    int64_t pending_tap_us;
+    int64_t shake_candidate_us;
     int64_t tilt_since_us;
     uint8_t tilt_candidate;
-    bool has_last_accel_z;
-    bool moving;
+    uint8_t shake_hits;
+    app_motion_state_t pending_tap_state;
     uint8_t tilt_level;
 } motion_ctx_t;
 
@@ -190,10 +180,10 @@ static void log_tuning_sample(motion_ctx_t *ctx, const app_motion_state_t *state
     float tilt_delta = fmaxf(fabsf(state->roll_deg - ctx->base_roll),
                              fabsf(state->pitch_deg - ctx->base_pitch));
     ESP_LOGI(TAG,
-             "sample ax=%.2f ay=%.2f az=%.2f |g|=%.2f gx=%.1f gy=%.1f gz=%.1f |gyro|=%.1f roll=%.1f pitch=%.1f tiltDelta=%.1f moving=%d tilt=%u",
+             "sample ax=%.2f ay=%.2f az=%.2f |g|=%.2f gx=%.1f gy=%.1f gz=%.1f |gyro|=%.1f roll=%.1f pitch=%.1f tiltDelta=%.1f tilt=%u",
              state->accel_x_g, state->accel_y_g, state->accel_z_g, accel_mag,
              state->gyro_x_dps, state->gyro_y_dps, state->gyro_z_dps, gyro_mag,
-             state->roll_deg, state->pitch_deg, tilt_delta, state->moving, state->tilt_level);
+             state->roll_deg, state->pitch_deg, tilt_delta, state->tilt_level);
 }
 #endif
 
@@ -305,14 +295,12 @@ static esp_err_t init_mpu6050(motion_ctx_t *ctx)
 
 #if CONFIG_SMART_POT_MPU6050_DEBUG_LOG
     ESP_LOGI(TAG,
-             "thresholds tap=%dmg gyro<%ddps rearm=%dms shake=%dmg/%ddps moveZ=%dmg stopZ=%dmg fall=%d recover=%d confirm=%dms",
+             "thresholds tap=%dmg gyro<%ddps rearm=%dms shake=%dmg/%ddps fall=%d recover=%d confirm=%dms",
              CONFIG_SMART_POT_MPU6050_TAP_DELTA_MG,
              CONFIG_SMART_POT_MPU6050_TAP_GYRO_MAX_DPS,
              CONFIG_SMART_POT_MPU6050_TAP_COOLDOWN_MS,
              CONFIG_SMART_POT_MPU6050_SHAKE_ACCEL_MG,
              CONFIG_SMART_POT_MPU6050_SHAKE_GYRO_DPS,
-             CONFIG_SMART_POT_MPU6050_MOVE_Z_DELTA_MG,
-             CONFIG_SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG,
              CONFIG_SMART_POT_MPU6050_FALL_DEG,
              CONFIG_SMART_POT_MPU6050_FALL_RECOVER_DEG,
              CONFIG_SMART_POT_MPU6050_FALL_CONFIRM_MS);
@@ -390,7 +378,6 @@ static void update_orientation(motion_ctx_t *ctx, app_motion_state_t *state, flo
 
 static void update_events(motion_ctx_t *ctx, app_motion_state_t *state, int64_t now_us)
 {
-    state->moving = ctx->moving;
     state->tilt_level = ctx->tilt_level;
     float accel_mag = sqrtf(state->accel_x_g * state->accel_x_g +
                             state->accel_y_g * state->accel_y_g +
@@ -398,50 +385,54 @@ static void update_events(motion_ctx_t *ctx, app_motion_state_t *state, int64_t 
     float gyro_mag = sqrtf(state->gyro_x_dps * state->gyro_x_dps +
                            state->gyro_y_dps * state->gyro_y_dps +
                            state->gyro_z_dps * state->gyro_z_dps);
-    float z_delta = ctx->has_last_accel_z ? state->accel_z_g - ctx->last_accel_z_g : 0.0f;
-    ctx->last_accel_z_g = state->accel_z_g;
-    ctx->has_last_accel_z = true;
     float roll_delta = fabsf(state->roll_deg - ctx->base_roll);
     float pitch_delta = fabsf(state->pitch_deg - ctx->base_pitch);
     float tilt = fmaxf(roll_delta, pitch_delta);
     state->tilt_delta_deg = tilt;
-    bool impact = accel_mag >= MPU6050_TAP_ACCEL_G && gyro_mag < MPU6050_TAP_GYRO_MAX_DPS;
-    bool shake_now = accel_mag >= MPU6050_SHAKE_ACCEL_G && gyro_mag >= MPU6050_SHAKE_GYRO_DPS;
-    bool move_start_now = fabsf(z_delta) >= MPU6050_MOVE_Z_DELTA_G;
-    bool move_stop_now = ctx->moving && ctx->move_z_direction != 0.0f &&
-                         (z_delta * ctx->move_z_direction) <= -MPU6050_MOVE_STOP_Z_DELTA_G;
+    bool shake_sample = accel_mag >= MPU6050_SHAKE_ACCEL_G && gyro_mag >= MPU6050_SHAKE_GYRO_DPS;
+    bool shake_confirmed = false;
 
-    if (shake_now &&
+    if (shake_sample) {
+        if (ctx->shake_candidate_us == 0 ||
+            now_us - ctx->shake_candidate_us > MPU6050_SHAKE_WINDOW_US) {
+            ctx->shake_candidate_us = now_us;
+            ctx->shake_hits = 0;
+        }
+        if (ctx->shake_hits < UINT8_MAX) {
+            ctx->shake_hits++;
+        }
+        shake_confirmed = ctx->shake_hits >= 2;
+    } else if (ctx->shake_candidate_us != 0 &&
+               now_us - ctx->shake_candidate_us > MPU6050_SHAKE_WINDOW_US) {
+        ctx->shake_candidate_us = 0;
+        ctx->shake_hits = 0;
+    }
+
+    if (shake_confirmed &&
         now_us - ctx->last_shake_us >= CONFIG_SMART_POT_MPU6050_SHAKE_COOLDOWN_MS * 1000LL) {
         emit_event(ctx, APP_MOTION_EVENT_SHAKE, state);
         ctx->last_shake_us = now_us;
+        ctx->pending_tap_us = 0;
+        ctx->shake_candidate_us = 0;
+        ctx->shake_hits = 0;
     }
 
-    if (impact && !shake_now &&
-        now_us - ctx->last_shake_us >= 300000LL &&
+    bool impact = accel_mag >= MPU6050_TAP_ACCEL_G &&
+                  gyro_mag < MPU6050_TAP_GYRO_MAX_DPS &&
+                  !shake_sample;
+    if (impact && ctx->pending_tap_us == 0 &&
         now_us - ctx->last_impact_us >= CONFIG_SMART_POT_MPU6050_TAP_COOLDOWN_MS * 1000LL) {
-        emit_event(ctx, APP_MOTION_EVENT_TAP, state);
-        ctx->last_impact_us = now_us;
+        ctx->pending_tap_us = now_us;
+        ctx->pending_tap_state = *state;
     }
 
-    if (!ctx->moving && move_start_now &&
-        now_us - ctx->last_move_event_us >= MPU6050_MOVE_MIN_US) {
-        ctx->moving = true;
-        ctx->move_since_us = now_us;
-        ctx->move_z_direction = z_delta >= 0.0f ? 1.0f : -1.0f;
-        ctx->last_move_event_us = now_us;
-        state->moving = true;
-        emit_event(ctx, APP_MOTION_EVENT_MOVE_STARTED, state);
-    } else if (ctx->moving && move_stop_now &&
-               now_us - ctx->move_since_us >= MPU6050_MOVE_MIN_US &&
-               now_us - ctx->last_move_event_us >= MPU6050_MOVE_MIN_US) {
-        ctx->moving = false;
-        ctx->move_z_direction = 0.0f;
-        ctx->last_move_event_us = now_us;
-        ctx->base_roll = state->roll_deg;
-        ctx->base_pitch = state->pitch_deg;
-        state->moving = false;
-        emit_event(ctx, APP_MOTION_EVENT_MOVE_STOPPED, state);
+    if (ctx->pending_tap_us != 0 &&
+        now_us - ctx->pending_tap_us >= MPU6050_TAP_CONFIRM_US) {
+        if (now_us - ctx->last_shake_us >= MPU6050_SHAKE_BLOCK_TAP_US) {
+            emit_event(ctx, APP_MOTION_EVENT_TAP, &ctx->pending_tap_state);
+            ctx->last_impact_us = now_us;
+        }
+        ctx->pending_tap_us = 0;
     }
 
     uint8_t candidate = ctx->tilt_level > 0 ? 1 : 0;
@@ -465,7 +456,6 @@ static void update_events(motion_ctx_t *ctx, app_motion_state_t *state, int64_t 
         }
     }
 
-    state->moving = ctx->moving;
     state->tilt_level = ctx->tilt_level;
 }
 
