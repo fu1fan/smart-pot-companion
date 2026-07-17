@@ -86,8 +86,8 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
 
     override suspend fun saveTelemetry(potId: String, telemetry: DeviceTelemetry) = db { c ->
         val bucket = Instant.parse(telemetry.recordedAt).truncatedTo(ChronoUnit.MINUTES)
-        c.prepareStatement("INSERT INTO telemetry_minute(pot_id,bucket,data) VALUES (?::uuid,?,?::jsonb) ON CONFLICT(pot_id,bucket) DO UPDATE SET data=EXCLUDED.data").use { s ->
-            s.setString(1, potId); s.setObject(2, bucket); s.setString(3, encode(telemetry)); s.executeUpdate()
+        c.prepareStatement("INSERT INTO telemetry_minute(pot_id,bucket,data) VALUES (?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(pot_id,bucket) DO UPDATE SET data=EXCLUDED.data").use { s ->
+            s.setString(1, potId); s.setString(2, bucket.toString()); s.setString(3, encode(telemetry)); s.executeUpdate()
         }
         Unit
     }
