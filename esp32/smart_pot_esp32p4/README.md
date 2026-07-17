@@ -24,6 +24,20 @@ idf.py menuconfig
 idf.py build
 ```
 
+The tracked `sdkconfig.defaults` is the shared non-secret configuration for
+board GPIOs, enabled sensors, endpoints, and build defaults. Keep personal
+credentials out of it. For Wi-Fi passwords and API keys, copy
+`sdkconfig.secrets.example` to `sdkconfig.secrets` and edit that local file.
+`sdkconfig.secrets` is ignored by Git and is loaded after `sdkconfig.defaults`.
+
+If an old local `sdkconfig` already exists, delete it once and reconfigure so
+the synced defaults are applied:
+
+```powershell
+Remove-Item .\sdkconfig
+idf.py reconfigure
+```
+
 Useful menuconfig entries are under `Smart Pot`:
 
 - Enable Wi-Fi station placeholder

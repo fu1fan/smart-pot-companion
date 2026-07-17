@@ -17,6 +17,7 @@ esp32/tmp/
 **/flash_package/
 **/sdkconfig
 **/sdkconfig.old
+**/sdkconfig.secrets
 **/dependencies.lock
 **/_codex_build.ps1
 **/__pycache__/
