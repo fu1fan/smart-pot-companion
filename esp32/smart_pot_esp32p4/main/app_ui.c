@@ -94,6 +94,8 @@ static lv_obj_t *s_cat_happy_eye_left;
 static lv_obj_t *s_cat_happy_eye_right;
 static lv_obj_t *s_cat_blink_eye_left;
 static lv_obj_t *s_cat_blink_eye_right;
+static lv_obj_t *s_cat_swirl_eye_left;
+static lv_obj_t *s_cat_swirl_eye_right;
 static lv_obj_t *s_cat_brow_left;
 static lv_obj_t *s_cat_brow_right;
 static lv_obj_t *s_cat_mouth;
@@ -1256,6 +1258,20 @@ static void make_cat_art(lv_obj_t *parent)
     lv_obj_add_flag(s_cat_blink_eye_left, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_cat_blink_eye_right, LV_OBJ_FLAG_HIDDEN);
 
+    s_cat_swirl_eye_left = lv_label_create(face);
+    lv_label_set_text(s_cat_swirl_eye_left, "@");
+    lv_obj_set_style_text_font(s_cat_swirl_eye_left, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_cat_swirl_eye_left, lv_color_hex(0x2a2118), LV_PART_MAIN);
+    lv_obj_align(s_cat_swirl_eye_left, LV_ALIGN_TOP_LEFT, 87, 193);
+    lv_obj_add_flag(s_cat_swirl_eye_left, LV_OBJ_FLAG_HIDDEN);
+
+    s_cat_swirl_eye_right = lv_label_create(face);
+    lv_label_set_text(s_cat_swirl_eye_right, "@");
+    lv_obj_set_style_text_font(s_cat_swirl_eye_right, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_cat_swirl_eye_right, lv_color_hex(0x2a2118), LV_PART_MAIN);
+    lv_obj_align(s_cat_swirl_eye_right, LV_ALIGN_TOP_LEFT, 183, 193);
+    lv_obj_add_flag(s_cat_swirl_eye_right, LV_OBJ_FLAG_HIDDEN);
+
     s_cat_brow_left = lv_label_create(face);
     lv_label_set_text(s_cat_brow_left, "");
     lv_obj_set_style_text_font(s_cat_brow_left, &lv_font_montserrat_24, LV_PART_MAIN);
@@ -1342,6 +1358,7 @@ static void cat_face_to_front(void)
         s_cat_highlight_left, s_cat_highlight_right,
         s_cat_happy_eye_left, s_cat_happy_eye_right,
         s_cat_blink_eye_left, s_cat_blink_eye_right,
+        s_cat_swirl_eye_left, s_cat_swirl_eye_right,
         s_cat_brow_left, s_cat_brow_right,
         s_cat_mouth, s_cat_drop, s_cat_drop_left, s_cat_zzz_label,
         s_cat_heart,
@@ -1365,6 +1382,8 @@ static void apply_motion_reaction_art(void)
     if (s_cat_blink_eye_right != NULL) lv_obj_add_flag(s_cat_blink_eye_right, LV_OBJ_FLAG_HIDDEN);
     if (s_cat_happy_eye_left != NULL) lv_obj_add_flag(s_cat_happy_eye_left, LV_OBJ_FLAG_HIDDEN);
     if (s_cat_happy_eye_right != NULL) lv_obj_add_flag(s_cat_happy_eye_right, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_swirl_eye_left != NULL) lv_obj_add_flag(s_cat_swirl_eye_left, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_swirl_eye_right != NULL) lv_obj_add_flag(s_cat_swirl_eye_right, LV_OBJ_FLAG_HIDDEN);
     if (s_cat_highlight_left != NULL) lv_obj_remove_flag(s_cat_highlight_left, LV_OBJ_FLAG_HIDDEN);
     if (s_cat_highlight_right != NULL) lv_obj_remove_flag(s_cat_highlight_right, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_cat_eye_left, LV_OBJ_FLAG_HIDDEN);
@@ -1386,10 +1405,12 @@ static void apply_motion_reaction_art(void)
         lv_label_set_text(s_cat_mouth, "O");
         break;
     case APP_UI_MOTION_REACTION_SHAKE:
-        lv_obj_set_size(s_cat_eye_left, 24, 32);
-        lv_obj_set_size(s_cat_eye_right, 24, 32);
-        lv_obj_align(s_cat_eye_left, LV_ALIGN_TOP_LEFT, 92, 194);
-        lv_obj_align(s_cat_eye_right, LV_ALIGN_TOP_LEFT, 188, 194);
+        lv_obj_add_flag(s_cat_eye_left, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_cat_eye_right, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_highlight_left != NULL) lv_obj_add_flag(s_cat_highlight_left, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_highlight_right != NULL) lv_obj_add_flag(s_cat_highlight_right, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_swirl_eye_left != NULL) lv_obj_remove_flag(s_cat_swirl_eye_left, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_swirl_eye_right != NULL) lv_obj_remove_flag(s_cat_swirl_eye_right, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_cat_brow_left, "\\");
         lv_label_set_text(s_cat_brow_right, "/");
         lv_label_set_text(s_cat_mouth, "~");
@@ -1484,6 +1505,8 @@ static void update_cat_art(app_mood_t mood)
         lv_obj_add_flag(s_cat_highlight_right, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_cat_happy_eye_left, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_cat_happy_eye_right, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_swirl_eye_left != NULL) lv_obj_add_flag(s_cat_swirl_eye_left, LV_OBJ_FLAG_HIDDEN);
+        if (s_cat_swirl_eye_right != NULL) lv_obj_add_flag(s_cat_swirl_eye_right, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_cat_blink_eye_left, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_cat_blink_eye_right, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_cat_mouth, mouth);
@@ -1518,6 +1541,8 @@ static void update_cat_art(app_mood_t mood)
     lv_obj_remove_flag(s_cat_highlight_right, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_cat_happy_eye_left, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_cat_happy_eye_right, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_swirl_eye_left != NULL) lv_obj_add_flag(s_cat_swirl_eye_left, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_swirl_eye_right != NULL) lv_obj_add_flag(s_cat_swirl_eye_right, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_cat_brow_left, left_brow);
     lv_label_set_text(s_cat_brow_right, right_brow);
     lv_label_set_text(s_cat_mouth, mouth);
@@ -1738,7 +1763,7 @@ void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
         if (s_motion_pitch_label != NULL) lv_label_set_text(s_motion_pitch_label, "-- deg");
         if (s_motion_accel_label != NULL) lv_label_set_text(s_motion_accel_label, "X --  Y --  Z --");
         if (s_motion_gyro_label != NULL) lv_label_set_text(s_motion_gyro_label, "X --  Y --  Z --");
-        if (s_motion_mag_label != NULL) lv_label_set_text(s_motion_mag_label, "|A| --  |G| --  tiltD --");
+        if (s_motion_mag_label != NULL) lv_label_set_text(s_motion_mag_label, "|A| --  |G| --  fallD --");
         if (s_motion_state_label != NULL) lv_label_set_text(s_motion_state_label, "no sample E0");
         bsp_display_unlock();
         return;
@@ -1764,7 +1789,7 @@ void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
         lv_label_set_text(s_motion_gyro_label, text);
     }
     if (s_motion_mag_label != NULL) {
-        snprintf(text, sizeof(text), "|A| %.2fg   |G| %.1fdps   tiltD %.1f/%.0fdeg",
+        snprintf(text, sizeof(text), "|A| %.2fg   |G| %.1fdps   fallD %.1f/%.0fdeg",
                  state->accel_mag_g, state->gyro_mag_dps,
                  state->tilt_delta_deg, state->tilt_trigger_deg);
         lv_label_set_text(s_motion_mag_label, text);

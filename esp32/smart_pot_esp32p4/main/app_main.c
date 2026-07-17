@@ -27,6 +27,10 @@
 static const char *TAG = "smart_pot";
 
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
+#ifndef CONFIG_SMART_POT_MPU6050_FALL_DEG
+#define CONFIG_SMART_POT_MPU6050_FALL_DEG 50
+#endif
+
 static volatile uint32_t s_motion_event_count;
 
 static const char *motion_event_name(app_motion_event_t event)
@@ -34,20 +38,16 @@ static const char *motion_event_name(app_motion_event_t event)
     switch (event) {
     case APP_MOTION_EVENT_TAP:
         return "tap";
-    case APP_MOTION_EVENT_DOUBLE_TAP:
-        return "double tap";
     case APP_MOTION_EVENT_SHAKE:
         return "shake";
     case APP_MOTION_EVENT_MOVE_STARTED:
         return "carried";
     case APP_MOTION_EVENT_MOVE_STOPPED:
         return "stable";
-    case APP_MOTION_EVENT_TILT_LIGHT:
-        return "tilt light";
-    case APP_MOTION_EVENT_TILT_SEVERE:
-        return "tilt severe";
-    case APP_MOTION_EVENT_TILT_RECOVERED:
-        return "tilt recovered";
+    case APP_MOTION_EVENT_FALLEN:
+        return "fallen";
+    case APP_MOTION_EVENT_FALL_RECOVERED:
+        return "fall recovered";
     default:
         return "unknown";
     }
@@ -57,21 +57,17 @@ static const char *motion_reaction_name(app_motion_event_t event)
 {
     switch (event) {
     case APP_MOTION_EVENT_TAP:
-        return "head pause";
-    case APP_MOTION_EVENT_DOUBLE_TAP:
-        return "voice wake";
+        return "voice only";
     case APP_MOTION_EVENT_SHAKE:
-        return "dizzy face";
+        return "swirl eyes";
     case APP_MOTION_EVENT_MOVE_STARTED:
-        return "carried face";
+        return "voice only";
     case APP_MOTION_EVENT_MOVE_STOPPED:
-        return "motion clear";
-    case APP_MOTION_EVENT_TILT_LIGHT:
-        return "tilt watch";
-    case APP_MOTION_EVENT_TILT_SEVERE:
-        return "dizzy tilt";
-    case APP_MOTION_EVENT_TILT_RECOVERED:
-        return "tilt clear";
+        return "voice only";
+    case APP_MOTION_EVENT_FALLEN:
+        return "voice only";
+    case APP_MOTION_EVENT_FALL_RECOVERED:
+        return "voice only";
     default:
         return "none";
     }
@@ -82,19 +78,15 @@ static const char *motion_voice_text(app_motion_event_t event)
     switch (event) {
     case APP_MOTION_EVENT_TAP:
         return "轻轻敲到我啦。";
-    case APP_MOTION_EVENT_DOUBLE_TAP:
-        return "收到双击，我来听你说。";
     case APP_MOTION_EVENT_SHAKE:
         return "有点晕啦，慢一点。";
     case APP_MOTION_EVENT_MOVE_STARTED:
         return "我被拿起来啦。";
     case APP_MOTION_EVENT_MOVE_STOPPED:
         return "我放稳啦。";
-    case APP_MOTION_EVENT_TILT_LIGHT:
-        return "我有点歪啦。";
-    case APP_MOTION_EVENT_TILT_SEVERE:
-        return "歪得太厉害啦。";
-    case APP_MOTION_EVENT_TILT_RECOVERED:
+    case APP_MOTION_EVENT_FALLEN:
+        return "我摔倒啦快把我扶起来！";
+    case APP_MOTION_EVENT_FALL_RECOVERED:
         return "我站稳啦。";
     default:
         return "我感觉到动了一下。";
@@ -119,7 +111,7 @@ static void motion_debug_task(void *arg)
             ui_state.roll_deg = motion.roll_deg;
             ui_state.pitch_deg = motion.pitch_deg;
             ui_state.tilt_delta_deg = motion.tilt_delta_deg;
-            ui_state.tilt_trigger_deg = (float)CONFIG_SMART_POT_MPU6050_MOVE_TILT_DELTA_DEG;
+            ui_state.tilt_trigger_deg = (float)CONFIG_SMART_POT_MPU6050_FALL_DEG;
             ui_state.event_count = s_motion_event_count;
             ui_state.moving = motion.moving;
             ui_state.tilt_level = motion.tilt_level;
@@ -147,37 +139,28 @@ static void motion_event_cb(app_motion_event_t event,
 
     switch (event) {
     case APP_MOTION_EVENT_TAP:
-        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_TAP, 1400);
+        app_ui_clear_motion_reaction();
         app_ui_set_dialog_status("Motion: tap");
-        break;
-    case APP_MOTION_EVENT_DOUBLE_TAP:
-        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_TAP, 1200);
-        app_ui_set_dialog_status("Motion: double tap");
-        app_voice_request_conversation();
         break;
     case APP_MOTION_EVENT_SHAKE:
         app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_SHAKE, 2400);
         app_ui_set_dialog_status("Motion: shake");
         break;
     case APP_MOTION_EVENT_MOVE_STARTED:
-        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_CARRIED, 5000);
+        app_ui_clear_motion_reaction();
         app_ui_set_dialog_status("Motion: carried");
         break;
     case APP_MOTION_EVENT_MOVE_STOPPED:
         app_ui_clear_motion_reaction();
         app_ui_set_dialog_status("Motion: stable");
         break;
-    case APP_MOTION_EVENT_TILT_LIGHT:
-        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_CARRIED, 2500);
-        app_ui_set_dialog_status("Motion: tilt light");
-        break;
-    case APP_MOTION_EVENT_TILT_SEVERE:
-        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_SHAKE, 2600);
-        app_ui_set_dialog_status("Motion: tilt severe");
-        break;
-    case APP_MOTION_EVENT_TILT_RECOVERED:
+    case APP_MOTION_EVENT_FALLEN:
         app_ui_clear_motion_reaction();
-        app_ui_set_dialog_status("Motion: tilt recovered");
+        app_ui_set_dialog_status("Motion: fallen");
+        break;
+    case APP_MOTION_EVENT_FALL_RECOVERED:
+        app_ui_clear_motion_reaction();
+        app_ui_set_dialog_status("Motion: fall recovered");
         break;
     default:
         break;

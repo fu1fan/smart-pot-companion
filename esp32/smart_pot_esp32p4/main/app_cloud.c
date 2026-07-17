@@ -277,8 +277,10 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
     cJSON *motion = cJSON_CreateObject();
     cJSON_AddNumberToObject(motion, "rollDeg", s_motion.roll_deg);
     cJSON_AddNumberToObject(motion, "pitchDeg", s_motion.pitch_deg);
+    cJSON_AddNumberToObject(motion, "tiltDeltaDeg", s_motion.tilt_delta_deg);
     cJSON_AddBoolToObject(motion, "moving", s_motion.moving);
     cJSON_AddNumberToObject(motion, "tiltLevel", s_motion.tilt_level);
+    cJSON_AddBoolToObject(motion, "fallen", s_motion.tilt_level > 0);
     cJSON_AddItemToObject(root, "motion", motion);
 #endif
     cJSON_AddStringToObject(root, "mood", mood_name(state->mood));
@@ -298,14 +300,12 @@ void app_cloud_update_motion(app_motion_event_t event, const app_motion_state_t 
     if (state != NULL) s_motion = *state;
     static const char *types[] = {
         "PHYSICAL_TAP",
-        "DOUBLE_TAP",
         "SHAKE",
         "MOVE_STARTED",
         "MOVE_STOPPED",
-        "TILT_LIGHT",
-        "TILT_SEVERE",
-        "TILT_RECOVERED",
+        "FALLEN",
+        "FALL_RECOVERED",
     };
-    if (event >= APP_MOTION_EVENT_TAP && event <= APP_MOTION_EVENT_TILT_RECOVERED) publish_event(types[event]);
+    if (event >= APP_MOTION_EVENT_TAP && event <= APP_MOTION_EVENT_FALL_RECOVERED) publish_event(types[event]);
 }
 #endif

@@ -236,13 +236,13 @@ menu "Smart Pot"
 
         config SMART_POT_MPU6050_TAP_DELTA_MG
             int "Tap acceleration magnitude threshold (mg)"
-            default 1500
+            default 1200
             range 500 4000
             depends on SMART_POT_MPU6050_ENABLE
 
         config SMART_POT_MPU6050_TAP_GYRO_MAX_DPS
             int "Tap maximum gyro threshold (deg/s)"
-            default 120
+            default 90
             range 10 1000
             depends on SMART_POT_MPU6050_ENABLE
 
@@ -250,18 +250,6 @@ menu "Smart Pot"
             int "Tap impact re-arm time (ms)"
             default 120
             range 50 1000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_DOUBLE_TAP_MIN_MS
-            int "Double tap minimum interval (ms)"
-            default 300
-            range 50 1000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_DOUBLE_TAP_MAX_MS
-            int "Double tap maximum interval (ms)"
-            default 800
-            range 100 2000
             depends on SMART_POT_MPU6050_ENABLE
 
         config SMART_POT_MPU6050_SHAKE_ACCEL_MG
@@ -282,57 +270,33 @@ menu "Smart Pot"
             range 200 10000
             depends on SMART_POT_MPU6050_ENABLE
 
-        config SMART_POT_MPU6050_MOVE_TILT_DELTA_DEG
-            int "Movement pitch/roll delta threshold (degrees)"
-            default 15
+        config SMART_POT_MPU6050_MOVE_Z_DELTA_MG
+            int "Movement start Z-axis acceleration delta threshold (mg)"
+            default 280
+            range 50 2000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_MOVE_STOP_Z_DELTA_MG
+            int "Movement stop reverse Z-axis acceleration delta threshold (mg)"
+            default 220
+            range 50 2000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_FALL_DEG
+            int "Fall angle threshold (degrees)"
+            default 50
             range 1 90
             depends on SMART_POT_MPU6050_ENABLE
 
-        config SMART_POT_MPU6050_MOVE_CONFIRM_MS
-            int "Movement confirmation time (ms)"
-            default 1000
-            range 50 5000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_MOVE_STABLE_MS
-            int "Static confirmation time before movement stops (ms)"
-            default 3000
-            range 100 10000
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_STATIC_DELTA_MG
-            int "Static acceleration delta around 1g (mg)"
-            default 80
-            range 10 500
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_STATIC_GYRO_DPS
-            int "Static gyro threshold (deg/s)"
-            default 5
-            range 1 100
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_TILT_LIGHT_DEG
-            int "Light tilt threshold (degrees)"
-            default 15
-            range 1 90
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_TILT_SEVERE_DEG
-            int "Severe tilt threshold (degrees)"
-            default 45
-            range 1 90
-            depends on SMART_POT_MPU6050_ENABLE
-
-        config SMART_POT_MPU6050_TILT_RECOVER_DEG
-            int "Tilt recovery threshold (degrees)"
+        config SMART_POT_MPU6050_FALL_RECOVER_DEG
+            int "Fall recovery angle threshold (degrees)"
             default 10
             range 0 90
             depends on SMART_POT_MPU6050_ENABLE
 
-        config SMART_POT_MPU6050_TILT_CONFIRM_MS
-            int "Tilt confirmation time (ms)"
-            default 2000
+        config SMART_POT_MPU6050_FALL_CONFIRM_MS
+            int "Fall and recovery confirmation time (ms)"
+            default 1000
             range 100 10000
             depends on SMART_POT_MPU6050_ENABLE
 
