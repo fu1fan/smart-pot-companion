@@ -93,6 +93,7 @@ static lv_obj_t *s_cat_heart;
 static lv_timer_t *s_touch_blink_timer;
 static lv_timer_t *s_remote_content_timer;
 static lv_timer_t *s_heart_hide_timer;
+static lv_timer_t *s_motion_reaction_timer;
 static lv_timer_t *s_idle_blink_timer;
 static lv_timer_t *s_schedule_blink_timer;
 static lv_timer_t *s_schedule_blink_restore_timer;
@@ -113,6 +114,8 @@ static lv_font_t *s_todo_title_font;
 static lv_font_t *s_todo_header_font;
 static app_mood_t s_current_mood = APP_MOOD_HAPPY;
 static bool s_touch_blink_active;
+static bool s_motion_reaction_active;
+static app_ui_motion_reaction_t s_motion_reaction;
 static ui_page_t s_current_page = UI_PAGE_FACE;
 
 static lv_point_precise_t s_cat_happy_eye_pts[] = { { 0, 9 }, { 16, 2 }, { 32, 9 } };
@@ -1244,10 +1247,88 @@ static void cat_face_to_front(void)
     }
 }
 
+static void apply_motion_reaction_art(void)
+{
+    if (s_cat_eye_left == NULL || s_cat_eye_right == NULL || s_cat_mouth == NULL ||
+        s_cat_brow_left == NULL || s_cat_brow_right == NULL) {
+        return;
+    }
+
+    cat_face_to_front();
+    if (s_cat_blink_eye_left != NULL) lv_obj_add_flag(s_cat_blink_eye_left, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_blink_eye_right != NULL) lv_obj_add_flag(s_cat_blink_eye_right, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_happy_eye_left != NULL) lv_obj_add_flag(s_cat_happy_eye_left, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_happy_eye_right != NULL) lv_obj_add_flag(s_cat_happy_eye_right, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_highlight_left != NULL) lv_obj_remove_flag(s_cat_highlight_left, LV_OBJ_FLAG_HIDDEN);
+    if (s_cat_highlight_right != NULL) lv_obj_remove_flag(s_cat_highlight_right, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_cat_eye_left, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_cat_eye_right, LV_OBJ_FLAG_HIDDEN);
+
+    bool show_drop = false;
+    bool show_drop_left = false;
+    bool show_zzz = false;
+    const char *zzz_text = "zZ";
+
+    switch (s_motion_reaction) {
+    case APP_UI_MOTION_REACTION_TAP:
+        lv_obj_set_size(s_cat_eye_left, 36, 46);
+        lv_obj_set_size(s_cat_eye_right, 36, 46);
+        lv_obj_align(s_cat_eye_left, LV_ALIGN_TOP_LEFT, 82, 187);
+        lv_obj_align(s_cat_eye_right, LV_ALIGN_TOP_LEFT, 180, 187);
+        lv_label_set_text(s_cat_brow_left, "!");
+        lv_label_set_text(s_cat_brow_right, "!");
+        lv_label_set_text(s_cat_mouth, "O");
+        break;
+    case APP_UI_MOTION_REACTION_SHAKE:
+        lv_obj_set_size(s_cat_eye_left, 24, 32);
+        lv_obj_set_size(s_cat_eye_right, 24, 32);
+        lv_obj_align(s_cat_eye_left, LV_ALIGN_TOP_LEFT, 92, 194);
+        lv_obj_align(s_cat_eye_right, LV_ALIGN_TOP_LEFT, 188, 194);
+        lv_label_set_text(s_cat_brow_left, "\\");
+        lv_label_set_text(s_cat_brow_right, "/");
+        lv_label_set_text(s_cat_mouth, "~");
+        show_drop = true;
+        show_drop_left = true;
+        show_zzz = true;
+        zzz_text = "!!";
+        break;
+    case APP_UI_MOTION_REACTION_CARRIED:
+    default:
+        lv_obj_set_size(s_cat_eye_left, 30, 40);
+        lv_obj_set_size(s_cat_eye_right, 30, 40);
+        lv_obj_align(s_cat_eye_left, LV_ALIGN_TOP_LEFT, 87, 190);
+        lv_obj_align(s_cat_eye_right, LV_ALIGN_TOP_LEFT, 183, 190);
+        lv_label_set_text(s_cat_brow_left, "/");
+        lv_label_set_text(s_cat_brow_right, "\\");
+        lv_label_set_text(s_cat_mouth, "o");
+        show_drop = true;
+        break;
+    }
+
+    if (s_cat_drop != NULL) {
+        if (show_drop) lv_obj_remove_flag(s_cat_drop, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_cat_drop, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_cat_drop_left != NULL) {
+        if (show_drop_left) lv_obj_remove_flag(s_cat_drop_left, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_cat_drop_left, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_cat_zzz_label != NULL) {
+        lv_label_set_text(s_cat_zzz_label, zzz_text);
+        if (show_zzz) lv_obj_remove_flag(s_cat_zzz_label, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_cat_zzz_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void update_cat_art(app_mood_t mood)
 {
     s_current_mood = mood;
     if (s_cat_head == NULL || s_cat_eye_left == NULL || s_cat_eye_right == NULL || s_cat_mouth == NULL) {
+        return;
+    }
+
+    if (s_motion_reaction_active) {
+        apply_motion_reaction_art();
         return;
     }
 
@@ -1311,6 +1392,7 @@ static void update_cat_art(app_mood_t mood)
             lv_obj_add_flag(s_cat_drop_left, LV_OBJ_FLAG_HIDDEN);
         }
         if (show_zzz && s_cat_zzz_label != NULL) {
+            lv_label_set_text(s_cat_zzz_label, "zZ");
             lv_obj_remove_flag(s_cat_zzz_label, LV_OBJ_FLAG_HIDDEN);
         } else if (s_cat_zzz_label != NULL) {
             lv_obj_add_flag(s_cat_zzz_label, LV_OBJ_FLAG_HIDDEN);
@@ -1346,6 +1428,7 @@ static void update_cat_art(app_mood_t mood)
         }
     }
     if (s_cat_zzz_label != NULL) {
+        lv_label_set_text(s_cat_zzz_label, "zZ");
         if (show_zzz) {
             lv_obj_remove_flag(s_cat_zzz_label, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -1474,6 +1557,57 @@ void app_ui_play_touch_reaction(void)
         lv_timer_set_repeat_count(s_heart_hide_timer, 1);
     }
 
+    bsp_display_unlock();
+}
+
+static void motion_reaction_timer_cb(lv_timer_t *timer)
+{
+    s_motion_reaction_active = false;
+    s_motion_reaction_timer = NULL;
+    update_cat_art(s_current_mood);
+    lv_timer_delete(timer);
+}
+
+void app_ui_play_motion_reaction(app_ui_motion_reaction_t reaction, uint32_t duration_ms)
+{
+    if (bsp_display_lock(100) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for motion reaction");
+        return;
+    }
+
+    if (s_touch_blink_timer != NULL) {
+        lv_timer_delete(s_touch_blink_timer);
+        s_touch_blink_timer = NULL;
+    }
+    s_touch_blink_active = false;
+
+    s_motion_reaction = reaction;
+    s_motion_reaction_active = true;
+    update_cat_art(s_current_mood);
+
+    if (s_motion_reaction_timer != NULL) {
+        lv_timer_delete(s_motion_reaction_timer);
+    }
+    s_motion_reaction_timer = lv_timer_create(motion_reaction_timer_cb,
+                                              duration_ms > 0 ? duration_ms : 1500,
+                                              NULL);
+    lv_timer_set_repeat_count(s_motion_reaction_timer, 1);
+    bsp_display_unlock();
+}
+
+void app_ui_clear_motion_reaction(void)
+{
+    if (bsp_display_lock(100) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for motion reaction clear");
+        return;
+    }
+
+    if (s_motion_reaction_timer != NULL) {
+        lv_timer_delete(s_motion_reaction_timer);
+        s_motion_reaction_timer = NULL;
+    }
+    s_motion_reaction_active = false;
+    update_cat_art(s_current_mood);
     bsp_display_unlock();
 }
 

@@ -33,6 +33,36 @@ static void motion_event_cb(app_motion_event_t event,
     ESP_LOGI(TAG, "Motion event=%d roll=%.1f pitch=%.1f moving=%d tilt=%u",
              event, state->roll_deg, state->pitch_deg,
              state->moving, state->tilt_level);
+
+    switch (event) {
+    case APP_MOTION_EVENT_TAP:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_TAP, 1400);
+        app_ui_set_dialog_status("Motion: tap");
+        break;
+    case APP_MOTION_EVENT_DOUBLE_TAP:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_TAP, 1200);
+        app_ui_set_dialog_status("Motion: double tap");
+        app_voice_request_conversation();
+        break;
+    case APP_MOTION_EVENT_SHAKE:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_SHAKE, 2400);
+        app_ui_set_dialog_status("Motion: shake");
+        break;
+    case APP_MOTION_EVENT_MOVE_STARTED:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_CARRIED, 5000);
+        app_ui_set_dialog_status("Motion: carried");
+        break;
+    case APP_MOTION_EVENT_MOVE_STOPPED:
+        app_ui_clear_motion_reaction();
+        app_ui_set_dialog_status("Motion: stable");
+        break;
+    case APP_MOTION_EVENT_TILT_LIGHT:
+    case APP_MOTION_EVENT_TILT_SEVERE:
+    case APP_MOTION_EVENT_TILT_RECOVERED:
+    default:
+        break;
+    }
+
     app_cloud_update_motion(event, state);
 }
 #endif

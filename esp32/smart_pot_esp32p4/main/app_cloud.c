@@ -296,7 +296,16 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
 void app_cloud_update_motion(app_motion_event_t event, const app_motion_state_t *state)
 {
     if (state != NULL) s_motion = *state;
-    static const char *types[] = {"PHYSICAL_TOUCH", "MOVE_STARTED", "MOVE_STOPPED", "TILT_LIGHT", "TILT_SEVERE", "TILT_RECOVERED"};
+    static const char *types[] = {
+        "PHYSICAL_TAP",
+        "DOUBLE_TAP",
+        "SHAKE",
+        "MOVE_STARTED",
+        "MOVE_STOPPED",
+        "TILT_LIGHT",
+        "TILT_SEVERE",
+        "TILT_RECOVERED",
+    };
     if (event >= APP_MOTION_EVENT_TAP && event <= APP_MOTION_EVENT_TILT_RECOVERED) publish_event(types[event]);
 }
 #endif
