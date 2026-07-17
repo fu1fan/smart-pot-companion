@@ -226,6 +226,80 @@ menu "Smart Pot"
             help
                 The new expansion board pulls AD0 low, so its default address is 0x68.
 
+        config SMART_POT_MPU6050_DEBUG_LOG
+            bool "Log MPU-6050 samples for tuning"
+            default n
+            depends on SMART_POT_MPU6050_ENABLE
+            help
+                Print one MPU-6050 sample per second and scan the shared I2C bus
+                after init probe failures. Useful while tuning thresholds.
+
+        config SMART_POT_MPU6050_TAP_DELTA_MG
+            int "Tap acceleration delta threshold (mg)"
+            default 380
+            range 50 2000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TAP_GYRO_MAX_DPS
+            int "Tap maximum gyro threshold (deg/s)"
+            default 120
+            range 10 1000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TAP_COOLDOWN_MS
+            int "Tap cooldown (ms)"
+            default 750
+            range 100 5000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_MOVE_DELTA_MG
+            int "Movement acceleration delta threshold (mg)"
+            default 180
+            range 20 1000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_MOVE_GYRO_DPS
+            int "Movement gyro threshold (deg/s)"
+            default 35
+            range 5 500
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_MOVE_CONFIRM_MS
+            int "Movement confirmation time (ms)"
+            default 500
+            range 50 5000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_MOVE_STABLE_MS
+            int "Movement stable time before stop (ms)"
+            default 1200
+            range 100 10000
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TILT_LIGHT_DEG
+            int "Light tilt threshold (degrees)"
+            default 15
+            range 1 90
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TILT_SEVERE_DEG
+            int "Severe tilt threshold (degrees)"
+            default 45
+            range 1 90
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TILT_RECOVER_DEG
+            int "Tilt recovery threshold (degrees)"
+            default 10
+            range 0 90
+            depends on SMART_POT_MPU6050_ENABLE
+
+        config SMART_POT_MPU6050_TILT_CONFIRM_MS
+            int "Tilt confirmation time (ms)"
+            default 2000
+            range 100 10000
+            depends on SMART_POT_MPU6050_ENABLE
+
         config SMART_POT_TTP223_ENABLE
             bool "Enable TTP223 touch input"
             default y
