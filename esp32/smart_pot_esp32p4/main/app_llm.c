@@ -714,6 +714,53 @@ static bool ends_with_text(const char *text, const char *suffix)
     return text_len >= suffix_len && strcmp(text + text_len - suffix_len, suffix) == 0;
 }
 
+static void clean_schedule_event_text(char *event)
+{
+    if (event == NULL) {
+        return;
+    }
+    trim_command_text(event);
+
+    static const char *const leading_noise[] = {
+        "请帮我提醒一下", "请帮我提醒", "帮我提醒一下", "帮我提醒",
+        "给我提醒一下", "给我提醒", "提醒我一下", "提醒我",
+        "提醒一下", "设置提醒", "设个提醒", "帮我设个提醒",
+        "添加日程", "新增日程", "创建日程", "新建日程", "记录日程", "安排日程",
+        "添加待办", "新增待办", "到时候提醒我", "到点提醒我",
+        "请帮我", "帮我", "请", "记得", "到时候", "到点", "要",
+    };
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (size_t i = 0; i < sizeof(leading_noise) / sizeof(leading_noise[0]); i++) {
+            if (starts_with_text(event, leading_noise[i])) {
+                size_t size = strlen(leading_noise[i]);
+                memmove(event, event + size, strlen(event + size) + 1);
+                trim_command_text(event);
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    static const char *const trailing_noise[] = {
+        "提醒我", "提醒一下", "提醒", "的提醒", "的日程", "日程", "待办", "任务",
+    };
+    changed = true;
+    while (changed) {
+        changed = false;
+        for (size_t i = 0; i < sizeof(trailing_noise) / sizeof(trailing_noise[0]); i++) {
+            size_t size = strlen(trailing_noise[i]);
+            if (ends_with_text(event, trailing_noise[i]) && strlen(event) > size) {
+                event[strlen(event) - size] = '\0';
+                trim_command_text(event);
+                changed = true;
+                break;
+            }
+        }
+    }
+}
+
 static char *find_first_text(char *text, const char *const *needles, size_t needle_count, const char **matched)
 {
     char *first = NULL;
@@ -1232,7 +1279,7 @@ static esp_err_t schedule_http_event_handler(esp_http_client_event_t *evt)
 static char *make_schedule_extract_body(const char *user_text, const struct tm *now_tm)
 {
     char now_text[40];
-    char prompt[896];
+    char prompt[1200];
     snprintf(now_text, sizeof(now_text), "%04d-%02d-%02d %02d:%02d",
              now_tm->tm_year + 1900, now_tm->tm_mon + 1, now_tm->tm_mday,
              now_tm->tm_hour, now_tm->tm_min);
@@ -1246,7 +1293,9 @@ static char *make_schedule_extract_body(const char *user_text, const struct tm *
              "规则：event必须删除提醒词和全部时间词；datetime必须把今天、明天、后天、周几、"
              "过几小时等换算为未来的北京时间。只说几点且今天已过时取次日。"
              "如果事件和时间都清楚，confidence至少0.85；如果只有ASR同音小错但可纠正，confidence至少0.70。"
-             "没有明确事件或无法确定具体时间时，datetime或event留空并填写clarification，禁止猜测。",
+             "没有明确事件或无法确定具体时间时，datetime或event留空并填写clarification，禁止猜测。"
+             "示例：用户说“后天早上八点提醒我吃饭”，event必须是“吃饭”，"
+             "不能是“提醒我”或“提醒我吃饭”。",
              now_text, user_text != NULL ? user_text : "");
 
     cJSON *root = cJSON_CreateObject();
@@ -1319,6 +1368,7 @@ static bool parse_schedule_extract_response(const char *http_body,
     *confidence = cJSON_IsNumber(confidence_obj) ? confidence_obj->valuedouble : 0.0;
     cJSON_Delete(result);
     trim_command_text(event);
+    clean_schedule_event_text(event);
     trim_command_text(datetime);
     trim_command_text(clarification);
     return is_schedule;
@@ -1400,12 +1450,31 @@ static void schedule_extract_task(void *arg)
     free(body);
     free(response);
 
+    char fallback_item[96] = "";
+    char fallback_deadline[64] = "";
+    bool fallback_parsed = parse_schedule_command(user_text, fallback_item, sizeof(fallback_item),
+                                                  fallback_deadline, sizeof(fallback_deadline));
+    if (cloud_success && event[0] == '\0' && fallback_parsed && fallback_item[0] != '\0') {
+        utf8_strlcpy(event, fallback_item, sizeof(event));
+        ESP_LOGI(TAG, "Schedule event recovered from local parser: %s", event);
+    }
+
     bool datetime_valid = validate_schedule_datetime(datetime);
     if (cloud_success && confidence >= SCHEDULE_CONFIDENCE_MIN && event[0] != '\0' && datetime_valid) {
         schedule_pending_clear();
         app_ui_add_schedule(event, datetime);
         app_ui_set_dialog_status("Schedule: smart added");
         finish_local_command_with_voice("好的，已经帮你安排好了。 ");
+        goto done;
+    }
+    if (fallback_parsed && fallback_deadline[0] != '\0' &&
+        (!cloud_success || event[0] == '\0' || !datetime_valid || confidence < SCHEDULE_CONFIDENCE_MIN)) {
+        schedule_pending_clear();
+        app_ui_add_schedule(fallback_item, fallback_deadline);
+        app_ui_set_dialog_status(cloud_success ? "Schedule: local corrected" : "Schedule: local fallback");
+        finish_local_command_with_voice(cloud_success ?
+                                        "好的，已经帮你安排好了。 " :
+                                        "网络有点慢，我先按本地识别帮你添加了。 ");
         goto done;
     }
     if (cloud_success) {
@@ -1416,10 +1485,6 @@ static void schedule_extract_task(void *arg)
     }
 
     /* Network/model failure: retain the deterministic parser as an offline fallback. */
-    char fallback_item[96] = "";
-    char fallback_deadline[64] = "";
-    bool fallback_parsed = parse_schedule_command(user_text, fallback_item, sizeof(fallback_item),
-                                                  fallback_deadline, sizeof(fallback_deadline));
     if (fallback_parsed && fallback_deadline[0] != '\0') {
         schedule_pending_clear();
         app_ui_add_schedule(fallback_item, fallback_deadline);
@@ -1449,7 +1514,7 @@ static bool looks_like_schedule_add_command(const char *text)
     static const char *const task_markers[] = {
         "报告", "口头报告", "作业", "考试", "会议", "开会", "实验", "论文",
         "答辩", "项目", "PPT", "ppt", "课程", "复习", "浇花", "浇水",
-        "吃药", "起床", "出门", "打卡", "运动", "取快递",
+        "吃饭", "吃药", "喝水", "起床", "出门", "打卡", "运动", "取快递",
     };
     static const char *const question_markers[] = {
         "吗", "呢", "是不是", "有没有", "多少", "几号", "几点", "？", "?",

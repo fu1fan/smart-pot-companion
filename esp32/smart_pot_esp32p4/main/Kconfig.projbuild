@@ -142,8 +142,8 @@ menu "Smart Pot"
         default y
 
     config SMART_POT_VOICE_WAKE_THRESHOLD
-        int "Voice wake RMS threshold"
-        default 1800
+        int "Voice wake phrase fallback average PCM threshold"
+        default 70
         depends on SMART_POT_VOICE_WAKE_ENABLE
 
     config SMART_POT_VOICE_WAKE_COOLDOWN_MS
@@ -153,7 +153,7 @@ menu "Smart Pot"
 
     config SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT
         int "WakeNet detection threshold percent"
-        default 55
+        default 45
         range 40 95
         depends on SMART_POT_VOICE_WAKE_ENABLE
         help

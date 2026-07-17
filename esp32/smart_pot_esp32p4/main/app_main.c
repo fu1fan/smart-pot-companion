@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
@@ -153,6 +154,56 @@ static void motion_event_cb(app_motion_event_t event,
 }
 #endif
 
+typedef struct {
+    const char *text;
+    app_tts_tone_t tone;
+} touch_feedback_t;
+
+static const touch_feedback_t *select_touch_feedback(app_mood_t mood)
+{
+    static const touch_feedback_t happy[] = {
+        { "哎哟，痒痒的。", APP_TTS_TONE_CHEERFUL },
+        { "嘿嘿，被你碰到啦。", APP_TTS_TONE_CHEERFUL },
+        { "小麦收到摸摸啦。", APP_TTS_TONE_CHEERFUL },
+    };
+    static const touch_feedback_t thirsty[] = {
+        { "哎哟，我有点渴啦。", APP_TTS_TONE_WORRIED },
+        { "轻一点嘛，我想喝点水。", APP_TTS_TONE_WORRIED },
+        { "摸摸收到，可以顺便看看水吗？", APP_TTS_TONE_WORRIED },
+    };
+    static const touch_feedback_t dark[] = {
+        { "哎哟，有点困困的。", APP_TTS_TONE_SLEEPY },
+        { "我想晒晒光啦。", APP_TTS_TONE_SLEEPY },
+        { "黑乎乎的，小麦有点懵。", APP_TTS_TONE_SLEEPY },
+    };
+    static const touch_feedback_t weak[] = {
+        { "哎哟，我现在有点虚弱。", APP_TTS_TONE_WORRIED },
+        { "轻一点嘛，我想要水和光。", APP_TTS_TONE_FLUSTERED },
+        { "小麦有点晕，帮我看看水和光。", APP_TTS_TONE_FLUSTERED },
+    };
+
+    const touch_feedback_t *options = happy;
+    size_t count = sizeof(happy) / sizeof(happy[0]);
+    switch (mood) {
+    case APP_MOOD_THIRSTY:
+        options = thirsty;
+        count = sizeof(thirsty) / sizeof(thirsty[0]);
+        break;
+    case APP_MOOD_DARK:
+        options = dark;
+        count = sizeof(dark) / sizeof(dark[0]);
+        break;
+    case APP_MOOD_WEAK:
+        options = weak;
+        count = sizeof(weak) / sizeof(weak[0]);
+        break;
+    case APP_MOOD_HAPPY:
+    default:
+        break;
+    }
+    return &options[esp_random() % count];
+}
+
 static void log_memory_stats(const char *stage)
 {
     ESP_LOGI(TAG,
@@ -179,7 +230,8 @@ static void sensor_update_cb(const app_plant_state_t *state, void *user_ctx)
         int64_t now_us = esp_timer_get_time();
         if (now_us - last_touch_reaction_us > 3000000) {
             app_ui_play_touch_reaction();
-            if (!app_tts_speak_text_no_followup("哎哟。")) {
+            const touch_feedback_t *feedback = select_touch_feedback(state->mood);
+            if (!app_tts_speak_text_with_tone(feedback->text, feedback->tone)) {
                 ESP_LOGW(TAG, "Touch reaction TTS queue failed");
             }
             last_touch_reaction_us = now_us;

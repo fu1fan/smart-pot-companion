@@ -1,5 +1,6 @@
 #include "app_voice.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "bsp/esp-bsp.h"
@@ -27,13 +28,18 @@
 #define CONFIG_SMART_POT_VOICE_WAKE_COOLDOWN_MS 1500
 #endif
 
+#ifndef CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD
+#define CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD 70
+#endif
+
 #ifndef CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT
-#define CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT 55
+#define CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT 45
 #endif
 
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
+#define VOICE_WAKE_ENERGY_PACKETS 2
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -61,6 +67,104 @@ static bool transcript_has_text(const char *text)
         return false;
     }
     return true;
+}
+
+static void trim_voice_text(char *text)
+{
+    if (text == NULL) {
+        return;
+    }
+
+    char *start = text;
+    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n' ||
+           *start == ',' || *start == '.' || *start == ':' || *start == ';' ||
+           *start == '!' || *start == '?') {
+        start++;
+    }
+    if (start != text) {
+        memmove(text, start, strlen(start) + 1);
+    }
+
+    size_t len = strlen(text);
+    while (len > 0) {
+        char ch = text[len - 1];
+        if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' &&
+            ch != ',' && ch != '.' && ch != ':' && ch != ';' &&
+            ch != '!' && ch != '?') {
+            break;
+        }
+        text[--len] = '\0';
+    }
+
+    static const char *const punctuation[] = { "，", "。", "！", "？", "、", "：", "；" };
+    bool changed;
+    do {
+        changed = false;
+        for (size_t i = 0; i < sizeof(punctuation) / sizeof(punctuation[0]); i++) {
+            size_t punctuation_size = strlen(punctuation[i]);
+            if (strncmp(text, punctuation[i], punctuation_size) == 0) {
+                memmove(text, text + punctuation_size, strlen(text + punctuation_size) + 1);
+                changed = true;
+            }
+        }
+    } while (changed);
+
+    len = strlen(text);
+    do {
+        changed = false;
+        for (size_t i = 0; i < sizeof(punctuation) / sizeof(punctuation[0]); i++) {
+            size_t punctuation_size = strlen(punctuation[i]);
+            if (len >= punctuation_size && strcmp(text + len - punctuation_size, punctuation[i]) == 0) {
+                len -= punctuation_size;
+                text[len] = '\0';
+                changed = true;
+            }
+        }
+    } while (changed && len > 0);
+}
+
+static bool remove_wake_phrase(char *text)
+{
+    if (text == NULL) {
+        return false;
+    }
+
+    static const char *const wake_variants[] = {
+        VOICE_WAKE_WORD, "你好，小麦", "你好 小麦", "你好小卖", "你好小脉",
+        "你好小迈", "你好晓麦", "小麦", "小卖", "小脉", "小迈", "晓麦",
+    };
+    trim_voice_text(text);
+
+    char *first = NULL;
+    const char *matched = NULL;
+    for (size_t i = 0; i < sizeof(wake_variants) / sizeof(wake_variants[0]); i++) {
+        char *pos = strstr(text, wake_variants[i]);
+        if (pos != NULL && (first == NULL || pos < first)) {
+            first = pos;
+            matched = wake_variants[i];
+        }
+    }
+    if (first == NULL || matched == NULL) {
+        return false;
+    }
+
+    char *after = first + strlen(matched);
+    memmove(text, after, strlen(after) + 1);
+    trim_voice_text(text);
+    return true;
+}
+
+static int average_sample_level(const int16_t *samples, size_t sample_count)
+{
+    if (samples == NULL || sample_count == 0) {
+        return 0;
+    }
+    int64_t sum = 0;
+    for (size_t i = 0; i < sample_count; i++) {
+        int32_t sample = samples[i];
+        sum += sample < 0 ? -sample : sample;
+    }
+    return (int)(sum / (int64_t)sample_count);
 }
 
 static bool cooldown_done(TickType_t now, TickType_t last_wake_tick)
@@ -121,7 +225,7 @@ static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_
              reset_result, disable_result, enable_result, threshold_result, custom_threshold_result);
 }
 
-static void transcribe_and_reply(esp_codec_dev_handle_t mic)
+static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_phrase)
 {
     s_conversation_busy = true;
     if (!app_wifi_is_connected()) {
@@ -136,6 +240,24 @@ static void transcribe_and_reply(esp_codec_dev_handle_t mic)
     char *transcript = app_asr_transcribe_from_mic(mic);
     if (transcript_has_text(transcript)) {
         ESP_LOGI(TAG, "ASR text: %s", transcript);
+        if (require_wake_phrase) {
+            if (!remove_wake_phrase(transcript)) {
+                ESP_LOGI(TAG, "Energy wake ignored because wake phrase was not confirmed");
+                free(transcript);
+                app_voice_conversation_complete();
+                return;
+            }
+            if (!transcript_has_text(transcript)) {
+                ESP_LOGI(TAG, "Energy wake confirmed without a following command");
+                app_ui_set_voice_status("Wake: confirmed");
+                free(transcript);
+                if (!app_tts_speak_text("我在呢。")) {
+                    app_voice_conversation_complete();
+                }
+                return;
+            }
+            ESP_LOGI(TAG, "Wake phrase removed, command=%s", transcript);
+        }
         app_ui_set_voice_status("ASR: got text");
         if (!app_llm_request_voice_reply(transcript)) {
             if (!app_tts_speak_text("我刚才卡住了，再说一次好吗。")) {
@@ -232,6 +354,7 @@ static void voice_task(void *arg)
     }
 
     TickType_t last_wake_tick = 0;
+    int wake_energy_packets = 0;
     s_voice_ready = true;
     int threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
     app_ui_set_voice_status(VOICE_WAKE_HINT);
@@ -284,7 +407,7 @@ static void voice_task(void *arg)
             s_manual_request = false;
             ESP_LOGI(TAG, "Manual voice conversation requested");
             app_ui_set_voice_status("ASR: listening");
-            transcribe_and_reply(mic);
+            transcribe_and_reply(mic, false);
             continue;
         }
 
@@ -297,9 +420,27 @@ static void voice_task(void *arg)
                 s_followup_request = false;
                 ESP_LOGI(TAG, "Follow-up voice conversation requested");
                 app_ui_set_voice_status("ASR: follow-up");
-                transcribe_and_reply(mic);
+                transcribe_and_reply(mic, false);
                 continue;
             }
+        }
+
+        TickType_t wake_now = xTaskGetTickCount();
+        int level = average_sample_level(samples, (size_t)feed_chunksize * (size_t)feed_channels);
+        if (!s_conversation_busy && level >= CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD) {
+            wake_energy_packets++;
+        } else {
+            wake_energy_packets = 0;
+        }
+        if (!s_conversation_busy && wake_energy_packets >= VOICE_WAKE_ENERGY_PACKETS &&
+            cooldown_done(wake_now, last_wake_tick)) {
+            last_wake_tick = wake_now;
+            wake_energy_packets = 0;
+            ESP_LOGI(TAG, "Energy wake candidate level=%d threshold=%d",
+                     level, CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD);
+            app_ui_set_voice_status("Wake: checking phrase");
+            transcribe_and_reply(mic, true);
+            continue;
         }
 
         afe_handle->feed(afe_data, samples);
@@ -315,7 +456,7 @@ static void voice_task(void *arg)
             ESP_LOGI(TAG, "WakeNet detected %s, word=%d, model=%d",
                      VOICE_WAKE_WORD, res->wake_word_index, res->wakenet_model_index);
             app_ui_set_voice_status("Wake: detected");
-            transcribe_and_reply(mic);
+            transcribe_and_reply(mic, false);
         } else if (!s_conversation_busy && cooldown_done(now, last_wake_tick)) {
             app_ui_set_voice_status(VOICE_WAKE_HINT);
         }

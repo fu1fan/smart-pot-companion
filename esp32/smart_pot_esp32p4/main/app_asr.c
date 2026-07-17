@@ -286,7 +286,9 @@ static char *make_full_request_json(void)
     cJSON *words = cJSON_CreateObject();
     cJSON_AddStringToObject(words, "text",
                             "智能盆栽小麦，浇花，浇水，土壤湿度，光照，提醒我，添加日程，待办，任务，番茄钟，口头报告，"
-                            "今天，明天，后天，上午，下午，晚上，八点，九点，十点，半点，点半，开会，作业，考试，报告");
+                            "你好小麦，早上，今天早上，明天早上，后天早上，后天早上八点，"
+                            "今天，明天，后天，上午，下午，晚上，八点，九点，十点，半点，点半，"
+                            "提醒我吃饭，吃饭，吃药，喝水，开会，作业，考试，报告");
     cJSON_AddItemToArray(data, words);
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
