@@ -6,6 +6,7 @@ import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import com.fu1fan.smartpot.server.store.PostgresSmartPotStore
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import io.ktor.http.*
+import io.ktor.http.auth.HttpAuthHeader
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -55,6 +56,7 @@ fun Application.module(
     val shares = ShareTokenService(config.shareTokenSecret)
     install(Authentication) {
         bearer("access") {
+            authHeader { call -> call.firstBearerAuthHeader() }
             authenticate { credential ->
                 if (credential.token == config.demoToken || shares.verify(credential.token) != null) UserIdPrincipal(credential.token) else null
             }
@@ -87,3 +89,19 @@ fun Application.module(
         scope.cancel()
     }
 }
+
+private fun ApplicationCall.firstBearerAuthHeader(): HttpAuthHeader? =
+    request.headers.getAll(HttpHeaders.Authorization)
+        ?.asSequence()
+        ?.flatMap { it.split(',').asSequence() }
+        ?.map(String::trim)
+        ?.mapNotNull { value ->
+            val parts = value.split(Regex("\\s+"), limit = 2)
+            val token = parts.getOrNull(1)?.trim().orEmpty()
+            if (parts.firstOrNull().equals("Bearer", ignoreCase = true) && token.isNotBlank()) {
+                HttpAuthHeader.Single("Bearer", token)
+            } else {
+                null
+            }
+        }
+        ?.firstOrNull()

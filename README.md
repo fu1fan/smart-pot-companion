@@ -27,7 +27,7 @@
 docker compose --env-file .env -f infra/docker-compose.yml up --build
 ```
 
-健康检查：`http://localhost:8080/health`。Android 模拟器默认访问 `http://10.0.2.2:8080`，默认演示令牌为 `smart-pot-demo-token`。真机测试可在构建时传入局域网地址和令牌：
+健康检查：`http://localhost:8080/health`。Android App 默认访问统一服务器 `http://103.236.87.90:18080`，默认演示令牌为 `smart-pot-demo-token`。本地调试或临时环境可在构建时传入地址和令牌：
 
 ```powershell
 ./gradlew.bat :androidApp:assembleDebug -PSMART_POT_SERVER_URL=http://192.168.1.2:8080 -PSMART_POT_DEMO_TOKEN=your-token

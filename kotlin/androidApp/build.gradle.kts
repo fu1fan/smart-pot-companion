@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val defaultServerUrl = providers.gradleProperty("SMART_POT_SERVER_URL").orElse("http://10.0.2.2:8080")
+val defaultServerUrl = providers.gradleProperty("SMART_POT_SERVER_URL").orElse("http://103.236.87.90:18080")
 val demoToken = providers.gradleProperty("SMART_POT_DEMO_TOKEN").orElse("smart-pot-demo-token")
 
 android {

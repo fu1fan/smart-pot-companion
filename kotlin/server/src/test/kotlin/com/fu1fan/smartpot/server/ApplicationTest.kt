@@ -13,10 +13,12 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.headers
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
@@ -50,6 +52,22 @@ class ApplicationTest {
 
         assertEquals(HttpStatusCode.OK, api.get("/health").status)
         val response = api.get("/api/v1/species") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(50, response.body<List<PlantSpecies>>().size)
+    }
+
+    @Test
+    fun `duplicate bearer header still authenticates catalog`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+
+        val response = api.get("/api/v1/species") {
+            headers {
+                append(HttpHeaders.Authorization, "Bearer ${config.demoToken}")
+                append(HttpHeaders.Authorization, "Bearer ${config.demoToken}")
+            }
+        }
+
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(50, response.body<List<PlantSpecies>>().size)
     }
