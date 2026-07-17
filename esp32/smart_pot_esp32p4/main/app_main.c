@@ -27,6 +27,8 @@
 static const char *TAG = "smart_pot";
 
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
+static volatile uint32_t s_motion_event_count;
+
 static const char *motion_event_name(app_motion_event_t event)
 {
     switch (event) {
@@ -75,6 +77,30 @@ static const char *motion_reaction_name(app_motion_event_t event)
     }
 }
 
+static const char *motion_voice_text(app_motion_event_t event)
+{
+    switch (event) {
+    case APP_MOTION_EVENT_TAP:
+        return "轻轻敲到我啦。";
+    case APP_MOTION_EVENT_DOUBLE_TAP:
+        return "收到双击，我来听你说。";
+    case APP_MOTION_EVENT_SHAKE:
+        return "有点晕啦，慢一点。";
+    case APP_MOTION_EVENT_MOVE_STARTED:
+        return "我被拿起来啦。";
+    case APP_MOTION_EVENT_MOVE_STOPPED:
+        return "我放稳啦。";
+    case APP_MOTION_EVENT_TILT_LIGHT:
+        return "我有点歪啦。";
+    case APP_MOTION_EVENT_TILT_SEVERE:
+        return "歪得太厉害啦。";
+    case APP_MOTION_EVENT_TILT_RECOVERED:
+        return "我站稳啦。";
+    default:
+        return "我感觉到动了一下。";
+    }
+}
+
 static void motion_debug_task(void *arg)
 {
     (void)arg;
@@ -92,6 +118,9 @@ static void motion_debug_task(void *arg)
             ui_state.gyro_z_dps = motion.gyro_z_dps;
             ui_state.roll_deg = motion.roll_deg;
             ui_state.pitch_deg = motion.pitch_deg;
+            ui_state.tilt_delta_deg = motion.tilt_delta_deg;
+            ui_state.tilt_trigger_deg = (float)CONFIG_SMART_POT_MPU6050_MOVE_TILT_DELTA_DEG;
+            ui_state.event_count = s_motion_event_count;
             ui_state.moving = motion.moving;
             ui_state.tilt_level = motion.tilt_level;
             ui_state.accel_mag_g = sqrtf(motion.accel_x_g * motion.accel_x_g +
@@ -111,9 +140,10 @@ static void motion_event_cb(app_motion_event_t event,
                             void *user_ctx)
 {
     (void)user_ctx;
-    ESP_LOGI(TAG, "Motion event=%d roll=%.1f pitch=%.1f moving=%d tilt=%u",
-             event, state->roll_deg, state->pitch_deg,
-             state->moving, state->tilt_level);
+    uint32_t event_count = ++s_motion_event_count;
+    ESP_LOGI(TAG, "Motion event=%d count=%lu roll=%.1f pitch=%.1f tiltDelta=%.1f moving=%d tilt=%u",
+             event, (unsigned long)event_count, state->roll_deg, state->pitch_deg,
+             state->tilt_delta_deg, state->moving, state->tilt_level);
 
     switch (event) {
     case APP_MOTION_EVENT_TAP:
@@ -153,6 +183,9 @@ static void motion_event_cb(app_motion_event_t event,
         break;
     }
 
+    if (!app_tts_speak_text_no_followup(motion_voice_text(event))) {
+        ESP_LOGW(TAG, "Motion voice feedback queue failed for event=%d", event);
+    }
     app_ui_set_motion_debug_event(motion_event_name(event), motion_reaction_name(event));
     app_cloud_update_motion(event, state);
 }

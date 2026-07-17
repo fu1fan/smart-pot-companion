@@ -1738,8 +1738,8 @@ void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
         if (s_motion_pitch_label != NULL) lv_label_set_text(s_motion_pitch_label, "-- deg");
         if (s_motion_accel_label != NULL) lv_label_set_text(s_motion_accel_label, "X --  Y --  Z --");
         if (s_motion_gyro_label != NULL) lv_label_set_text(s_motion_gyro_label, "X --  Y --  Z --");
-        if (s_motion_mag_label != NULL) lv_label_set_text(s_motion_mag_label, "|A| --  |G| --");
-        if (s_motion_state_label != NULL) lv_label_set_text(s_motion_state_label, "no sample");
+        if (s_motion_mag_label != NULL) lv_label_set_text(s_motion_mag_label, "|A| --  |G| --  tiltD --");
+        if (s_motion_state_label != NULL) lv_label_set_text(s_motion_state_label, "no sample E0");
         bsp_display_unlock();
         return;
     }
@@ -1764,13 +1764,16 @@ void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
         lv_label_set_text(s_motion_gyro_label, text);
     }
     if (s_motion_mag_label != NULL) {
-        snprintf(text, sizeof(text), "|A| %.2fg   |G| %.1fdps",
-                 state->accel_mag_g, state->gyro_mag_dps);
+        snprintf(text, sizeof(text), "|A| %.2fg   |G| %.1fdps   tiltD %.1f/%.0fdeg",
+                 state->accel_mag_g, state->gyro_mag_dps,
+                 state->tilt_delta_deg, state->tilt_trigger_deg);
         lv_label_set_text(s_motion_mag_label, text);
     }
     if (s_motion_state_label != NULL) {
-        snprintf(text, sizeof(text), "%s  tilt %u",
-                 state->moving ? "moving" : "stable", (unsigned int)state->tilt_level);
+        snprintf(text, sizeof(text), "%s L%u E%lu",
+                 state->moving ? "moving" : "stable",
+                 (unsigned int)state->tilt_level,
+                 (unsigned long)state->event_count);
         lv_label_set_text(s_motion_state_label, text);
     }
 

@@ -23,6 +23,7 @@ typedef struct {
     float gyro_z_dps;
     float roll_deg;
     float pitch_deg;
+    float tilt_delta_deg;
     bool moving;
     uint8_t tilt_level;
 } app_motion_state_t;

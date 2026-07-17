@@ -431,6 +431,7 @@ static void update_events(motion_ctx_t *ctx, app_motion_state_t *state, int64_t 
     float roll_delta = fabsf(state->roll_deg - ctx->base_roll);
     float pitch_delta = fabsf(state->pitch_deg - ctx->base_pitch);
     float tilt = fmaxf(roll_delta, pitch_delta);
+    state->tilt_delta_deg = tilt;
     bool impact = accel_mag >= MPU6050_TAP_ACCEL_G && gyro_mag < MPU6050_TAP_GYRO_MAX_DPS;
     bool shake_now = accel_mag >= MPU6050_SHAKE_ACCEL_G && gyro_mag >= MPU6050_SHAKE_GYRO_DPS;
     bool move_now = tilt >= MPU6050_MOVE_TILT_DELTA_DEG;
