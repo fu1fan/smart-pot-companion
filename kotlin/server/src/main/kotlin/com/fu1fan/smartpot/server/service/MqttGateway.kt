@@ -76,10 +76,7 @@ class MqttGateway(
     }
 
     private suspend fun consume(topic: String, payload: String) {
-        val parts = topic.split('/')
-        require(parts.size == 6)
-        val deviceId = parts[4]
-        val kind = parts[5]
+        val (deviceId, kind) = parseDeviceTopic(topic)
         val pot = potService.ensureForDevice(deviceId)
         when (kind) {
             "telemetry" -> {
@@ -116,4 +113,15 @@ class MqttGateway(
     override fun close() {
         client?.disconnect()?.join()
     }
+}
+
+internal data class DeviceTopic(val deviceId: String, val kind: String)
+
+internal fun parseDeviceTopic(topic: String): DeviceTopic {
+    val parts = topic.split('/')
+    require(parts.size == 5) { "invalid device topic: $topic" }
+    require(parts[0] == "smartpot" && parts[1] == "v1" && parts[2] == "devices") { "invalid device topic: $topic" }
+    require(parts[3].matches(Regex("[A-Za-z0-9_-]{3,64}"))) { "invalid device id in topic: $topic" }
+    require(parts[4] in setOf("telemetry", "reported", "acks", "events", "online")) { "invalid device topic kind: $topic" }
+    return DeviceTopic(deviceId = parts[3], kind = parts[4])
 }
