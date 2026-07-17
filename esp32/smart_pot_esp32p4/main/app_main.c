@@ -20,11 +20,92 @@
 #include "app_voice.h"
 #include "app_wifi.h"
 
+#include <math.h>
+
 #define BH1750_ONLY_I2C_TEST 0
 
 static const char *TAG = "smart_pot";
 
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
+static const char *motion_event_name(app_motion_event_t event)
+{
+    switch (event) {
+    case APP_MOTION_EVENT_TAP:
+        return "tap";
+    case APP_MOTION_EVENT_DOUBLE_TAP:
+        return "double tap";
+    case APP_MOTION_EVENT_SHAKE:
+        return "shake";
+    case APP_MOTION_EVENT_MOVE_STARTED:
+        return "carried";
+    case APP_MOTION_EVENT_MOVE_STOPPED:
+        return "stable";
+    case APP_MOTION_EVENT_TILT_LIGHT:
+        return "tilt light";
+    case APP_MOTION_EVENT_TILT_SEVERE:
+        return "tilt severe";
+    case APP_MOTION_EVENT_TILT_RECOVERED:
+        return "tilt recovered";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *motion_reaction_name(app_motion_event_t event)
+{
+    switch (event) {
+    case APP_MOTION_EVENT_TAP:
+        return "head pause";
+    case APP_MOTION_EVENT_DOUBLE_TAP:
+        return "voice wake";
+    case APP_MOTION_EVENT_SHAKE:
+        return "dizzy face";
+    case APP_MOTION_EVENT_MOVE_STARTED:
+        return "carried face";
+    case APP_MOTION_EVENT_MOVE_STOPPED:
+        return "motion clear";
+    case APP_MOTION_EVENT_TILT_LIGHT:
+        return "tilt watch";
+    case APP_MOTION_EVENT_TILT_SEVERE:
+        return "dizzy tilt";
+    case APP_MOTION_EVENT_TILT_RECOVERED:
+        return "tilt clear";
+    default:
+        return "none";
+    }
+}
+
+static void motion_debug_task(void *arg)
+{
+    (void)arg;
+
+    while (true) {
+        app_motion_state_t motion = {0};
+        app_ui_motion_debug_state_t ui_state = {0};
+        ui_state.valid = app_motion_get_state(&motion);
+        if (ui_state.valid) {
+            ui_state.accel_x_g = motion.accel_x_g;
+            ui_state.accel_y_g = motion.accel_y_g;
+            ui_state.accel_z_g = motion.accel_z_g;
+            ui_state.gyro_x_dps = motion.gyro_x_dps;
+            ui_state.gyro_y_dps = motion.gyro_y_dps;
+            ui_state.gyro_z_dps = motion.gyro_z_dps;
+            ui_state.roll_deg = motion.roll_deg;
+            ui_state.pitch_deg = motion.pitch_deg;
+            ui_state.moving = motion.moving;
+            ui_state.tilt_level = motion.tilt_level;
+            ui_state.accel_mag_g = sqrtf(motion.accel_x_g * motion.accel_x_g +
+                                         motion.accel_y_g * motion.accel_y_g +
+                                         motion.accel_z_g * motion.accel_z_g);
+            ui_state.gyro_mag_dps = sqrtf(motion.gyro_x_dps * motion.gyro_x_dps +
+                                          motion.gyro_y_dps * motion.gyro_y_dps +
+                                          motion.gyro_z_dps * motion.gyro_z_dps);
+        }
+        app_ui_update_motion_debug(&ui_state);
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
+
 static void motion_event_cb(app_motion_event_t event,
                             const app_motion_state_t *state,
                             void *user_ctx)
@@ -57,12 +138,22 @@ static void motion_event_cb(app_motion_event_t event,
         app_ui_set_dialog_status("Motion: stable");
         break;
     case APP_MOTION_EVENT_TILT_LIGHT:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_CARRIED, 2500);
+        app_ui_set_dialog_status("Motion: tilt light");
+        break;
     case APP_MOTION_EVENT_TILT_SEVERE:
+        app_ui_play_motion_reaction(APP_UI_MOTION_REACTION_SHAKE, 2600);
+        app_ui_set_dialog_status("Motion: tilt severe");
+        break;
     case APP_MOTION_EVENT_TILT_RECOVERED:
+        app_ui_clear_motion_reaction();
+        app_ui_set_dialog_status("Motion: tilt recovered");
+        break;
     default:
         break;
     }
 
+    app_ui_set_motion_debug_event(motion_event_name(event), motion_reaction_name(event));
     app_cloud_update_motion(event, state);
 }
 #endif
@@ -153,6 +244,9 @@ void app_main(void)
     app_sensors_start(sensor_update_cb, NULL);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
     app_motion_start(motion_event_cb, NULL);
+    if (xTaskCreate(motion_debug_task, "smart_pot_motion_ui", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to create MPU-6050 debug UI task");
+    }
 #endif
 #endif
 

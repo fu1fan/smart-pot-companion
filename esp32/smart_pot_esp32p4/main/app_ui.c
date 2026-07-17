@@ -33,6 +33,7 @@ static void touch_event_cb(lv_event_t *event);
 
 typedef enum {
     UI_PAGE_FACE = 0,
+    UI_PAGE_MOTION,
     UI_PAGE_SCHEDULE,
     UI_PAGE_POMODORO,
     UI_PAGE_COUNT,
@@ -45,6 +46,7 @@ typedef enum {
 } pomodoro_phase_t;
 
 static lv_obj_t *s_face_page;
+static lv_obj_t *s_motion_page;
 static lv_obj_t *s_schedule_page;
 static lv_obj_t *s_pomodoro_page;
 static lv_obj_t *s_face_mood_label;
@@ -64,6 +66,15 @@ static lv_obj_t *s_voice_label;
 static lv_obj_t *s_dialog_label;
 static lv_obj_t *s_mode_label_face;
 static lv_obj_t *s_mode_label_schedule;
+static lv_obj_t *s_motion_status_label;
+static lv_obj_t *s_motion_roll_label;
+static lv_obj_t *s_motion_pitch_label;
+static lv_obj_t *s_motion_accel_label;
+static lv_obj_t *s_motion_gyro_label;
+static lv_obj_t *s_motion_mag_label;
+static lv_obj_t *s_motion_state_label;
+static lv_obj_t *s_motion_event_label;
+static lv_obj_t *s_motion_reaction_label;
 static lv_obj_t *s_schedule_empty_label;
 static lv_obj_t *s_schedule_item_labels[SCHEDULE_MAX_ITEMS];
 static lv_obj_t *s_schedule_deadline_labels[SCHEDULE_MAX_ITEMS];
@@ -902,6 +913,101 @@ static lv_obj_t *make_metric_card(lv_obj_t *parent, int32_t x, int32_t y, const 
     return card;
 }
 
+static lv_obj_t *make_motion_debug_panel(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
+                                         const char *title, lv_color_t accent, lv_obj_t **value_out)
+{
+    lv_obj_t *panel = lv_obj_create(parent);
+    lv_obj_set_size(panel, w, h);
+    lv_obj_align(panel, LV_ALIGN_TOP_LEFT, x, y);
+    lv_obj_set_style_radius(panel, 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x0d1714), LV_PART_MAIN);
+    lv_obj_set_style_border_color(panel, accent, LV_PART_MAIN);
+    lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(panel, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    enable_page_switch_target(panel);
+
+    lv_obj_t *title_label = lv_label_create(panel);
+    lv_label_set_text(title_label, title);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title_label, lv_color_hex(0xb8c7bd), LV_PART_MAIN);
+    lv_obj_set_width(title_label, w - 24);
+    lv_label_set_long_mode(title_label, LV_LABEL_LONG_CLIP);
+    lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 12, h <= 60 ? 5 : 9);
+
+    lv_obj_t *value_label = lv_label_create(panel);
+    lv_label_set_text(value_label, "--");
+    lv_obj_set_width(value_label, w - 24);
+    lv_label_set_long_mode(value_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(value_label,
+                               h <= 60 ? &lv_font_montserrat_20 : &lv_font_montserrat_24,
+                               LV_PART_MAIN);
+    lv_obj_set_style_text_color(value_label, accent, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(value_label, 0, LV_PART_MAIN);
+    lv_obj_align(value_label, LV_ALIGN_TOP_LEFT, 12, h <= 60 ? 24 : 36);
+    if (value_out != NULL) {
+        *value_out = value_label;
+    }
+
+    return panel;
+}
+
+static void make_motion_debug_page(lv_obj_t *screen)
+{
+    s_motion_page = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_motion_page);
+    lv_obj_set_size(s_motion_page, UI_SCREEN_W, UI_SCREEN_H);
+    lv_obj_set_style_bg_opa(s_motion_page, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_motion_page, lv_color_hex(0x06100e), LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_motion_page, lv_color_hex(0xf0fff8), LV_PART_MAIN);
+    lv_obj_add_flag(s_motion_page, LV_OBJ_FLAG_HIDDEN);
+    enable_page_switch_target(s_motion_page);
+
+    lv_obj_t *title = lv_label_create(s_motion_page);
+    lv_label_set_text(title, "MPU6050 DEBUG");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_26, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 40, 24);
+
+    lv_obj_t *subtitle = lv_label_create(s_motion_page);
+    lv_label_set_text(subtitle, "Live angle, acceleration, gyro and detected state");
+    lv_obj_set_width(subtitle, 430);
+    lv_label_set_long_mode(subtitle, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0xb8c7bd), LV_PART_MAIN);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 42, 62);
+
+    s_motion_status_label = lv_label_create(s_motion_page);
+    lv_label_set_text(s_motion_status_label, "MPU: waiting");
+    lv_obj_set_width(s_motion_status_label, 260);
+    lv_label_set_long_mode(s_motion_status_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(s_motion_status_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_motion_status_label, lv_color_hex(0xffe46e), LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_motion_status_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    lv_obj_align(s_motion_status_label, LV_ALIGN_TOP_RIGHT, -40, 56);
+
+    make_motion_debug_panel(s_motion_page, 40, 100, 216, 96, "ROLL", lv_color_hex(0x86dfff),
+                            &s_motion_roll_label);
+    make_motion_debug_panel(s_motion_page, 292, 100, 216, 96, "PITCH", lv_color_hex(0xc9ee76),
+                            &s_motion_pitch_label);
+    make_motion_debug_panel(s_motion_page, 544, 100, 216, 96, "STATE", lv_color_hex(0xff9baa),
+                            &s_motion_state_label);
+    make_motion_debug_panel(s_motion_page, 40, 220, 720, 52, "ACCEL G",
+                            lv_color_hex(0x86dfff), &s_motion_accel_label);
+    make_motion_debug_panel(s_motion_page, 40, 284, 720, 52, "GYRO DPS",
+                            lv_color_hex(0xc9ee76), &s_motion_gyro_label);
+    make_motion_debug_panel(s_motion_page, 40, 348, 720, 52, "MAGNITUDE",
+                            lv_color_hex(0xffe46e), &s_motion_mag_label);
+    make_motion_debug_panel(s_motion_page, 40, 412, 348, 48, "LAST EVENT",
+                            lv_color_hex(0xff9baa), &s_motion_event_label);
+    make_motion_debug_panel(s_motion_page, 412, 412, 348, 48, "REACTION",
+                            lv_color_hex(0x86dfff), &s_motion_reaction_label);
+
+    lv_label_set_text(s_motion_event_label, "none");
+    lv_label_set_text(s_motion_reaction_label, "none");
+}
+
 static lv_obj_t *make_line(lv_obj_t *parent, lv_point_precise_t *points, uint32_t point_count,
                            lv_color_t color, int32_t width)
 {
@@ -1611,6 +1717,82 @@ void app_ui_clear_motion_reaction(void)
     bsp_display_unlock();
 }
 
+void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state)
+{
+    if (state == NULL) {
+        return;
+    }
+    if (bsp_display_lock(20) != ESP_OK) {
+        return;
+    }
+
+    if (s_motion_status_label == NULL) {
+        bsp_display_unlock();
+        return;
+    }
+
+    char text[96];
+    if (!state->valid) {
+        lv_label_set_text(s_motion_status_label, "MPU: waiting");
+        if (s_motion_roll_label != NULL) lv_label_set_text(s_motion_roll_label, "-- deg");
+        if (s_motion_pitch_label != NULL) lv_label_set_text(s_motion_pitch_label, "-- deg");
+        if (s_motion_accel_label != NULL) lv_label_set_text(s_motion_accel_label, "X --  Y --  Z --");
+        if (s_motion_gyro_label != NULL) lv_label_set_text(s_motion_gyro_label, "X --  Y --  Z --");
+        if (s_motion_mag_label != NULL) lv_label_set_text(s_motion_mag_label, "|A| --  |G| --");
+        if (s_motion_state_label != NULL) lv_label_set_text(s_motion_state_label, "no sample");
+        bsp_display_unlock();
+        return;
+    }
+
+    lv_label_set_text(s_motion_status_label, "MPU: live");
+    if (s_motion_roll_label != NULL) {
+        snprintf(text, sizeof(text), "%+.1f deg", state->roll_deg);
+        lv_label_set_text(s_motion_roll_label, text);
+    }
+    if (s_motion_pitch_label != NULL) {
+        snprintf(text, sizeof(text), "%+.1f deg", state->pitch_deg);
+        lv_label_set_text(s_motion_pitch_label, text);
+    }
+    if (s_motion_accel_label != NULL) {
+        snprintf(text, sizeof(text), "X %+.2f   Y %+.2f   Z %+.2f",
+                 state->accel_x_g, state->accel_y_g, state->accel_z_g);
+        lv_label_set_text(s_motion_accel_label, text);
+    }
+    if (s_motion_gyro_label != NULL) {
+        snprintf(text, sizeof(text), "X %+.1f   Y %+.1f   Z %+.1f",
+                 state->gyro_x_dps, state->gyro_y_dps, state->gyro_z_dps);
+        lv_label_set_text(s_motion_gyro_label, text);
+    }
+    if (s_motion_mag_label != NULL) {
+        snprintf(text, sizeof(text), "|A| %.2fg   |G| %.1fdps",
+                 state->accel_mag_g, state->gyro_mag_dps);
+        lv_label_set_text(s_motion_mag_label, text);
+    }
+    if (s_motion_state_label != NULL) {
+        snprintf(text, sizeof(text), "%s  tilt %u",
+                 state->moving ? "moving" : "stable", (unsigned int)state->tilt_level);
+        lv_label_set_text(s_motion_state_label, text);
+    }
+
+    bsp_display_unlock();
+}
+
+void app_ui_set_motion_debug_event(const char *event, const char *reaction)
+{
+    if (bsp_display_lock(50) != ESP_OK) {
+        return;
+    }
+
+    if (s_motion_event_label != NULL) {
+        lv_label_set_text(s_motion_event_label, event != NULL ? event : "none");
+    }
+    if (s_motion_reaction_label != NULL) {
+        lv_label_set_text(s_motion_reaction_label, reaction != NULL ? reaction : "none");
+    }
+
+    bsp_display_unlock();
+}
+
 static void set_page_visible(lv_obj_t *page, bool visible)
 {
     if (page == NULL) {
@@ -1630,11 +1812,14 @@ static void switch_page(void)
     }
 
     if (s_current_page == UI_PAGE_FACE) {
+        s_current_page = UI_PAGE_MOTION;
+    } else if (s_current_page == UI_PAGE_MOTION) {
         s_current_page = UI_PAGE_SCHEDULE;
     } else {
         s_current_page = UI_PAGE_FACE;
     }
     set_page_visible(s_face_page, s_current_page == UI_PAGE_FACE);
+    set_page_visible(s_motion_page, s_current_page == UI_PAGE_MOTION);
     set_page_visible(s_schedule_page, s_current_page == UI_PAGE_SCHEDULE);
     set_page_visible(s_pomodoro_page, false);
 }
@@ -1692,6 +1877,7 @@ bool app_ui_start_pomodoro(void)
     s_pomodoro_phase = POMODORO_FOCUS;
     s_current_page = UI_PAGE_POMODORO;
     set_page_visible(s_face_page, false);
+    set_page_visible(s_motion_page, false);
     set_page_visible(s_schedule_page, false);
     set_page_visible(s_pomodoro_page, true);
     update_pomodoro_page();
@@ -1709,6 +1895,7 @@ static void stop_pomodoro_unlocked(void)
     s_pomodoro_remaining_sec = 0;
     s_current_page = UI_PAGE_FACE;
     set_page_visible(s_pomodoro_page, false);
+    set_page_visible(s_motion_page, false);
     set_page_visible(s_schedule_page, false);
     set_page_visible(s_face_page, true);
     update_home_time();
@@ -1733,6 +1920,7 @@ void app_ui_show_schedule_page(void)
 
     s_current_page = UI_PAGE_SCHEDULE;
     set_page_visible(s_face_page, false);
+    set_page_visible(s_motion_page, false);
     set_page_visible(s_schedule_page, true);
     set_page_visible(s_pomodoro_page, false);
     update_schedule_page();
@@ -1781,6 +1969,7 @@ void app_ui_add_schedule(const char *item, const char *deadline)
 
     s_current_page = UI_PAGE_SCHEDULE;
     set_page_visible(s_face_page, false);
+    set_page_visible(s_motion_page, false);
     set_page_visible(s_schedule_page, true);
     set_page_visible(s_pomodoro_page, false);
     update_schedule_page();
@@ -1936,6 +2125,8 @@ void app_ui_init(void)
     s_dialog_label = lv_label_create(s_face_page);
     lv_label_set_text(s_dialog_label, "");
     lv_obj_add_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
+
+    make_motion_debug_page(screen);
 
     s_schedule_page = lv_obj_create(screen);
     s_schedule_font = lv_tiny_ttf_create_data_ex(
