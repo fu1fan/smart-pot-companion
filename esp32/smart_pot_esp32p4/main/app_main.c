@@ -162,24 +162,36 @@ typedef struct {
 static const touch_feedback_t *select_touch_feedback(app_mood_t mood)
 {
     static const touch_feedback_t happy[] = {
-        { "哎哟，痒痒的。", APP_TTS_TONE_CHEERFUL },
-        { "嘿嘿，被你碰到啦。", APP_TTS_TONE_CHEERFUL },
-        { "小麦收到摸摸啦。", APP_TTS_TONE_CHEERFUL },
+        { "哎哟，痒痒。", APP_TTS_TONE_CHEERFUL },
+        { "哎哟，嘿嘿。", APP_TTS_TONE_CHEERFUL },
+        { "哎哟，来啦。", APP_TTS_TONE_CHEERFUL },
+        { "嗨，摸到啦。", APP_TTS_TONE_CHEERFUL },
+        { "嗨，轻轻的。", APP_TTS_TONE_CHEERFUL },
+        { "嗨，在呢。", APP_TTS_TONE_CHEERFUL },
     };
     static const touch_feedback_t thirsty[] = {
-        { "哎哟，我有点渴啦。", APP_TTS_TONE_WORRIED },
-        { "轻一点嘛，我想喝点水。", APP_TTS_TONE_WORRIED },
-        { "摸摸收到，可以顺便看看水吗？", APP_TTS_TONE_WORRIED },
+        { "哎哟，轻点嘛。", APP_TTS_TONE_WORRIED },
+        { "哎哟，慢一点。", APP_TTS_TONE_WORRIED },
+        { "哎哟，小心点。", APP_TTS_TONE_WORRIED },
+        { "哎哟，别急嘛。", APP_TTS_TONE_WORRIED },
+        { "哎哟，嗯嗯。", APP_TTS_TONE_WORRIED },
+        { "哎哟，在呢。", APP_TTS_TONE_WORRIED },
     };
     static const touch_feedback_t dark[] = {
-        { "哎哟，有点困困的。", APP_TTS_TONE_SLEEPY },
-        { "我想晒晒光啦。", APP_TTS_TONE_SLEEPY },
-        { "黑乎乎的，小麦有点懵。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，轻轻的。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，慢慢来。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，嗯哼。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，小声点。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，别闹嘛。", APP_TTS_TONE_SLEEPY },
+        { "哎哟，在听。", APP_TTS_TONE_SLEEPY },
     };
     static const touch_feedback_t weak[] = {
-        { "哎哟，我现在有点虚弱。", APP_TTS_TONE_WORRIED },
-        { "轻一点嘛，我想要水和光。", APP_TTS_TONE_FLUSTERED },
-        { "小麦有点晕，帮我看看水和光。", APP_TTS_TONE_FLUSTERED },
+        { "哎哟，轻一点。", APP_TTS_TONE_WORRIED },
+        { "哎哟，别晃嘛。", APP_TTS_TONE_FLUSTERED },
+        { "哎哟，小心。", APP_TTS_TONE_FLUSTERED },
+        { "哎哟，慢一点。", APP_TTS_TONE_FLUSTERED },
+        { "哎哟，稳一点。", APP_TTS_TONE_WORRIED },
+        { "哎哟，别急。", APP_TTS_TONE_WORRIED },
     };
 
     const touch_feedback_t *options = happy;

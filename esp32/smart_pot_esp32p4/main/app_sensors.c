@@ -74,6 +74,22 @@
 #define CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT 35
 #endif
 
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS
+#define CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS 8000
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS
+#define CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS 30000
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS
+#define CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS 300000
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS
+#define CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS 10000
+#endif
+
 #ifndef CONFIG_SMART_POT_TTP223_ENABLE
 #define CONFIG_SMART_POT_TTP223_ENABLE 0
 #endif
@@ -190,6 +206,9 @@ typedef struct {
     gpio_num_t light_strip_gpio;
     bool light_strip_ready;
     bool light_strip_on;
+    int64_t light_strip_changed_us;
+    int64_t light_strip_low_since_us;
+    int64_t light_strip_high_since_us;
     bool last_touch_active;
     uint32_t touch_count;
     uint32_t last_soil_raw;
@@ -428,6 +447,16 @@ static int light_strip_level(bool on)
     return on == active_high ? 1 : 0;
 }
 
+static int64_t light_strip_ms_to_us(int ms)
+{
+    return ms > 0 ? (int64_t)ms * 1000LL : 0;
+}
+
+static bool light_strip_elapsed(int64_t since_us, int64_t now_us, int ms)
+{
+    return since_us > 0 && now_us - since_us >= light_strip_ms_to_us(ms);
+}
+
 static void set_light_strip(sensor_hw_t *hw, bool on, uint8_t light_percent, const char *reason)
 {
     if (hw == NULL || !hw->light_strip_ready) {
@@ -443,6 +472,7 @@ static void set_light_strip(sensor_hw_t *hw, bool on, uint8_t light_percent, con
         ESP_LOGI(TAG, "Light strip %s: light=%u%% reason=%s GPIO%d level=%d",
                  on ? "on" : "off", light_percent, reason != NULL ? reason : "",
                  hw->light_strip_gpio, light_strip_level(on));
+        hw->light_strip_changed_us = esp_timer_get_time();
     }
     hw->light_strip_on = on;
 }
@@ -463,10 +493,44 @@ static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool ligh
         off_threshold = on_threshold;
     }
 
-    if (!hw->light_strip_on && light_percent < on_threshold) {
+    int64_t now_us = esp_timer_get_time();
+    bool low_light = light_percent < on_threshold;
+    bool enough_light = light_percent >= off_threshold;
+
+    if (low_light) {
+        if (hw->light_strip_low_since_us == 0) {
+            hw->light_strip_low_since_us = now_us;
+        }
+    } else {
+        hw->light_strip_low_since_us = 0;
+    }
+
+    if (enough_light) {
+        if (hw->light_strip_high_since_us == 0) {
+            hw->light_strip_high_since_us = now_us;
+        }
+    } else {
+        hw->light_strip_high_since_us = 0;
+    }
+
+    if (!hw->light_strip_on &&
+        low_light &&
+        light_strip_elapsed(hw->light_strip_low_since_us, now_us,
+                            CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS) &&
+        light_strip_elapsed(hw->light_strip_changed_us, now_us,
+                            CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS)) {
         set_light_strip(hw, true, light_percent, "below required light");
-    } else if (hw->light_strip_on && light_percent >= off_threshold) {
+        hw->light_strip_low_since_us = 0;
+        hw->light_strip_high_since_us = 0;
+    } else if (hw->light_strip_on &&
+               enough_light &&
+               light_strip_elapsed(hw->light_strip_high_since_us, now_us,
+                                   CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS) &&
+               light_strip_elapsed(hw->light_strip_changed_us, now_us,
+                                   CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS)) {
         set_light_strip(hw, false, light_percent, "light enough");
+        hw->light_strip_low_since_us = 0;
+        hw->light_strip_high_since_us = 0;
     }
 }
 
@@ -654,16 +718,18 @@ static void init_light_strip(sensor_hw_t *hw)
     }
 
     hw->light_strip_gpio = (gpio_num_t)CONFIG_SMART_POT_LIGHT_STRIP_GPIO;
+    gpio_set_level(hw->light_strip_gpio, light_strip_level(false));
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << hw->light_strip_gpio,
         .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
+        .pull_down_en = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
     hw->light_strip_ready = true;
     set_light_strip(hw, false, 100, "startup default");
+    hw->light_strip_changed_us = esp_timer_get_time();
     ESP_LOGI(TAG, "Light strip breaker configured on GPIO%d active_%s on<%d%% off>=%d%%",
              hw->light_strip_gpio,
              CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? "high" : "low",
