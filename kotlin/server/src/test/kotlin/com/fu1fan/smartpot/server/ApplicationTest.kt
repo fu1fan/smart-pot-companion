@@ -60,17 +60,17 @@ class ApplicationTest {
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
 
         assertEquals(HttpStatusCode.OK, api.get("/health").status)
-        val response = api.get("/api/v1/species") { bearerAuth(config.demoToken) }
+        val response = api.get("/api/v1/species")
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals(50, response.body<List<PlantSpecies>>().size)
     }
 
     @Test
-    fun `duplicate bearer header still authenticates catalog`() = testApplication {
+    fun `duplicate bearer header still authenticates owner routes`() = testApplication {
         application { module(config, InMemorySmartPotStore(), startMqtt = false) }
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
 
-        val response = api.get("/api/v1/species") {
+        val response = api.get("/api/v1/pots") {
             headers {
                 append(HttpHeaders.Authorization, "Bearer ${config.demoToken}")
                 append(HttpHeaders.Authorization, "Bearer ${config.demoToken}")
@@ -78,7 +78,7 @@ class ApplicationTest {
         }
 
         assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(50, response.body<List<PlantSpecies>>().size)
+        assertEquals(0, response.body<List<PotProfile>>().size)
     }
 
     @Test

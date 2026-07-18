@@ -227,6 +227,8 @@ menu "Smart Pot"
                 Do not use GPIO37/GPIO38 because they are used by the console UART.
                 Runtime wiring is pinned in app_board_config.h so local sdkconfig
                 cannot accidentally override synced board GPIO assignments.
+                Light thresholds use lux and are synced from the plant profile;
+                app_board_config.h provides the fallback lux range and debounce time.
 
         config SMART_POT_LIGHT_STRIP_GPIO
             int "GPIO connected to light strip breaker"
@@ -237,57 +239,6 @@ menu "Smart Pot"
             bool "Light strip breaker is active high"
             default y
             depends on SMART_POT_LIGHT_STRIP_ENABLE
-
-        config SMART_POT_LIGHT_STRIP_ON_PERCENT
-            int "Turn light strip on below this light percent"
-            default 25
-            range 0 100
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-
-        config SMART_POT_LIGHT_STRIP_OFF_PERCENT
-            int "Turn light strip off at or above this light percent"
-            default 35
-            range 0 100
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-            help
-                Keep this higher than the on threshold to avoid rapid toggling
-                around the low-light boundary.
-
-        config SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS
-            int "Low-light duration before turning light strip on"
-            default 8000
-            range 0 600000
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-            help
-                The light level must stay below the on threshold for this long
-                before the strip is enabled.
-
-        config SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS
-            int "Enough-light duration before turning light strip off"
-            default 30000
-            range 0 3600000
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-            help
-                The light level must stay above the off threshold for this long
-                before the strip is disabled.
-
-        config SMART_POT_LIGHT_STRIP_MIN_ON_MS
-            int "Minimum light strip on time"
-            default 300000
-            range 0 7200000
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-            help
-                Keep the strip on for at least this long once enabled. This
-                avoids visible flashing when the strip light is seen by BH1750.
-
-        config SMART_POT_LIGHT_STRIP_MIN_OFF_MS
-            int "Minimum light strip off time"
-            default 10000
-            range 0 600000
-            depends on SMART_POT_LIGHT_STRIP_ENABLE
-            help
-                Keep the strip off briefly after disabling it to avoid relay or
-                breaker chatter around the threshold.
 
         config SMART_POT_MPU6050_ENABLE
             bool "Enable MPU-6050 posture sensor"

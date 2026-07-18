@@ -13,7 +13,9 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #include "app_time.h"
 #include "app_tts.h"
@@ -65,30 +67,6 @@
 
 #ifndef CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH
 #define CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH 1
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT
-#define CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT 25
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT
-#define CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT 35
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS
-#define CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS 8000
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS
-#define CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS 30000
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS
-#define CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS 300000
-#endif
-
-#ifndef CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS
-#define CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS 10000
 #endif
 
 #ifndef CONFIG_SMART_POT_TTP223_ENABLE
@@ -172,6 +150,20 @@ typedef struct {
     void *user_ctx;
 } sensor_task_ctx_t;
 
+typedef struct {
+    bool available;
+    bool on;
+    bool manual_mode;
+    bool manual_on;
+    bool off_period_enabled;
+    uint16_t off_start_minute;
+    uint16_t off_end_minute;
+    uint8_t soil_min_percent;
+    uint8_t soil_max_percent;
+    uint32_t light_min_lux;
+    uint32_t light_max_lux;
+} light_strip_control_t;
+
 typedef enum {
     ENV_ALERT_UNKNOWN = 0,
     ENV_ALERT_LOW_LOW,
@@ -190,6 +182,22 @@ typedef enum {
     SENSOR_LEVEL_NORMAL,
     SENSOR_LEVEL_HIGH,
 } sensor_level_t;
+
+static SemaphoreHandle_t s_light_ctrl_lock;
+static bool s_light_ctrl_loaded;
+static light_strip_control_t s_light_ctrl = {
+    .available = false,
+    .on = false,
+    .manual_mode = false,
+    .manual_on = false,
+    .off_period_enabled = APP_BOARD_LIGHT_STRIP_OFF_PERIOD_ENABLED,
+    .off_start_minute = APP_BOARD_LIGHT_STRIP_OFF_START_MINUTE,
+    .off_end_minute = APP_BOARD_LIGHT_STRIP_OFF_END_MINUTE,
+    .soil_min_percent = SOIL_LOW_PERCENT,
+    .soil_max_percent = SOIL_HIGH_PERCENT,
+    .light_min_lux = APP_BOARD_LIGHT_STRIP_DEFAULT_LIGHT_MIN_LUX,
+    .light_max_lux = APP_BOARD_LIGHT_STRIP_DEFAULT_LIGHT_MAX_LUX,
+};
 
 typedef struct {
     bool hardware_enabled;
@@ -460,10 +468,144 @@ static int64_t light_strip_ms_to_us(int ms)
 
 static bool light_strip_elapsed(int64_t since_us, int64_t now_us, int ms)
 {
-    return since_us > 0 && now_us - since_us >= light_strip_ms_to_us(ms);
+    return ms <= 0 || (since_us > 0 && now_us - since_us >= light_strip_ms_to_us(ms));
 }
 
-static void set_light_strip(sensor_hw_t *hw, bool on, uint8_t light_percent, const char *reason)
+#define LIGHT_CTRL_NVS_NAMESPACE "light_ctrl"
+
+static void light_ctrl_load_locked(void)
+{
+    if (s_light_ctrl_loaded) {
+        return;
+    }
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(LIGHT_CTRL_NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        uint8_t u8 = 0;
+        uint16_t u16 = 0;
+        uint32_t u32 = 0;
+        if (nvs_get_u8(nvs, "manual_mode", &u8) == ESP_OK) s_light_ctrl.manual_mode = u8 != 0;
+        if (nvs_get_u8(nvs, "manual_on", &u8) == ESP_OK) s_light_ctrl.manual_on = u8 != 0;
+        if (nvs_get_u8(nvs, "off_en", &u8) == ESP_OK) s_light_ctrl.off_period_enabled = u8 != 0;
+        if (nvs_get_u16(nvs, "off_start", &u16) == ESP_OK && u16 < 1440) s_light_ctrl.off_start_minute = u16;
+        if (nvs_get_u16(nvs, "off_end", &u16) == ESP_OK && u16 < 1440) s_light_ctrl.off_end_minute = u16;
+        if (nvs_get_u8(nvs, "soil_min", &u8) == ESP_OK && u8 <= 100) s_light_ctrl.soil_min_percent = u8;
+        if (nvs_get_u8(nvs, "soil_max", &u8) == ESP_OK && u8 <= 100) s_light_ctrl.soil_max_percent = u8;
+        if (nvs_get_u32(nvs, "light_min", &u32) == ESP_OK && u32 > 0) s_light_ctrl.light_min_lux = u32;
+        if (nvs_get_u32(nvs, "light_max", &u32) == ESP_OK && u32 > 0) s_light_ctrl.light_max_lux = u32;
+        nvs_close(nvs);
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Light strip settings load skipped: %s", esp_err_to_name(err));
+    }
+
+    if (s_light_ctrl.light_max_lux < s_light_ctrl.light_min_lux) {
+        s_light_ctrl.light_max_lux = s_light_ctrl.light_min_lux;
+    }
+    if (s_light_ctrl.soil_max_percent < s_light_ctrl.soil_min_percent) {
+        s_light_ctrl.soil_max_percent = s_light_ctrl.soil_min_percent;
+    }
+    s_light_ctrl_loaded = true;
+}
+
+static void light_ctrl_save_locked(void)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(LIGHT_CTRL_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Light strip settings save skipped: %s", esp_err_to_name(err));
+        return;
+    }
+
+    nvs_set_u8(nvs, "manual_mode", s_light_ctrl.manual_mode ? 1 : 0);
+    nvs_set_u8(nvs, "manual_on", s_light_ctrl.manual_on ? 1 : 0);
+    nvs_set_u8(nvs, "off_en", s_light_ctrl.off_period_enabled ? 1 : 0);
+    nvs_set_u16(nvs, "off_start", s_light_ctrl.off_start_minute);
+    nvs_set_u16(nvs, "off_end", s_light_ctrl.off_end_minute);
+    nvs_set_u8(nvs, "soil_min", s_light_ctrl.soil_min_percent);
+    nvs_set_u8(nvs, "soil_max", s_light_ctrl.soil_max_percent);
+    nvs_set_u32(nvs, "light_min", s_light_ctrl.light_min_lux);
+    nvs_set_u32(nvs, "light_max", s_light_ctrl.light_max_lux);
+    err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Light strip settings commit failed: %s", esp_err_to_name(err));
+    }
+}
+
+static void light_ctrl_ensure_loaded(void)
+{
+    if (s_light_ctrl_lock == NULL) {
+        s_light_ctrl_lock = xSemaphoreCreateMutex();
+    }
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        light_ctrl_load_locked();
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else if (!s_light_ctrl_loaded) {
+        light_ctrl_load_locked();
+    }
+}
+
+static light_strip_control_t light_ctrl_snapshot(void)
+{
+    light_ctrl_ensure_loaded();
+    light_strip_control_t snapshot = s_light_ctrl;
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        snapshot = s_light_ctrl;
+        xSemaphoreGive(s_light_ctrl_lock);
+    }
+    return snapshot;
+}
+
+static void light_ctrl_update_runtime(bool available, bool on)
+{
+    light_ctrl_ensure_loaded();
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_light_ctrl.available = available;
+        s_light_ctrl.on = on;
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else {
+        s_light_ctrl.available = available;
+        s_light_ctrl.on = on;
+    }
+}
+
+static bool minute_in_period(uint16_t now_minute, uint16_t start_minute, uint16_t end_minute)
+{
+    if (start_minute == end_minute) {
+        return false;
+    }
+    if (start_minute < end_minute) {
+        return now_minute >= start_minute && now_minute < end_minute;
+    }
+    return now_minute >= start_minute || now_minute < end_minute;
+}
+
+static bool light_strip_in_off_period(const light_strip_control_t *ctrl)
+{
+    if (ctrl == NULL || !ctrl->off_period_enabled) {
+        return false;
+    }
+
+    struct tm now = { 0 };
+    if (!app_time_get_local(&now)) {
+        return false;
+    }
+
+    uint16_t minute = (uint16_t)(now.tm_hour * 60 + now.tm_min);
+    return minute_in_period(minute, ctrl->off_start_minute, ctrl->off_end_minute);
+}
+
+static void light_ctrl_project_output_locked(void)
+{
+    if (light_strip_in_off_period(&s_light_ctrl)) {
+        s_light_ctrl.on = false;
+    } else if (s_light_ctrl.manual_mode) {
+        s_light_ctrl.on = s_light_ctrl.manual_on;
+    }
+}
+
+static void set_light_strip(sensor_hw_t *hw, bool on, uint32_t light_lux, const char *reason)
 {
     if (hw == NULL || !hw->light_strip_ready) {
         return;
@@ -475,33 +617,47 @@ static void set_light_strip(sensor_hw_t *hw, bool on, uint8_t light_percent, con
     }
 
     if (hw->light_strip_on != on) {
-        ESP_LOGI(TAG, "Light strip %s: light=%u%% reason=%s GPIO%d level=%d",
-                 on ? "on" : "off", light_percent, reason != NULL ? reason : "",
+        ESP_LOGI(TAG, "Light strip %s: light=%ulux reason=%s GPIO%d level=%d",
+                 on ? "on" : "off", (unsigned int)light_lux, reason != NULL ? reason : "",
                  hw->light_strip_gpio, light_strip_level(on));
         hw->light_strip_changed_us = esp_timer_get_time();
     }
     hw->light_strip_on = on;
+    light_ctrl_update_runtime(true, on);
 }
 
-static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool light_ok)
+static void update_light_strip(sensor_hw_t *hw, uint32_t light_lux, bool light_ok)
 {
     if (hw == NULL || !hw->light_strip_ready) {
         return;
     }
+
+    light_strip_control_t ctrl = light_ctrl_snapshot();
+    bool off_period = light_strip_in_off_period(&ctrl);
+
+    int64_t now_us = esp_timer_get_time();
+    if (off_period) {
+        set_light_strip(hw, false, light_lux, "quiet off period");
+        hw->light_strip_low_since_us = 0;
+        hw->light_strip_high_since_us = 0;
+        return;
+    }
+
+    if (ctrl.manual_mode) {
+        set_light_strip(hw, ctrl.manual_on, light_lux, "app manual mode");
+        hw->light_strip_low_since_us = 0;
+        hw->light_strip_high_since_us = 0;
+        return;
+    }
+
     if (!light_ok) {
         ESP_LOGW(TAG, "Light strip unchanged because BH1750 reading is unavailable");
         return;
     }
 
-    uint8_t on_threshold = clamp_percent(APP_BOARD_LIGHT_STRIP_ON_PERCENT);
-    uint8_t off_threshold = clamp_percent(APP_BOARD_LIGHT_STRIP_OFF_PERCENT);
-    if (off_threshold < on_threshold) {
-        off_threshold = on_threshold;
-    }
-
-    int64_t now_us = esp_timer_get_time();
-    bool low_light = light_percent < on_threshold;
-    bool enough_light = light_percent >= off_threshold;
+    uint32_t min_lux = ctrl.light_min_lux > 0 ? ctrl.light_min_lux : APP_BOARD_LIGHT_STRIP_DEFAULT_LIGHT_MIN_LUX;
+    bool low_light = light_lux < min_lux;
+    bool enough_light = light_lux >= min_lux;
 
     if (low_light) {
         if (hw->light_strip_low_since_us == 0) {
@@ -525,7 +681,7 @@ static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool ligh
                             APP_BOARD_LIGHT_STRIP_ON_CONFIRM_MS) &&
         light_strip_elapsed(hw->light_strip_changed_us, now_us,
                             APP_BOARD_LIGHT_STRIP_MIN_OFF_MS)) {
-        set_light_strip(hw, true, light_percent, "below required light");
+        set_light_strip(hw, true, light_lux, "below target lux");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
     } else if (hw->light_strip_on &&
@@ -534,7 +690,7 @@ static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool ligh
                                    APP_BOARD_LIGHT_STRIP_OFF_CONFIRM_MS) &&
                light_strip_elapsed(hw->light_strip_changed_us, now_us,
                                    APP_BOARD_LIGHT_STRIP_MIN_ON_MS)) {
-        set_light_strip(hw, false, light_percent, "light enough");
+        set_light_strip(hw, false, light_lux, "target lux reached");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
     }
@@ -718,13 +874,16 @@ static esp_err_t read_bh1750(sensor_hw_t *hw, uint32_t *lux)
 
 static void init_light_strip(sensor_hw_t *hw)
 {
+    light_ctrl_ensure_loaded();
     if (!APP_BOARD_LIGHT_STRIP_ENABLE ||
         !gpio_configured(APP_BOARD_LIGHT_STRIP_GPIO)) {
+        light_ctrl_update_runtime(false, false);
         return;
     }
     if (gpio_reserved_for_console(APP_BOARD_LIGHT_STRIP_GPIO)) {
         ESP_LOGE(TAG, "Light strip GPIO%d is reserved for console UART; light strip output disabled",
                  APP_BOARD_LIGHT_STRIP_GPIO);
+        light_ctrl_update_runtime(false, false);
         return;
     }
 
@@ -744,13 +903,16 @@ static void init_light_strip(sensor_hw_t *hw)
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
     hw->light_strip_ready = true;
-    set_light_strip(hw, false, 100, "startup default");
+    set_light_strip(hw, false, 0, "startup default");
     hw->light_strip_changed_us = esp_timer_get_time();
-    ESP_LOGI(TAG, "Light strip breaker configured on GPIO%d active_%s on<%d%% off>=%d%%",
+    light_strip_control_t ctrl = light_ctrl_snapshot();
+    ESP_LOGI(TAG, "Light strip breaker configured on GPIO%d active_%s target=%lu-%lulux confirm=%d/%dms",
              hw->light_strip_gpio,
              APP_BOARD_LIGHT_STRIP_ACTIVE_HIGH ? "high" : "low",
-             APP_BOARD_LIGHT_STRIP_ON_PERCENT,
-             APP_BOARD_LIGHT_STRIP_OFF_PERCENT);
+             (unsigned long)ctrl.light_min_lux,
+             (unsigned long)ctrl.light_max_lux,
+             APP_BOARD_LIGHT_STRIP_ON_CONFIRM_MS,
+             APP_BOARD_LIGHT_STRIP_OFF_CONFIRM_MS);
 }
 
 static void init_touch(sensor_hw_t *hw)
@@ -971,7 +1133,7 @@ static void sensor_task(void *arg)
             .soil_digital_dry = soil_ok ? soil_dry : false,
         };
         state.mood = calculate_mood(state.soil_percent, state.light_percent);
-        update_light_strip(&hw, state.light_percent, light_ok);
+        update_light_strip(&hw, state.light_lux, light_ok);
         update_environment_voice_reminder(&hw, state.soil_percent, state.light_percent,
                                           soil_ok, light_ok);
 
@@ -998,4 +1160,106 @@ void app_sensors_start(app_sensor_update_cb_t cb, void *user_ctx)
     ctx.user_ctx = user_ctx;
 
     xTaskCreate(sensor_task, "smart_pot_sensors", 4096, &ctx, 5, NULL);
+}
+
+void app_sensors_set_light_strip_manual_mode(bool enabled)
+{
+    light_ctrl_ensure_loaded();
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_light_ctrl.manual_mode = enabled;
+        light_ctrl_project_output_locked();
+        light_ctrl_save_locked();
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else {
+        s_light_ctrl.manual_mode = enabled;
+        light_ctrl_project_output_locked();
+    }
+    ESP_LOGI(TAG, "Light strip manual mode: %s", enabled ? "on" : "off");
+}
+
+void app_sensors_set_light_strip_manual_on(bool on)
+{
+    light_ctrl_ensure_loaded();
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_light_ctrl.manual_on = on;
+        light_ctrl_project_output_locked();
+        light_ctrl_save_locked();
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else {
+        s_light_ctrl.manual_on = on;
+        light_ctrl_project_output_locked();
+    }
+    ESP_LOGI(TAG, "Light strip manual output: %s", on ? "on" : "off");
+}
+
+bool app_sensors_set_light_strip_off_period(bool enabled, uint16_t start_minute, uint16_t end_minute)
+{
+    if (start_minute >= 1440 || end_minute >= 1440 || (enabled && start_minute == end_minute)) {
+        return false;
+    }
+
+    light_ctrl_ensure_loaded();
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_light_ctrl.off_period_enabled = enabled;
+        s_light_ctrl.off_start_minute = start_minute;
+        s_light_ctrl.off_end_minute = end_minute;
+        light_ctrl_project_output_locked();
+        light_ctrl_save_locked();
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else {
+        s_light_ctrl.off_period_enabled = enabled;
+        s_light_ctrl.off_start_minute = start_minute;
+        s_light_ctrl.off_end_minute = end_minute;
+        light_ctrl_project_output_locked();
+    }
+    ESP_LOGI(TAG, "Light strip quiet period: enabled=%d start=%u end=%u",
+             enabled, start_minute, end_minute);
+    return true;
+}
+
+bool app_sensors_set_plant_thresholds(uint8_t soil_min_percent, uint8_t soil_max_percent,
+                                      uint32_t light_min_lux, uint32_t light_max_lux)
+{
+    if (soil_min_percent > soil_max_percent || soil_max_percent > 100 ||
+        light_min_lux == 0 || light_min_lux > light_max_lux) {
+        return false;
+    }
+
+    light_ctrl_ensure_loaded();
+    if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        s_light_ctrl.soil_min_percent = soil_min_percent;
+        s_light_ctrl.soil_max_percent = soil_max_percent;
+        s_light_ctrl.light_min_lux = light_min_lux;
+        s_light_ctrl.light_max_lux = light_max_lux;
+        light_ctrl_save_locked();
+        xSemaphoreGive(s_light_ctrl_lock);
+    } else {
+        s_light_ctrl.soil_min_percent = soil_min_percent;
+        s_light_ctrl.soil_max_percent = soil_max_percent;
+        s_light_ctrl.light_min_lux = light_min_lux;
+        s_light_ctrl.light_max_lux = light_max_lux;
+    }
+    ESP_LOGI(TAG, "Plant thresholds synced: soil=%u-%u%% light=%lu-%lulux",
+             soil_min_percent, soil_max_percent,
+             (unsigned long)light_min_lux, (unsigned long)light_max_lux);
+    return true;
+}
+
+void app_sensors_get_light_strip_state(app_light_strip_state_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    light_strip_control_t ctrl = light_ctrl_snapshot();
+    out->available = ctrl.available;
+    out->on = ctrl.on;
+    out->manual_mode = ctrl.manual_mode;
+    out->manual_on = ctrl.manual_on;
+    out->off_period_enabled = ctrl.off_period_enabled;
+    out->off_start_minute = ctrl.off_start_minute;
+    out->off_end_minute = ctrl.off_end_minute;
+    out->soil_min_percent = ctrl.soil_min_percent;
+    out->soil_max_percent = ctrl.soil_max_percent;
+    out->light_min_lux = ctrl.light_min_lux;
+    out->light_max_lux = ctrl.light_max_lux;
 }

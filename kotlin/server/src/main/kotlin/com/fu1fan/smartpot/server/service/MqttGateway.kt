@@ -7,6 +7,7 @@ import com.fu1fan.smartpot.server.focusSessionFrom
 import com.fu1fan.smartpot.server.scheduleItemFrom
 import com.fu1fan.smartpot.server.scheduleRevision
 import com.fu1fan.smartpot.server.scheduleState
+import com.fu1fan.smartpot.server.syncProfile
 import com.fu1fan.smartpot.server.syncSchedule
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import com.hivemq.client.mqtt.MqttClient
@@ -101,6 +102,7 @@ class MqttGateway(
                 val reported = appJson.decodeFromString<DeviceReportedState>(payload)
                 require(reported.deviceId == deviceId)
                 store.saveReportedState(reported)
+                resyncProfileIfNeeded(pot, reported)
                 resyncScheduleIfNeeded(pot, reported.scheduleRevision, "reported")
                 potService.publishSnapshot(pot.id)
             }
@@ -130,11 +132,19 @@ class MqttGateway(
                 require(online.deviceId == deviceId)
                 store.setOnline(deviceId, online.online, online.changedAt)
                 if (online.online) {
+                    runCatching { commandService?.syncProfile(pot) }
+                        .onFailure { System.err.println("Profile MQTT resync on online skipped: ${it.message}") }
                     resyncScheduleIfNeeded(pot, null, "online")
                 }
                 realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(online)))
             }
         }
+    }
+
+    private suspend fun resyncProfileIfNeeded(pot: PotProfile, reported: DeviceReportedState) {
+        if (reported.thresholds == pot.species.thresholds) return
+        runCatching { commandService?.syncProfile(pot) }
+            .onFailure { System.err.println("Profile MQTT resync skipped: ${it.message}") }
     }
 
     private suspend fun resyncScheduleIfNeeded(pot: PotProfile, deviceRevision: Long?, reason: String) {

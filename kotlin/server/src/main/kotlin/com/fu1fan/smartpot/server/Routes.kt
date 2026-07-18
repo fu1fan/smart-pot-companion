@@ -46,6 +46,10 @@ fun Application.configureRoutes(services: ServerServices) {
             call.respond(ShareSession(services.shares.issue(redeemed.first, request.actorName.trim(), expires), redeemed.first, request.actorName.trim(), expires.toString()))
         }
 
+        route("/api/v1") {
+            get("/species") { call.respond(services.store.listSpecies()) }
+        }
+
         authenticate("access") {
             post("/v1/chat/completions") {
                 call.requireOwner(services)
@@ -55,7 +59,6 @@ fun Application.configureRoutes(services: ServerServices) {
                 }
             }
             route("/api/v1") {
-                get("/species") { call.respond(services.store.listSpecies()) }
                 get("/pots") {
                     val access = call.accessIdentity(services)
                     call.respond(services.store.listPots().filter { access.owner || access.allowedPotId == it.id })
@@ -183,10 +186,23 @@ fun Application.configureRoutes(services: ServerServices) {
 }
 
 private fun ApplicationCall.accessIdentity(services: ServerServices): AccessIdentity {
-    val token = request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")?.trim().orEmpty()
+    val token = firstBearerToken()
     return if (token == services.config.demoToken) AccessIdentity("主人", owner = true)
     else requireNotNull(services.shares.verify(token)) { "访问令牌无效或已过期" }
 }
+
+private fun ApplicationCall.firstBearerToken(): String =
+    request.headers.getAll(HttpHeaders.Authorization)
+        ?.asSequence()
+        ?.flatMap { it.split(',').asSequence() }
+        ?.map(String::trim)
+        ?.mapNotNull { value ->
+            val parts = value.split(Regex("\\s+"), limit = 2)
+            val token = parts.getOrNull(1)?.trim().orEmpty()
+            token.takeIf { parts.firstOrNull().equals("Bearer", ignoreCase = true) && it.isNotBlank() }
+        }
+        ?.firstOrNull()
+        .orEmpty()
 
 private fun ApplicationCall.requireOwner(services: ServerServices) {
     require(accessIdentity(services).owner) { "仅主人可以执行此操作" }

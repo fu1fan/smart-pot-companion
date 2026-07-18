@@ -45,6 +45,19 @@ data class DisplayContent(
 )
 
 @Serializable
+data class LightStripControlState(
+    val available: Boolean = false,
+    val on: Boolean = false,
+    val manualMode: Boolean = false,
+    val manualOn: Boolean = false,
+    val offPeriodEnabled: Boolean = false,
+    val offStartMinute: Int = 0,
+    val offEndMinute: Int = 0,
+    val lightMinLux: Int = 500,
+    val lightMaxLux: Int = 8_000,
+)
+
+@Serializable
 data class PlantThresholds(
     val soilMinPercent: Int,
     val soilMaxPercent: Int,
@@ -64,6 +77,7 @@ data class DeviceReportedState(
     val standby: Boolean,
     val content: DisplayContent = DisplayContent(),
     val thresholds: PlantThresholds? = null,
+    val lightStrip: LightStripControlState = LightStripControlState(),
     val scheduleRevision: Long = 0,
     val firmwareVersion: String,
 )
@@ -91,6 +105,7 @@ enum class DeviceCommandType {
     SYNC_PROFILE,
     SYNC_SCHEDULE,
     SPEAK_TEXT,
+    SET_LIGHT_STRIP_CONTROL,
 }
 
 @Serializable

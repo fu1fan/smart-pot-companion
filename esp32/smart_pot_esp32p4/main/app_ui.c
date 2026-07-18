@@ -2630,7 +2630,7 @@ void app_ui_update(const app_plant_state_t *state)
     snprintf(text, sizeof(text), "%u%%", state->soil_percent);
     lv_label_set_text(s_soil_label, text);
     lv_bar_set_value(s_soil_bar, state->soil_percent, LV_ANIM_ON);
-    snprintf(text, sizeof(text), "%u%%", state->light_percent);
+    snprintf(text, sizeof(text), "%lu lux", (unsigned long)state->light_lux);
     lv_label_set_text(s_light_label, text);
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
     lv_label_set_text(s_mood_label, mood_to_word(state->mood));

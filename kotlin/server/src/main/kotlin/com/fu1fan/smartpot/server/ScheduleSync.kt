@@ -84,6 +84,9 @@ internal suspend fun CommandService.syncSchedule(pot: PotProfile, items: List<Sc
         ),
     )
 
+internal suspend fun CommandService.syncProfile(pot: PotProfile) =
+    submit(pot, DeviceControlRequest(type = DeviceCommandType.SYNC_PROFILE))
+
 internal suspend fun syncScheduleToDevice(store: SmartPotStore, commands: CommandService, pot: PotProfile) {
     runCatching { commands.syncSchedule(pot, store.listScheduleItems(pot.id)) }
         .onFailure { System.err.println("Schedule sync skipped: ${it.message}") }

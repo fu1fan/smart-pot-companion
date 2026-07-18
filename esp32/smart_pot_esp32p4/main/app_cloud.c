@@ -15,6 +15,7 @@
 #include "esp_wifi.h"
 #include "app_tts.h"
 #include "app_ui.h"
+#include "app_sensors.h"
 
 #ifndef CONFIG_SMART_POT_CLOUD_ENABLE
 #define CONFIG_SMART_POT_CLOUD_ENABLE 0
@@ -92,6 +93,9 @@ static void publish_online(bool online)
 static void publish_reported(void)
 {
     char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
+    app_light_strip_state_t light_strip = { 0 };
+    app_sensors_get_light_strip_state(&light_strip);
+
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "schemaVersion", 1);
     cJSON_AddStringToObject(root, "deviceId", CONFIG_SMART_POT_DEVICE_ID);
@@ -100,6 +104,23 @@ static void publish_reported(void)
     cJSON_AddNumberToObject(root, "volumePercent", app_tts_get_volume());
     cJSON_AddBoolToObject(root, "standby", s_standby);
     cJSON_AddItemToObject(root, "content", cJSON_CreateObject());
+    cJSON *thresholds = cJSON_CreateObject();
+    cJSON_AddNumberToObject(thresholds, "soilMinPercent", light_strip.soil_min_percent);
+    cJSON_AddNumberToObject(thresholds, "soilMaxPercent", light_strip.soil_max_percent);
+    cJSON_AddNumberToObject(thresholds, "lightMinLux", light_strip.light_min_lux);
+    cJSON_AddNumberToObject(thresholds, "lightMaxLux", light_strip.light_max_lux);
+    cJSON_AddItemToObject(root, "thresholds", thresholds);
+    cJSON *strip_json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(strip_json, "available", light_strip.available);
+    cJSON_AddBoolToObject(strip_json, "on", light_strip.on);
+    cJSON_AddBoolToObject(strip_json, "manualMode", light_strip.manual_mode);
+    cJSON_AddBoolToObject(strip_json, "manualOn", light_strip.manual_on);
+    cJSON_AddBoolToObject(strip_json, "offPeriodEnabled", light_strip.off_period_enabled);
+    cJSON_AddNumberToObject(strip_json, "offStartMinute", light_strip.off_start_minute);
+    cJSON_AddNumberToObject(strip_json, "offEndMinute", light_strip.off_end_minute);
+    cJSON_AddNumberToObject(strip_json, "lightMinLux", light_strip.light_min_lux);
+    cJSON_AddNumberToObject(strip_json, "lightMaxLux", light_strip.light_max_lux);
+    cJSON_AddItemToObject(root, "lightStrip", strip_json);
     cJSON_AddNumberToObject(root, "scheduleRevision", (double)s_schedule_revision);
     cJSON_AddStringToObject(root, "firmwareVersion", "0.2.0");
     publish_json("reported", root, true);
@@ -231,6 +252,101 @@ static void sync_schedule_from_payload(cJSON *payload)
     app_ui_set_schedule_items(items, count);
 }
 
+static bool read_minute_value(cJSON *json, uint16_t *out)
+{
+    if (!cJSON_IsNumber(json) || json->valueint < 0 || json->valueint >= 1440) {
+        return false;
+    }
+    if (out != NULL) {
+        *out = (uint16_t)json->valueint;
+    }
+    return true;
+}
+
+static bool sync_profile_from_payload(cJSON *payload)
+{
+    cJSON *thresholds = cJSON_GetObjectItem(payload, "thresholds");
+    if (!cJSON_IsObject(thresholds)) {
+        return false;
+    }
+
+    cJSON *soil_min = cJSON_GetObjectItem(thresholds, "soilMinPercent");
+    cJSON *soil_max = cJSON_GetObjectItem(thresholds, "soilMaxPercent");
+    cJSON *light_min = cJSON_GetObjectItem(thresholds, "lightMinLux");
+    cJSON *light_max = cJSON_GetObjectItem(thresholds, "lightMaxLux");
+    if (!cJSON_IsNumber(soil_min) || !cJSON_IsNumber(soil_max) ||
+        !cJSON_IsNumber(light_min) || !cJSON_IsNumber(light_max)) {
+        return false;
+    }
+    if (soil_min->valueint < 0 || soil_min->valueint > 100 ||
+        soil_max->valueint < 0 || soil_max->valueint > 100 ||
+        soil_min->valueint > soil_max->valueint ||
+        light_min->valuedouble <= 0 || light_min->valuedouble > light_max->valuedouble) {
+        return false;
+    }
+
+    return app_sensors_set_plant_thresholds((uint8_t)soil_min->valueint,
+                                            (uint8_t)soil_max->valueint,
+                                            (uint32_t)light_min->valuedouble,
+                                            (uint32_t)light_max->valuedouble);
+}
+
+static bool set_light_strip_control_from_payload(cJSON *payload)
+{
+    bool has_update = false;
+    cJSON *manual_mode = cJSON_GetObjectItem(payload, "manualMode");
+    cJSON *manual_on = cJSON_GetObjectItem(payload, "on");
+    cJSON *off_period = cJSON_GetObjectItem(payload, "offPeriodEnabled");
+    cJSON *off_start = cJSON_GetObjectItem(payload, "offStartMinute");
+    cJSON *off_end = cJSON_GetObjectItem(payload, "offEndMinute");
+
+    if (manual_mode != NULL) {
+        if (!cJSON_IsBool(manual_mode)) {
+            return false;
+        }
+        app_sensors_set_light_strip_manual_mode(cJSON_IsTrue(manual_mode));
+        has_update = true;
+    }
+
+    if (manual_on != NULL) {
+        if (!cJSON_IsBool(manual_on)) {
+            return false;
+        }
+        app_sensors_set_light_strip_manual_on(cJSON_IsTrue(manual_on));
+        if (manual_mode == NULL) {
+            app_sensors_set_light_strip_manual_mode(true);
+        }
+        has_update = true;
+    }
+
+    if (off_period != NULL || off_start != NULL || off_end != NULL) {
+        app_light_strip_state_t current = { 0 };
+        app_sensors_get_light_strip_state(&current);
+        bool enabled = current.off_period_enabled;
+        uint16_t start_minute = current.off_start_minute;
+        uint16_t end_minute = current.off_end_minute;
+
+        if (off_period != NULL) {
+            if (!cJSON_IsBool(off_period)) {
+                return false;
+            }
+            enabled = cJSON_IsTrue(off_period);
+        }
+        if (off_start != NULL && !read_minute_value(off_start, &start_minute)) {
+            return false;
+        }
+        if (off_end != NULL && !read_minute_value(off_end, &end_minute)) {
+            return false;
+        }
+        if (!app_sensors_set_light_strip_off_period(enabled, start_minute, end_minute)) {
+            return false;
+        }
+        has_update = true;
+    }
+
+    return has_update;
+}
+
 static void handle_command(const char *json)
 {
     cJSON *root = cJSON_Parse(json);
@@ -282,7 +398,11 @@ static void handle_command(const char *json)
         return;
     } else if (strcmp(type->valuestring, "SYNC_SCHEDULE") == 0) {
         sync_schedule_from_payload(payload);
-    } else if (strcmp(type->valuestring, "SYNC_PROFILE") != 0) {
+    } else if (strcmp(type->valuestring, "SYNC_PROFILE") == 0) {
+        ok = sync_profile_from_payload(payload);
+    } else if (strcmp(type->valuestring, "SET_LIGHT_STRIP_CONTROL") == 0) {
+        ok = set_light_strip_control_from_payload(payload);
+    } else {
         ok = false;
     }
     publish_ack(id->valuestring, ok ? "COMPLETED" : "FAILED", ok ? NULL : "invalid payload");

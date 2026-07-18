@@ -117,11 +117,11 @@ private fun DashboardScreen(state: SmartPotUiState) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricCard("土壤湿度", snap?.telemetry?.soilPercent?.let { "$it%" } ?: "--", soilLabel(snap?.evaluated?.soilStatus), snap?.pot?.species?.thresholds?.let { "标准 ${it.soilMinPercent}-${it.soilMaxPercent}%" }.orEmpty(), Modifier.weight(1f))
-                MetricCard("环境光照", snap?.telemetry?.lightLux?.let { "$it lux" } ?: "--", lightLabel(snap?.evaluated?.lightStatus), snap?.pot?.species?.thresholds?.let { "标准 ${it.lightMinLux}-${it.lightMaxLux}" }.orEmpty(), Modifier.weight(1f))
+                MetricCard("环境光照", snap?.telemetry?.lightLux?.let { "$it lux" } ?: "--", lightLabel(snap?.evaluated?.lightStatus), snap?.pot?.species?.thresholds?.let { "标准 ${it.lightMinLux}-${it.lightMaxLux} lux" }.orEmpty(), Modifier.weight(1f))
             }
         }
         item { AdviceCard("位置与养护建议", listOfNotNull(snap?.evaluated?.soilAdvice, snap?.evaluated?.lightAdvice)) }
-        item { Text("最近趋势", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); TelemetryChart(state.telemetry) }
+        item { Text("最近趋势", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); TelemetryChart(state.telemetry, snap?.pot?.species?.thresholds) }
         item {
             val affinity = snap?.affinity ?: AffinityState()
             ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("好感度 · ${affinityLabel(affinity.level)}", fontWeight = FontWeight.Bold); Spacer(Modifier.height(8.dp)); LinearProgressIndicator(progress = { affinity.score / 100f }, modifier = Modifier.fillMaxWidth()); Text("${affinity.score}/100 · 浇水、互动与合适光照会让关系升温", fontSize = 12.sp, color = Color.Gray) } }
@@ -196,10 +196,15 @@ private fun AdviceCard(title: String, lines: List<String>, color: Color = SoftLe
 }
 
 @Composable
-private fun TelemetryChart(values: List<DeviceTelemetry>) {
+private fun TelemetryChart(values: List<DeviceTelemetry>, thresholds: PlantThresholds?) {
     val points = values.takeLast(60)
     Canvas(Modifier.fillMaxWidth().height(150.dp).background(Color.White, RoundedCornerShape(18.dp)).padding(12.dp)) {
         if (points.size < 2) return@Canvas
+        val maxLightLux = maxOf(
+            thresholds?.lightMaxLux ?: 10_000,
+            points.maxOfOrNull { it.lightLux }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0,
+            1,
+        ).toFloat()
         fun pathOf(get: (DeviceTelemetry) -> Float, max: Float): Path = Path().apply {
             points.forEachIndexed { index, item ->
                 val x = size.width * index / (points.size - 1)
@@ -208,7 +213,7 @@ private fun TelemetryChart(values: List<DeviceTelemetry>) {
             }
         }
         drawPath(pathOf({ it.soilPercent.toFloat() }, 100f), Leaf, style = androidx.compose.ui.graphics.drawscope.Stroke(4f))
-        drawPath(pathOf({ it.lightPercent.toFloat() }, 100f), Color(0xFFF5B642), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+        drawPath(pathOf({ it.lightLux.toFloat() }, maxLightLux), Color(0xFFF5B642), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
         drawCircle(Leaf, 5f, Offset(8f, 8f)); drawCircle(Color(0xFFF5B642), 5f, Offset(80f, 8f))
     }
 }
@@ -401,6 +406,15 @@ private fun ControlScreen(
     var volume by remember { mutableFloatStateOf((state.snapshot?.deviceState?.volumePercent ?: 60).toFloat()) }
     var share by remember { mutableStateOf("") }
     val schedules = state.schedule?.items.orEmpty()
+    val lightStrip = state.snapshot?.deviceState?.lightStrip
+    var manualMode by remember(lightStrip?.manualMode) { mutableStateOf(lightStrip?.manualMode ?: false) }
+    var manualOn by remember(lightStrip?.manualOn, lightStrip?.on) { mutableStateOf(lightStrip?.manualOn ?: lightStrip?.on ?: false) }
+    var offPeriodEnabled by remember(lightStrip?.offPeriodEnabled) { mutableStateOf(lightStrip?.offPeriodEnabled ?: false) }
+    var offStartText by remember(lightStrip?.offStartMinute) { mutableStateOf(minuteOfDayText(lightStrip?.offStartMinute ?: 23 * 60)) }
+    var offEndText by remember(lightStrip?.offEndMinute) { mutableStateOf(minuteOfDayText(lightStrip?.offEndMinute ?: 7 * 60)) }
+    val offStartMinute = parseMinuteOfDay(offStartText)
+    val offEndMinute = parseMinuteOfDay(offEndText)
+    val offPeriodValid = offStartMinute != null && offEndMinute != null && offStartMinute != offEndMinute
 
     LazyColumn(
         Modifier.fillMaxSize().padding(16.dp),
@@ -439,6 +453,87 @@ private fun ControlScreen(
         } else {
             items(schedules, key = { it.id }) { item ->
                 ScheduleRow(item, onCheckedChange = { checked -> toggleSchedule(item, checked) })
+            }
+        }
+        item {
+            ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("植物补光", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"} · 标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (manualMode) {
+                            Button(
+                                onClick = {
+                                    manualMode = false
+                                    control(DeviceControlRequest(DeviceCommandType.SET_LIGHT_STRIP_CONTROL, lightStripManualMode = false))
+                                },
+                            ) { Text("退出手动开关灯模式") }
+                        } else {
+                            Button(
+                                onClick = {
+                                    manualMode = true
+                                    control(DeviceControlRequest(DeviceCommandType.SET_LIGHT_STRIP_CONTROL, lightStripManualMode = true, lightStripOn = manualOn))
+                                },
+                            ) { Text("进入手动开关灯模式") }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("手动开关灯")
+                            Text("仅在 APP 手动控制时生效", color = Color.Gray, fontSize = 12.sp)
+                        }
+                        Switch(
+                            checked = manualOn,
+                            onCheckedChange = { checked ->
+                                manualOn = checked
+                                control(DeviceControlRequest(DeviceCommandType.SET_LIGHT_STRIP_CONTROL, lightStripManualMode = true, lightStripOn = checked))
+                            },
+                            enabled = manualMode,
+                        )
+                    }
+                    HorizontalDivider()
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("一直灭灯时间段")
+                            Text("进入这段时间后，ESP 和 APP 手动开灯都会被禁止", color = Color.Gray, fontSize = 12.sp)
+                        }
+                        Switch(checked = offPeriodEnabled, onCheckedChange = { offPeriodEnabled = it })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            offStartText,
+                            { offStartText = it.take(5) },
+                            label = { Text("开始 HH:mm") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            offEndText,
+                            { offEndText = it.take(5) },
+                            label = { Text("结束 HH:mm") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            control(
+                                DeviceControlRequest(
+                                    DeviceCommandType.SET_LIGHT_STRIP_CONTROL,
+                                    lightStripOffPeriodEnabled = offPeriodEnabled,
+                                    lightStripOffStartMinute = offStartMinute,
+                                    lightStripOffEndMinute = offEndMinute,
+                                ),
+                            )
+                        },
+                        enabled = !offPeriodEnabled || offPeriodValid,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("保存灭灯时间段") }
+                }
             }
         }
         item {
@@ -524,6 +619,15 @@ private fun CompanionScreen(state: SmartPotUiState, send: (String) -> Unit, reme
 
 private fun soilLabel(value: SoilStatus?) = when (value) { SoilStatus.TOO_DRY -> "缺水"; SoilStatus.SUITABLE -> "适宜"; SoilStatus.TOO_WET -> "积水风险"; else -> "等待数据" }
 private fun lightLabel(value: LightStatus?) = when (value) { LightStatus.DARK -> "阴暗"; LightStatus.DIFFUSE -> "散射光"; LightStatus.TOO_STRONG -> "强光"; else -> "等待数据" }
+private fun minuteOfDayText(value: Int): String = "%02d:%02d".format((value / 60).coerceIn(0, 23), (value % 60).coerceIn(0, 59))
+private fun parseMinuteOfDay(value: String): Int? {
+    val parts = value.trim().split(":")
+    if (parts.size != 2) return null
+    val hour = parts[0].toIntOrNull() ?: return null
+    val minute = parts[1].toIntOrNull() ?: return null
+    if (hour !in 0..23 || minute !in 0..59) return null
+    return hour * 60 + minute
+}
 private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.NEW_LEAF -> "新叶"; CareType.OTHER -> "其他" }
 private fun careEmoji(value: CareType) = when (value) { CareType.WATER -> "💧"; CareType.FERTILIZE -> "🌿"; CareType.PRUNE -> "✂"; CareType.REPOT -> "🪴"; CareType.NEW_LEAF -> "🌱"; CareType.OTHER -> "✓" }
 private fun affinityLabel(value: AffinityLevel) = when (value) { AffinityLevel.STRANGER -> "初次见面"; AffinityLevel.FAMILIAR -> "渐渐熟悉"; AffinityLevel.CLOSE -> "亲密伙伴"; AffinityLevel.TRUSTED -> "彼此信赖"; AffinityLevel.BEST_FRIEND -> "最佳朋友" }
