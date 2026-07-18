@@ -4,6 +4,8 @@ import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.AppConfig
 import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.focusSessionFrom
+import com.fu1fan.smartpot.server.mergeDeviceScheduleItems
+import com.fu1fan.smartpot.server.potGrowthDays
 import com.fu1fan.smartpot.server.scheduleItemFrom
 import com.fu1fan.smartpot.server.scheduleRevision
 import com.fu1fan.smartpot.server.scheduleState
@@ -103,7 +105,14 @@ class MqttGateway(
                 require(reported.deviceId == deviceId)
                 store.saveReportedState(reported)
                 resyncProfileIfNeeded(pot, reported)
-                resyncScheduleIfNeeded(pot, reported.scheduleRevision, "reported")
+                val scheduleChanged = mergeDeviceScheduleItems(
+                    store,
+                    pot,
+                    reported.scheduleItems,
+                    runCatching { Instant.parse(reported.reportedAt) }.getOrDefault(Instant.now()),
+                )
+                if (scheduleChanged) publishScheduleUpdate(pot)
+                else resyncScheduleIfNeeded(pot, reported.scheduleRevision, "reported")
                 potService.publishSnapshot(pot.id)
             }
             "acks" -> commandService?.acceptAck(pot.id, appJson.decodeFromString(payload))
@@ -142,7 +151,7 @@ class MqttGateway(
     }
 
     private suspend fun resyncProfileIfNeeded(pot: PotProfile, reported: DeviceReportedState) {
-        if (reported.thresholds == pot.species.thresholds) return
+        if (reported.thresholds == pot.species.thresholds && reported.growthDays == potGrowthDays(pot)) return
         runCatching { commandService?.syncProfile(pot) }
             .onFailure { System.err.println("Profile MQTT resync skipped: ${it.message}") }
     }

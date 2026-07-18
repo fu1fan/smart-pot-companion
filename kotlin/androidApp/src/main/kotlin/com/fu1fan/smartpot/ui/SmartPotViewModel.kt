@@ -57,6 +57,13 @@ class SmartPotViewModel : ViewModel() {
         selectPot(pot.id)
     }
 
+    fun updateSpecies(speciesId: String) = withPot { id ->
+        api.updatePot(id, UpdatePotRequest(speciesId = speciesId))
+        val pots = api.pots()
+        mutableState.update { it.copy(pots = pots) }
+        refreshAll(id)
+    }
+
     fun selectPot(id: String) {
         mutableState.update { it.copy(selectedPotId = id, loading = true) }
         realtimeJob?.cancel()

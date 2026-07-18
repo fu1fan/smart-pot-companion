@@ -90,6 +90,7 @@ static lv_obj_t *s_motion_state_label;
 static lv_obj_t *s_motion_event_label;
 static lv_obj_t *s_motion_reaction_label;
 static lv_obj_t *s_schedule_empty_label;
+static lv_obj_t *s_memory_days_label;
 static lv_obj_t *s_schedule_item_labels[SCHEDULE_MAX_ITEMS];
 static lv_obj_t *s_schedule_deadline_labels[SCHEDULE_MAX_ITEMS];
 static lv_obj_t *s_cat_area;
@@ -138,6 +139,7 @@ static time_t s_schedule_due_ts[SCHEDULE_MAX_ITEMS];
 static bool s_schedule_completed[SCHEDULE_MAX_ITEMS];
 static bool s_schedule_reminded[SCHEDULE_MAX_ITEMS];
 static uint8_t s_schedule_count;
+static uint32_t s_growth_days = 1;
 static lv_font_t *s_schedule_font;
 static lv_font_t *s_schedule_time_font;
 static lv_font_t *s_schedule_title_font;
@@ -647,6 +649,17 @@ static void schedule_restart_cleanup_timer(void)
     }
     s_schedule_cleanup_timer = lv_timer_create(schedule_cleanup_timer_cb, 120000, NULL);
     lv_timer_set_repeat_count(s_schedule_cleanup_timer, 1);
+}
+
+static void update_growth_days_label(void)
+{
+    if (s_memory_days_label == NULL) {
+        return;
+    }
+
+    char text[24];
+    snprintf(text, sizeof(text), "%lu 天", (unsigned long)(s_growth_days > 0 ? s_growth_days : 1));
+    lv_label_set_text(s_memory_days_label, text);
 }
 
 static void update_schedule_page(void)
@@ -2091,9 +2104,43 @@ void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t
     bsp_display_unlock();
 }
 
+uint8_t app_ui_get_schedule_items(app_ui_schedule_sync_item_t *items, uint8_t max_count)
+{
+    if (items == NULL || max_count == 0) {
+        return 0;
+    }
+    if (bsp_display_lock(100) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for schedule report");
+        return 0;
+    }
+
+    uint8_t count = s_schedule_count < max_count ? s_schedule_count : max_count;
+    for (uint8_t i = 0; i < count; i++) {
+        items[i].id = s_schedule_ids[i];
+        items[i].title = s_schedule_items[i];
+        items[i].display_time = s_schedule_deadlines[i];
+        items[i].due_ts = s_schedule_due_ts[i];
+        items[i].completed = s_schedule_completed[i];
+    }
+
+    bsp_display_unlock();
+    return count;
+}
+
 void app_ui_set_schedule_event_callback(app_ui_schedule_event_cb_t callback)
 {
     s_schedule_event_cb = callback;
+}
+
+void app_ui_set_growth_days(uint32_t days)
+{
+    s_growth_days = days > 0 ? days : 1;
+    if (bsp_display_lock(100) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for growth days");
+        return;
+    }
+    update_growth_days_label();
+    bsp_display_unlock();
 }
 
 static void pomodoro_exit_event_cb(lv_event_t *event)
@@ -2412,7 +2459,7 @@ void app_ui_init(void)
     lv_obj_set_style_text_color(meet_label, lv_color_hex(0xffffff), LV_PART_MAIN);
     lv_obj_align(meet_label, LV_ALIGN_TOP_MID, 0, 180);
     lv_obj_t *days_label = lv_label_create(memory_card);
-    lv_label_set_text(days_label, "XX 天");
+    lv_label_set_text(days_label, "1 天");
     lv_obj_set_style_text_font(days_label,
                                s_schedule_title_font != NULL ? s_schedule_title_font : &lv_font_montserrat_26,
                                LV_PART_MAIN);
@@ -2446,15 +2493,16 @@ void app_ui_init(void)
     lv_obj_set_style_text_align(memory_text, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_align(memory_text, LV_ALIGN_TOP_LEFT, 28, 286);
 
-    lv_obj_t *memory_days = lv_label_create(s_schedule_page);
-    lv_label_set_text(memory_days, "XX 天");
-    lv_obj_set_width(memory_days, 244);
-    lv_obj_set_style_text_font(memory_days,
+    s_memory_days_label = lv_label_create(s_schedule_page);
+    lv_label_set_text(s_memory_days_label, "1 天");
+    lv_obj_set_width(s_memory_days_label, 244);
+    lv_obj_set_style_text_font(s_memory_days_label,
                                s_schedule_title_font != NULL ? s_schedule_title_font : &lv_font_montserrat_26,
                                LV_PART_MAIN);
-    lv_obj_set_style_text_color(memory_days, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_set_style_text_align(memory_days, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_align(memory_days, LV_ALIGN_TOP_LEFT, 28, 326);
+    lv_obj_set_style_text_color(s_memory_days_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_memory_days_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(s_memory_days_label, LV_ALIGN_TOP_LEFT, 28, 326);
+    update_growth_days_label();
 
     lv_obj_t *schedule_panel = lv_obj_create(s_schedule_page);
     lv_obj_set_size(schedule_panel, 476, 318);

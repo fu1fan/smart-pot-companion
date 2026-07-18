@@ -63,4 +63,6 @@ void app_ui_stop_pomodoro(void);
 void app_ui_show_schedule_page(void);
 void app_ui_add_schedule(const char *item, const char *deadline);
 void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t count);
+uint8_t app_ui_get_schedule_items(app_ui_schedule_sync_item_t *items, uint8_t max_count);
 void app_ui_set_schedule_event_callback(app_ui_schedule_event_cb_t callback);
+void app_ui_set_growth_days(uint32_t days);

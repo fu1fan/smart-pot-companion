@@ -8,6 +8,7 @@ import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
 import com.fu1fan.smartpot.protocol.CreateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.DailyFocusSummary
+import com.fu1fan.smartpot.protocol.DeviceScheduleItem
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
@@ -17,6 +18,7 @@ import com.fu1fan.smartpot.protocol.ShareCode
 import com.fu1fan.smartpot.protocol.ShareSession
 import com.fu1fan.smartpot.protocol.UpdatePotRequest
 import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
+import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -32,9 +34,11 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.time.Instant
 
 class ApplicationTest {
     private val config = AppConfig(
@@ -194,5 +198,35 @@ class ApplicationTest {
 
         val overview = api.get("/api/v1/pots/${pot.id}/care-overview") { bearerAuth(config.demoToken) }.body<CareDayOverview>()
         assertEquals(100, overview.focus.scheduleCompletionPercent)
+    }
+
+    @Test
+    fun `device reported schedule items merge into shared schedule`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.seedSpecies(SpeciesCatalog.all)
+        val species = requireNotNull(store.findSpecies("pothos"))
+        val pot = store.savePot(
+            PotProfile(
+                id = "11111111-1111-1111-1111-111111111111",
+                deviceId = "esp32-reported-schedule",
+                displayName = "小麦",
+                species = species,
+                createdAt = "2026-07-16T00:00:00Z",
+            ),
+        )
+
+        val changed = mergeDeviceScheduleItems(
+            store,
+            pot,
+            listOf(DeviceScheduleItem(title = "晒太阳", displayTime = "今天下午", completed = false)),
+            Instant.parse("2026-07-18T10:00:00Z"),
+        )
+
+        assertTrue(changed)
+        val items = store.listScheduleItems(pot.id)
+        assertEquals(1, items.size)
+        assertEquals("晒太阳", items.first().title)
+        assertEquals("ESP", items.first().source)
+        assertEquals(3, potGrowthDays(pot, Instant.parse("2026-07-18T10:00:00Z")))
     }
 }

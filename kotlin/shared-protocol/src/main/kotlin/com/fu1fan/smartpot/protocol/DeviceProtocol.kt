@@ -58,6 +58,16 @@ data class LightStripControlState(
 )
 
 @Serializable
+data class DeviceScheduleItem(
+    val id: String = "",
+    val title: String,
+    val displayTime: String = "",
+    val dueAt: String? = null,
+    val dueAtEpochSeconds: Long? = null,
+    val completed: Boolean = false,
+)
+
+@Serializable
 data class PlantThresholds(
     val soilMinPercent: Int,
     val soilMaxPercent: Int,
@@ -75,10 +85,12 @@ data class DeviceReportedState(
     val brightnessPercent: Int,
     val volumePercent: Int,
     val standby: Boolean,
+    val growthDays: Int? = null,
     val content: DisplayContent = DisplayContent(),
     val thresholds: PlantThresholds? = null,
     val lightStrip: LightStripControlState = LightStripControlState(),
     val scheduleRevision: Long = 0,
+    val scheduleItems: List<DeviceScheduleItem> = emptyList(),
     val firmwareVersion: String,
 )
 

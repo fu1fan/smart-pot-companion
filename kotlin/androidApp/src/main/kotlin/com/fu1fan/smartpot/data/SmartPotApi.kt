@@ -39,6 +39,7 @@ class SmartPotApi(
     suspend fun species(): List<PlantSpecies> = getApi("/api/v1/species")
     suspend fun pots(): List<PotProfile> = getApi("/api/v1/pots")
     suspend fun createPot(request: CreatePotRequest): PotProfile = postApi("/api/v1/pots", request)
+    suspend fun updatePot(id: String, request: UpdatePotRequest): PotProfile = patchApi("/api/v1/pots/$id", request)
     suspend fun snapshot(id: String): PotSnapshot = getApi("/api/v1/pots/$id/snapshot")
     suspend fun telemetry(id: String): List<DeviceTelemetry> = getApi("/api/v1/pots/$id/telemetry?limit=240")
     suspend fun careLogs(id: String): List<CareLog> = getApi("/api/v1/pots/$id/care")

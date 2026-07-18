@@ -2,6 +2,7 @@ package com.fu1fan.smartpot.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -67,7 +68,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                 when {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
-                    tab == 0 -> DashboardScreen(state)
+                    tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
                     tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary, viewModel::toggleSchedule)
                     tab == 2 -> ControlScreen(state, viewModel::control, viewModel::addSchedule, viewModel::toggleSchedule, viewModel::createShare, viewModel::redeemShare)
                     else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory)
@@ -98,18 +99,81 @@ private fun SetupScreen(species: List<PlantSpecies>, create: (String, String, St
 }
 
 @Composable
-private fun DashboardScreen(state: SmartPotUiState) {
+private fun SpeciesPickerDialog(
+    species: List<PlantSpecies>,
+    currentSpeciesId: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        title = { Text("修改植物品种") },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(species, key = { it.id }) { plant ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(plant.id) }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(plant.chineseName, fontWeight = FontWeight.SemiBold)
+                            Text(plant.scientificName, fontSize = 12.sp, color = Color.Gray)
+                            Text(
+                                "湿度 ${plant.thresholds.soilMinPercent}-${plant.thresholds.soilMaxPercent}% · 光照 ${plant.thresholds.lightMinLux}-${plant.thresholds.lightMaxLux} lux",
+                                fontSize = 11.sp,
+                                color = Color.Gray,
+                            )
+                        }
+                        if (plant.id == currentSpeciesId) Text("当前", color = Leaf, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> Unit) {
     val snap = state.snapshot
     val metrics = dashboardMetrics(state)
+    var speciesDialog by rememberSaveable { mutableStateOf(false) }
+    val pot = snap?.pot
+    if (speciesDialog && pot != null) {
+        SpeciesPickerDialog(
+            species = state.species,
+            currentSpeciesId = pot.species.id,
+            onDismiss = { speciesDialog = false },
+            onSelect = { id ->
+                speciesDialog = false
+                updateSpecies(id)
+            },
+        )
+    }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clickable(enabled = pot != null && state.species.isNotEmpty()) { speciesDialog = true },
+                ) {
                     Text(snap?.pot?.species?.chineseName ?: "等待设备", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     Text(snap?.pot?.species?.scientificName.orEmpty(), color = Color.Gray)
                     Text("成长第 ${metrics.growthDays?.toString() ?: "--"} 天", color = Leaf, fontWeight = FontWeight.SemiBold)
                 }
-                AssistChip(onClick = {}, label = { Text(if (snap?.online == true) "● WiFi 在线" else "○ 设备离线") })
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(onClick = {}, label = { Text(if (snap?.online == true) "● WiFi 在线" else "○ 设备离线") })
+                    AssistChip(
+                        onClick = { speciesDialog = true },
+                        enabled = pot != null && state.species.isNotEmpty(),
+                        label = { Text("修改品种") },
+                    )
+                }
             }
         }
         item { PlantHealthCard(metrics) }
@@ -120,7 +184,7 @@ private fun DashboardScreen(state: SmartPotUiState) {
                 MetricCard("环境光照", snap?.telemetry?.lightLux?.let { "$it lux" } ?: "--", lightLabel(snap?.evaluated?.lightStatus), snap?.pot?.species?.thresholds?.let { "标准 ${it.lightMinLux}-${it.lightMaxLux} lux" }.orEmpty(), Modifier.weight(1f))
             }
         }
-        item { AdviceCard("位置与养护建议", listOfNotNull(snap?.evaluated?.soilAdvice, snap?.evaluated?.lightAdvice)) }
+        item { AdviceCard("位置与养护建议", listOfNotNull(snap?.evaluated?.soilAdvice, snap?.evaluated?.lightAdvice, snap?.pot?.species?.knowledge)) }
         item { Text("最近趋势", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); TelemetryChart(state.telemetry, snap?.pot?.species?.thresholds) }
         item {
             val affinity = snap?.affinity ?: AffinityState()
@@ -448,13 +512,7 @@ private fun ControlScreen(
                 ) { Text("添加") }
             }
         }
-        if (schedules.isEmpty()) {
-            item { Text("还没有同步日程", color = Color.Gray) }
-        } else {
-            items(schedules, key = { it.id }) { item ->
-                ScheduleRow(item, onCheckedChange = { checked -> toggleSchedule(item, checked) })
-            }
-        }
+        item { SharedScheduleTable(schedules, toggleSchedule) }
         item {
             ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -586,6 +644,51 @@ private fun ControlScreen(
             state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", fontWeight = FontWeight.Bold) }
             OutlinedTextField(share, { share = it }, label = { Text("输入分享码") })
             OutlinedButton(onClick = { redeem(share, "共享伙伴") }) { Text("加入盆栽") }
+        }
+    }
+}
+
+@Composable
+private fun SharedScheduleTable(
+    schedules: List<ScheduleItem>,
+    toggleSchedule: (ScheduleItem, Boolean) -> Unit,
+) {
+    val rows = schedules.sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("共同日程表", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("手机 · ESP", fontSize = 12.sp, color = Color.Gray)
+                }
+                Text("${rows.count { !it.completed }}/${rows.size}", color = Leaf, fontWeight = FontWeight.Bold)
+            }
+            if (rows.isEmpty()) {
+                Text("暂无共同日程", color = Color.Gray)
+            } else {
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("完成", modifier = Modifier.width(48.dp), fontSize = 12.sp, color = Color.Gray)
+                    Text("时间", modifier = Modifier.width(92.dp), fontSize = 12.sp, color = Color.Gray)
+                    Text("任务", modifier = Modifier.weight(1f), fontSize = 12.sp, color = Color.Gray)
+                    Text("来源", modifier = Modifier.width(62.dp), fontSize = 12.sp, color = Color.Gray)
+                }
+                HorizontalDivider()
+                rows.forEach { item ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = item.completed,
+                            onCheckedChange = { checked -> toggleSchedule(item, checked) },
+                            modifier = Modifier.width(48.dp),
+                        )
+                        Text(scheduleTimeText(item), modifier = Modifier.width(92.dp), fontSize = 12.sp, color = Color.Gray)
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, fontWeight = FontWeight.SemiBold)
+                            if (item.completed) Text("已完成", fontSize = 11.sp, color = Leaf)
+                        }
+                        Text(scheduleSourceLabel(item.source), modifier = Modifier.width(62.dp), fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            }
         }
     }
 }

@@ -74,7 +74,10 @@ fun Application.configureRoutes(services: ServerServices) {
                     }
                     patch {
                         val pot = call.requirePot(services, ownerOnly = true)
-                        call.respond(services.pots.update(pot.id, call.receive()))
+                        val updated = services.pots.update(pot.id, call.receive())
+                        runCatching { services.commands.syncProfile(updated) }
+                            .onFailure { System.err.println("Profile sync skipped after pot update: ${it.message}") }
+                        call.respond(updated)
                     }
                     get("/snapshot") {
                         val pot = call.requirePot(services)

@@ -2,6 +2,7 @@ package com.fu1fan.smartpot.server.service
 
 import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.appJson
+import com.fu1fan.smartpot.server.potGrowthDays
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -47,6 +48,10 @@ class CommandService(
                 }
                 if (request.type == DeviceCommandType.SYNC_PROFILE) {
                     put("thresholds", appJson.encodeToJsonElement(pot.species.thresholds))
+                    put("growthDays", potGrowthDays(pot))
+                    put("speciesId", pot.species.id)
+                    put("plantChineseName", pot.species.chineseName)
+                    put("plantScientificName", pot.species.scientificName)
                 }
                 if (request.type == DeviceCommandType.SYNC_SCHEDULE) {
                     request.scheduleRevision?.let { put("revision", it) }

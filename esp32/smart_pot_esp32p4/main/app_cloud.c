@@ -40,6 +40,7 @@ static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
 static int s_brightness = 100;
 static bool s_standby;
+static uint32_t s_growth_days = 1;
 static uint64_t s_schedule_revision;
 static char s_topic_prefix[128];
 static char s_lwt_topic[160];
@@ -95,6 +96,8 @@ static void publish_reported(void)
     char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
     app_light_strip_state_t light_strip = { 0 };
     app_sensors_get_light_strip_state(&light_strip);
+    app_ui_schedule_sync_item_t schedule_items[8] = { 0 };
+    uint8_t schedule_count = app_ui_get_schedule_items(schedule_items, 8);
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "schemaVersion", 1);
@@ -103,6 +106,7 @@ static void publish_reported(void)
     cJSON_AddNumberToObject(root, "brightnessPercent", s_brightness);
     cJSON_AddNumberToObject(root, "volumePercent", app_tts_get_volume());
     cJSON_AddBoolToObject(root, "standby", s_standby);
+    cJSON_AddNumberToObject(root, "growthDays", (double)(s_growth_days > 0 ? s_growth_days : 1));
     cJSON_AddItemToObject(root, "content", cJSON_CreateObject());
     cJSON *thresholds = cJSON_CreateObject();
     cJSON_AddNumberToObject(thresholds, "soilMinPercent", light_strip.soil_min_percent);
@@ -122,6 +126,19 @@ static void publish_reported(void)
     cJSON_AddNumberToObject(strip_json, "lightMaxLux", light_strip.light_max_lux);
     cJSON_AddItemToObject(root, "lightStrip", strip_json);
     cJSON_AddNumberToObject(root, "scheduleRevision", (double)s_schedule_revision);
+    cJSON *schedule_json = cJSON_CreateArray();
+    for (uint8_t i = 0; i < schedule_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "id", schedule_items[i].id != NULL ? schedule_items[i].id : "");
+        cJSON_AddStringToObject(item, "title", schedule_items[i].title != NULL ? schedule_items[i].title : "");
+        cJSON_AddStringToObject(item, "displayTime", schedule_items[i].display_time != NULL ? schedule_items[i].display_time : "");
+        if (schedule_items[i].due_ts > 0) {
+            cJSON_AddNumberToObject(item, "dueAtEpochSeconds", (double)schedule_items[i].due_ts);
+        }
+        cJSON_AddBoolToObject(item, "completed", schedule_items[i].completed);
+        cJSON_AddItemToArray(schedule_json, item);
+    }
+    cJSON_AddItemToObject(root, "scheduleItems", schedule_json);
     cJSON_AddStringToObject(root, "firmwareVersion", "0.2.0");
     publish_json("reported", root, true);
     cJSON_Delete(root);
@@ -169,6 +186,7 @@ static void publish_schedule_event(const char *event_type,
                                    time_t due_ts,
                                    bool completed)
 {
+    s_schedule_revision = (uint64_t)(esp_timer_get_time() / 1000ULL);
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "scheduleId", id != NULL ? id : "");
     cJSON_AddStringToObject(data, "title", title != NULL ? title : "");
@@ -178,6 +196,7 @@ static void publish_schedule_event(const char *event_type,
         cJSON_AddNumberToObject(data, "dueAtEpochSeconds", (double)due_ts);
     }
     publish_event_with_data(event_type, data);
+    publish_reported();
 }
 
 static time_t parse_iso_utc_time(const char *value)
@@ -285,10 +304,16 @@ static bool sync_profile_from_payload(cJSON *payload)
         return false;
     }
 
-    return app_sensors_set_plant_thresholds((uint8_t)soil_min->valueint,
-                                            (uint8_t)soil_max->valueint,
-                                            (uint32_t)light_min->valuedouble,
-                                            (uint32_t)light_max->valuedouble);
+    bool ok = app_sensors_set_plant_thresholds((uint8_t)soil_min->valueint,
+                                               (uint8_t)soil_max->valueint,
+                                               (uint32_t)light_min->valuedouble,
+                                               (uint32_t)light_max->valuedouble);
+    cJSON *growth_days = cJSON_GetObjectItem(payload, "growthDays");
+    if (ok && cJSON_IsNumber(growth_days) && growth_days->valueint > 0) {
+        s_growth_days = (uint32_t)growth_days->valueint;
+        app_ui_set_growth_days(s_growth_days);
+    }
+    return ok;
 }
 
 static bool set_light_strip_control_from_payload(cJSON *payload)
