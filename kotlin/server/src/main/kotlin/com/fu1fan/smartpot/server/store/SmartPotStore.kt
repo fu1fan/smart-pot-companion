@@ -52,6 +52,9 @@ interface SmartPotStore : AutoCloseable {
     suspend fun listFocusSessions(potId: String, since: String? = null): List<FocusSession>
     suspend fun saveFocusSession(session: FocusSession)
 
+    suspend fun listScheduleItems(potId: String): List<ScheduleItem>
+    suspend fun saveScheduleItem(item: ScheduleItem)
+
     suspend fun saveShareCode(code: ShareCode, potId: String)
     suspend fun redeemShareCode(code: String, actorName: String, now: String): Pair<String, ShareCode>?
 

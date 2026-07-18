@@ -69,7 +69,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state)
                     tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary)
-                    tab == 2 -> ControlScreen(state, viewModel::control, viewModel::createShare, viewModel::redeemShare)
+                    tab == 2 -> ControlScreen(state, viewModel::control, viewModel::addSchedule, viewModel::toggleSchedule, viewModel::createShare, viewModel::redeemShare)
                     else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory)
                 }
             }
@@ -351,19 +351,127 @@ private fun FocusTrendChart(values: List<DailyFocusSummary>) {
 }
 
 @Composable
-private fun ControlScreen(state: SmartPotUiState, control: (DeviceControlRequest) -> Unit, createShare: () -> Unit, redeem: (String, String) -> Unit) {
+private fun ControlScreen(
+    state: SmartPotUiState,
+    control: (DeviceControlRequest) -> Unit,
+    addSchedule: (String, String) -> Unit,
+    toggleSchedule: (ScheduleItem, Boolean) -> Unit,
+    createShare: () -> Unit,
+    redeem: (String, String) -> Unit,
+) {
     var text by remember { mutableStateOf("") }
+    var scheduleTitle by remember { mutableStateOf("") }
+    var scheduleTime by remember { mutableStateOf("") }
     var brightness by remember { mutableFloatStateOf((state.snapshot?.deviceState?.brightnessPercent ?: 70).toFloat()) }
     var volume by remember { mutableFloatStateOf((state.snapshot?.deviceState?.volumePercent ?: 60).toFloat()) }
     var share by remember { mutableStateOf("") }
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Text("远程屏幕", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); OutlinedTextField(text, { text = it.take(48) }, label = { Text("短句（最多 48 字符）") }, modifier = Modifier.fillMaxWidth()); Button(onClick = { control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, text = text, durationSeconds = 30)) }, modifier = Modifier.fillMaxWidth()) { Text("同步到 LED 屏") } }
-        item { Text("内置表情", fontWeight = FontWeight.Bold); listOf("heart" to "❤️", "smile" to "😊", "happy" to "😄", "thirsty" to "🥤", "dark" to "🌙", "weak" to "🥺", "wave" to "👋", "star" to "⭐", "flower" to "🌸", "water" to "💧", "sun" to "☀️", "sleep" to "💤").chunked(4).forEach { row -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { row.forEach { emoji -> OutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, emojiId = emoji.first, durationSeconds = 20)) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(emoji.second, fontSize = 20.sp) } } } } }
+    val schedules = state.schedule?.items.orEmpty()
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 12.dp),
+    ) {
+        item {
+            Text("日程同步", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                scheduleTitle,
+                { scheduleTitle = it.take(80) },
+                label = { Text("新增日程") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    scheduleTime,
+                    { scheduleTime = it.take(40) },
+                    label = { Text("提醒时间") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                )
+                Button(
+                    onClick = {
+                        addSchedule(scheduleTitle, scheduleTime)
+                        scheduleTitle = ""
+                        scheduleTime = ""
+                    },
+                    enabled = scheduleTitle.isNotBlank(),
+                ) { Text("添加") }
+            }
+        }
+        if (schedules.isEmpty()) {
+            item { Text("还没有同步日程", color = Color.Gray) }
+        } else {
+            items(schedules, key = { it.id }) { item ->
+                ScheduleRow(item, onCheckedChange = { checked -> toggleSchedule(item, checked) })
+            }
+        }
+        item {
+            HorizontalDivider()
+            Text("远程屏幕", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                text,
+                { text = it.take(96) },
+                label = { Text("短句（支持中文，最多 96 字符）") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = {
+                    control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, text = text, durationSeconds = 30))
+                    text = ""
+                },
+                enabled = text.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("同步到 ESP 屏幕") }
+        }
+        item {
+            Text("内置表情", fontWeight = FontWeight.Bold)
+            listOf("heart" to "❤️", "smile" to "😊", "happy" to "😄", "thirsty" to "🥤", "dark" to "🌙", "weak" to "🥺", "wave" to "👋", "star" to "⭐", "flower" to "🌸", "water" to "💧", "sun" to "☀️", "sleep" to "💤")
+                .chunked(4)
+                .forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { emoji ->
+                            OutlinedButton(
+                                onClick = { control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, emojiId = emoji.first, durationSeconds = 2)) },
+                                contentPadding = PaddingValues(horizontal = 10.dp),
+                            ) { Text(emoji.second, fontSize = 20.sp) }
+                        }
+                    }
+                }
+        }
         item { Text("屏幕亮度 ${brightness.toInt()}%"); Slider(value = brightness, onValueChange = { brightness = it }, valueRange = 0f..100f, onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_BRIGHTNESS, brightnessPercent = brightness.toInt())) }) }
         item { Text("回复音量 ${volume.toInt()}%"); Slider(value = volume, onValueChange = { volume = it }, valueRange = 0f..100f, onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_VOLUME, volumePercent = volume.toInt())) }) }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = { control(DeviceControlRequest(DeviceCommandType.REMOTE_TOUCH)) }) { Text("隔空触摸 ❤️") }; OutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SET_STANDBY, standby = true)) }) { Text("休眠屏幕") }; OutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.RESTART)) }) { Text("重启") } } }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { control(DeviceControlRequest(DeviceCommandType.REMOTE_TOUCH)) }) { Text("隔空触摸 ❤️") }
+                OutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SET_STANDBY, standby = true)) }) { Text("休眠屏幕") }
+                OutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.RESTART)) }) { Text("重启") }
+            }
+        }
         item { state.lastCommand?.let { Text(if (it.acknowledged) "设备已确认：${it.ack?.status}" else "命令已发送，设备暂未确认", color = if (it.acknowledged) Leaf else Color(0xFFA56A00)) } }
-        item { HorizontalDivider(); Text("双人共享", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Button(onClick = createShare) { Text("生成临时分享码") }; state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", fontWeight = FontWeight.Bold) }; OutlinedTextField(share, { share = it }, label = { Text("输入分享码") }); OutlinedButton(onClick = { redeem(share, "共享伙伴") }) { Text("加入盆栽") } }
+        item {
+            HorizontalDivider()
+            Text("双人共享", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Button(onClick = createShare) { Text("生成临时分享码") }
+            state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", fontWeight = FontWeight.Bold) }
+            OutlinedTextField(share, { share = it }, label = { Text("输入分享码") })
+            OutlinedButton(onClick = { redeem(share, "共享伙伴") }) { Text("加入盆栽") }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleRow(item: ScheduleItem, onCheckedChange: (Boolean) -> Unit) {
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = item.completed, onCheckedChange = onCheckedChange)
+            Column(Modifier.weight(1f)) {
+                Text(item.title, fontWeight = FontWeight.SemiBold)
+                val timeText = item.displayTime.ifBlank { item.dueAt?.take(16)?.replace('T', ' ') ?: "未设置提醒时间" }
+                Text("${if (item.source == "ESP") "ESP 语音" else "手机"} · $timeText", fontSize = 12.sp, color = Color.Gray)
+            }
+            if (item.completed) Text("已完成", color = Leaf, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 

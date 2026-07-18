@@ -32,6 +32,8 @@ class SmartPotApi(
     private suspend inline fun <reified T> getApi(path: String): T = client.get("$base$path") { authorize() }.body()
     private suspend inline fun <reified Request, reified Response> postApi(path: String, request: Request): Response =
         client.post("$base$path") { authorize(); contentType(ContentType.Application.Json); setBody(request) }.body()
+    private suspend inline fun <reified Request, reified Response> patchApi(path: String, request: Request): Response =
+        client.patch("$base$path") { authorize(); contentType(ContentType.Application.Json); setBody(request) }.body()
     private suspend inline fun <reified Response> postEmpty(path: String): Response = client.post("$base$path") { authorize() }.body()
 
     suspend fun species(): List<PlantSpecies> = getApi("/api/v1/species")
@@ -45,6 +47,10 @@ class SmartPotApi(
     suspend fun careOverview(id: String): CareDayOverview = getApi("/api/v1/pots/$id/care-overview")
     suspend fun focusDaily(id: String): List<DailyFocusSummary> = getApi("/api/v1/pots/$id/focus/daily?days=5")
     suspend fun addFocusSession(id: String): FocusSession = postApi("/api/v1/pots/$id/focus/sessions", CreateFocusSessionRequest(minutes = 25, source = "APP"))
+    suspend fun schedule(id: String): ScheduleSyncState = getApi("/api/v1/pots/$id/schedule")
+    suspend fun addSchedule(id: String, request: CreateScheduleItemRequest): ScheduleItem = postApi("/api/v1/pots/$id/schedule", request)
+    suspend fun updateSchedule(id: String, scheduleId: String, request: UpdateScheduleItemRequest): ScheduleItem =
+        patchApi("/api/v1/pots/$id/schedule/$scheduleId", request)
     suspend fun memories(id: String): List<UserMemory> = getApi("/api/v1/pots/$id/memories")
     suspend fun addMemory(id: String, text: String): UserMemory = postApi("/api/v1/pots/$id/memories", CreateMemoryRequest(text))
     suspend fun messages(id: String): List<ChatMessage> = getApi("/api/v1/pots/$id/chat")

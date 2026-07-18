@@ -32,10 +32,20 @@ class CommandService(
                 request.volumePercent?.let { put("volumePercent", it) }
                 request.standby?.let { put("standby", it) }
                 request.text?.trim()?.let { put("text", it) }
-                request.emojiId?.let { put("emojiId", it) }
-                request.durationSeconds?.let { put("durationSeconds", it) }
+                request.emojiId?.let {
+                    put("mode", "emoji")
+                    put("emojiId", it)
+                }
+                (request.durationSeconds ?: if (request.emojiId != null) 2 else null)?.let {
+                    put("durationSeconds", it)
+                    put("durationMs", it * 1000)
+                }
                 if (request.type == DeviceCommandType.SYNC_PROFILE) {
                     put("thresholds", appJson.encodeToJsonElement(pot.species.thresholds))
+                }
+                if (request.type == DeviceCommandType.SYNC_SCHEDULE) {
+                    request.scheduleRevision?.let { put("revision", it) }
+                    put("items", appJson.encodeToJsonElement(request.scheduleItems))
                 }
             },
         )
@@ -62,13 +72,17 @@ class CommandService(
         request.brightnessPercent?.let { require(it in 0..100) { "屏幕亮度必须为 0-100" } }
         request.volumePercent?.let { require(it in 0..100) { "音量必须为 0-100" } }
         request.durationSeconds?.let { require(it in 1..300) { "显示时长必须为 1-300 秒" } }
-        request.text?.let { require(it.length <= 48) { "屏幕文字不能超过 48 个字符" } }
+        request.text?.let {
+            require(it.length <= 96) { "屏幕文字不能超过 96 个字符" }
+            require(it.toByteArray(Charsets.UTF_8).size <= 384) { "屏幕文字过长" }
+        }
         request.emojiId?.let { require(it in EMOJI_IDS) { "不支持的表情" } }
         when (request.type) {
             DeviceCommandType.SET_BRIGHTNESS -> requireNotNull(request.brightnessPercent)
             DeviceCommandType.SET_VOLUME -> requireNotNull(request.volumePercent)
             DeviceCommandType.SET_STANDBY -> requireNotNull(request.standby)
             DeviceCommandType.SHOW_CONTENT -> require(!request.text.isNullOrBlank() || request.emojiId != null)
+            DeviceCommandType.SYNC_SCHEDULE -> require(request.scheduleItems.size <= 8) { "同步日程不能超过 8 条" }
             else -> Unit
         }
     }

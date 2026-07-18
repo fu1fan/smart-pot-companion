@@ -26,12 +26,14 @@ internal suspend fun focusSummaries(
     val firstDate = today.minusDays((days - 1).toLong())
     val since = firstDate.atStartOfDay(zone).toInstant().toString()
     val sessions = store.listFocusSessions(pot.id, since)
+    val scheduleItems = store.listScheduleItems(pot.id)
     return (0 until days).map { offset ->
         val date = firstDate.plusDays(offset.toLong())
         val daily = sessions.filter { it.completedAt.toLocalDate(zone) == date }
         val count = daily.sumOf { (it.minutes / PomodoroMinutes).coerceAtLeast(1) }
         val minutes = daily.sumOf { it.minutes }
-        val completion = ((count.toDouble() / DailyTargetPomodoros) * 100).roundToInt().coerceIn(0, 100)
+        val completion = scheduleCompletionPercent(scheduleItems, date, zone)
+            ?: ((count.toDouble() / DailyTargetPomodoros) * 100).roundToInt().coerceIn(0, 100)
         DailyFocusSummary(date.toString(), count, minutes, DailyTargetPomodoros, completion)
     }
 }

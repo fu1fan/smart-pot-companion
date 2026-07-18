@@ -38,9 +38,10 @@ static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
 static int s_brightness = 100;
 static bool s_standby;
+static uint64_t s_schedule_revision;
 static char s_topic_prefix[128];
 static char s_lwt_topic[160];
-static char s_command_buffer[2048];
+static char s_command_buffer[4096];
 static size_t s_command_len;
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
 static app_motion_state_t s_motion;
@@ -98,7 +99,7 @@ static void publish_reported(void)
     cJSON_AddNumberToObject(root, "volumePercent", app_tts_get_volume());
     cJSON_AddBoolToObject(root, "standby", s_standby);
     cJSON_AddItemToObject(root, "content", cJSON_CreateObject());
-    cJSON_AddNumberToObject(root, "scheduleRevision", 0);
+    cJSON_AddNumberToObject(root, "scheduleRevision", (double)s_schedule_revision);
     cJSON_AddStringToObject(root, "firmwareVersion", "0.2.0");
     publish_json("reported", root, true);
     cJSON_Delete(root);
@@ -118,7 +119,7 @@ static void publish_ack(const char *command_id, const char *status, const char *
     cJSON_Delete(root);
 }
 
-static void publish_event(const char *type)
+static void publish_event_with_data(const char *type, cJSON *data)
 {
     char timestamp[32], id[64];
     timestamp_now(timestamp, sizeof(timestamp));
@@ -129,27 +130,69 @@ static void publish_event(const char *type)
     cJSON_AddStringToObject(root, "deviceId", CONFIG_SMART_POT_DEVICE_ID);
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddStringToObject(root, "occurredAt", timestamp);
-    cJSON_AddItemToObject(root, "data", cJSON_CreateObject());
+    cJSON_AddItemToObject(root, "data", data != NULL ? data : cJSON_CreateObject());
     publish_json("events", root, false);
     cJSON_Delete(root);
 }
 
-static const char *emoji_text(const char *id)
+static void publish_event(const char *type)
 {
-    if (id == NULL) return "";
-    if (strcmp(id, "heart") == 0) return "<3  来自远方的拥抱";
-    if (strcmp(id, "smile") == 0) return "今天也要开心呀 :)";
-    if (strcmp(id, "happy") == 0) return "我现在心情很好！";
-    if (strcmp(id, "thirsty") == 0) return "有一点口渴啦";
-    if (strcmp(id, "dark") == 0) return "这里有点暗，想看看阳光";
-    if (strcmp(id, "weak") == 0) return "今天需要主人多关心一下";
-    if (strcmp(id, "wave") == 0) return "远远地向你挥挥叶子";
-    if (strcmp(id, "star") == 0) return "送你一颗小星星 *";
-    if (strcmp(id, "water") == 0) return "滴答，记得看看水分";
-    if (strcmp(id, "sun") == 0) return "今天也要晒晒太阳";
-    if (strcmp(id, "sleep") == 0) return "晚安，做个好梦 zZ";
-    if (strcmp(id, "flower") == 0) return "送你一朵小花";
-    return "小麦收到你的表情啦";
+    publish_event_with_data(type, NULL);
+}
+
+static void publish_schedule_event(const char *event_type,
+                                   const char *id,
+                                   const char *title,
+                                   const char *display_time,
+                                   time_t due_ts,
+                                   bool completed)
+{
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "scheduleId", id != NULL ? id : "");
+    cJSON_AddStringToObject(data, "title", title != NULL ? title : "");
+    cJSON_AddStringToObject(data, "displayTime", display_time != NULL ? display_time : "");
+    cJSON_AddBoolToObject(data, "completed", completed);
+    if (due_ts > 0) {
+        cJSON_AddNumberToObject(data, "dueAtEpochSeconds", (double)due_ts);
+    }
+    publish_event_with_data(event_type, data);
+}
+
+static void sync_schedule_from_payload(cJSON *payload)
+{
+    cJSON *revision = cJSON_GetObjectItem(payload, "revision");
+    if (cJSON_IsNumber(revision) && revision->valuedouble > 0) {
+        s_schedule_revision = (uint64_t)revision->valuedouble;
+    }
+
+    cJSON *items_json = cJSON_GetObjectItem(payload, "items");
+    if (!cJSON_IsArray(items_json)) {
+        return;
+    }
+
+    app_ui_schedule_sync_item_t items[8] = { 0 };
+    uint8_t count = 0;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items_json) {
+        if (count >= 8 || !cJSON_IsObject(item)) {
+            continue;
+        }
+        cJSON *id = cJSON_GetObjectItem(item, "id");
+        cJSON *title = cJSON_GetObjectItem(item, "title");
+        cJSON *display = cJSON_GetObjectItem(item, "displayTime");
+        cJSON *due_at = cJSON_GetObjectItem(item, "dueAt");
+        cJSON *completed = cJSON_GetObjectItem(item, "completed");
+        if (!cJSON_IsString(title) || title->valuestring[0] == '\0') {
+            continue;
+        }
+        items[count].id = cJSON_IsString(id) ? id->valuestring : "";
+        items[count].title = title->valuestring;
+        items[count].display_time = cJSON_IsString(display) && display->valuestring[0] ? display->valuestring :
+                                    (cJSON_IsString(due_at) ? due_at->valuestring : "");
+        items[count].completed = cJSON_IsBool(completed) && cJSON_IsTrue(completed);
+        count++;
+    }
+    app_ui_set_schedule_items(items, count);
 }
 
 static void handle_command(const char *json)
@@ -179,9 +222,14 @@ static void handle_command(const char *json)
         cJSON *text = cJSON_GetObjectItem(payload, "text");
         cJSON *emoji = cJSON_GetObjectItem(payload, "emojiId");
         cJSON *duration = cJSON_GetObjectItem(payload, "durationSeconds");
-        const char *display = cJSON_IsString(text) && text->valuestring[0] ? text->valuestring : emoji_text(cJSON_IsString(emoji) ? emoji->valuestring : NULL);
-        app_ui_show_remote_content(display, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 20) * 1000U);
-        if (cJSON_IsString(emoji) && strcmp(emoji->valuestring, "heart") == 0) app_ui_play_touch_reaction();
+        if (cJSON_IsString(emoji) && emoji->valuestring[0] != '\0') {
+            app_ui_show_emoji(emoji->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 2) * 1000U);
+            if (strcmp(emoji->valuestring, "heart") == 0) app_ui_play_touch_reaction();
+        } else if (cJSON_IsString(text) && text->valuestring[0] != '\0') {
+            app_ui_show_remote_content(text->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 20) * 1000U);
+        } else {
+            ok = false;
+        }
     } else if (strcmp(type->valuestring, "REMOTE_TOUCH") == 0) {
         app_ui_play_touch_reaction();
         app_tts_speak_text_no_followup("收到你从远方传来的摸摸啦。");
@@ -196,8 +244,9 @@ static void handle_command(const char *json)
         vTaskDelay(pdMS_TO_TICKS(250));
         esp_restart();
         return;
-    } else if (strcmp(type->valuestring, "SYNC_PROFILE") != 0 &&
-               strcmp(type->valuestring, "SYNC_SCHEDULE") != 0) {
+    } else if (strcmp(type->valuestring, "SYNC_SCHEDULE") == 0) {
+        sync_schedule_from_payload(payload);
+    } else if (strcmp(type->valuestring, "SYNC_PROFILE") != 0) {
         ok = false;
     }
     publish_ack(id->valuestring, ok ? "COMPLETED" : "FAILED", ok ? NULL : "invalid payload");
@@ -235,6 +284,7 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
 void app_cloud_start(void)
 {
     if (!CONFIG_SMART_POT_CLOUD_ENABLE) { ESP_LOGI(TAG, "MQTT cloud disabled"); return; }
+    app_ui_set_schedule_event_callback(publish_schedule_event);
     snprintf(s_topic_prefix, sizeof(s_topic_prefix), "smartpot/v1/devices/%s", CONFIG_SMART_POT_DEVICE_ID);
     snprintf(s_lwt_topic, sizeof(s_lwt_topic), "%s/online", s_topic_prefix);
     static char lwt_payload[192];

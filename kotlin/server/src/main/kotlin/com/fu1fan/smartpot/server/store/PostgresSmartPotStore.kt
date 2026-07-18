@@ -205,6 +205,14 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         session.id, session.potId, session.completedAt, encode(session),
     )
 
+    override suspend fun listScheduleItems(potId: String): List<ScheduleItem> =
+        listPotJson("schedule_items", potId, "completed, COALESCE(due_at, updated_at), updated_at")
+
+    override suspend fun saveScheduleItem(item: ScheduleItem) = saveJsonRecord(
+        "INSERT INTO schedule_items(id,pot_id,due_at,completed,updated_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?,?,?::jsonb) ON CONFLICT(id) DO UPDATE SET due_at=EXCLUDED.due_at,completed=EXCLUDED.completed,updated_at=EXCLUDED.updated_at,data=EXCLUDED.data",
+        item.id, item.potId, item.dueAt, item.completed, item.updatedAt, encode(item),
+    )
+
     override suspend fun saveShareCode(code: ShareCode, potId: String) = db { c ->
         c.prepareStatement("INSERT INTO share_codes(code,pot_id,expires_at) VALUES (?,?::uuid,?::timestamptz) ON CONFLICT(code) DO UPDATE SET pot_id=EXCLUDED.pot_id,expires_at=EXCLUDED.expires_at,redeemed_by=NULL").use { s ->
             s.setString(1, code.code); s.setString(2, potId); s.setString(3, code.expiresAt); s.executeUpdate()

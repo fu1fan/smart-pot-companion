@@ -130,6 +130,28 @@ fun Application.configureRoutes(services: ServerServices) {
                         services.store.saveFocusSession(session)
                         call.respond(HttpStatusCode.Created, session)
                     }
+                    get("/schedule") {
+                        val pot = call.requirePot(services)
+                        call.respond(scheduleState(services.store.listScheduleItems(pot.id)))
+                    }
+                    post("/schedule") {
+                        val pot = call.requirePot(services)
+                        val item = scheduleItemFrom(pot, call.receive<CreateScheduleItemRequest>(), "APP")
+                        services.store.saveScheduleItem(item)
+                        syncScheduleToDevice(services.store, services.commands, pot)
+                        services.realtime.publish(RealtimeEvent(RealtimeEventType.SCHEDULE, pot.id, appJson.encodeToJsonElement(scheduleState(services.store.listScheduleItems(pot.id)))))
+                        call.respond(HttpStatusCode.Created, item)
+                    }
+                    patch("/schedule/{scheduleId}") {
+                        val pot = call.requirePot(services)
+                        val scheduleId = requireNotNull(call.parameters["scheduleId"]) { "缺少日程 ID" }
+                        val current = requireNotNull(services.store.listScheduleItems(pot.id).firstOrNull { it.id == scheduleId }) { "日程不存在" }
+                        val item = updatedScheduleItem(current, call.receive<UpdateScheduleItemRequest>())
+                        services.store.saveScheduleItem(item)
+                        syncScheduleToDevice(services.store, services.commands, pot)
+                        services.realtime.publish(RealtimeEvent(RealtimeEventType.SCHEDULE, pot.id, appJson.encodeToJsonElement(scheduleState(services.store.listScheduleItems(pot.id)))))
+                        call.respond(item)
+                    }
                     post("/control") {
                         val pot = call.requirePot(services)
                         call.respond(HttpStatusCode.Accepted, services.commands.submit(pot, call.receive()))

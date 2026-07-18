@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "app_types.h"
 
@@ -10,6 +11,21 @@ typedef enum {
     APP_UI_MOTION_REACTION_SHAKE,
     APP_UI_MOTION_REACTION_CARRIED,
 } app_ui_motion_reaction_t;
+
+typedef struct {
+    const char *id;
+    const char *title;
+    const char *display_time;
+    time_t due_ts;
+    bool completed;
+} app_ui_schedule_sync_item_t;
+
+typedef void (*app_ui_schedule_event_cb_t)(const char *event_type,
+                                           const char *id,
+                                           const char *title,
+                                           const char *display_time,
+                                           time_t due_ts,
+                                           bool completed);
 
 typedef struct {
     bool valid;
@@ -41,7 +57,10 @@ void app_ui_clear_motion_reaction(void);
 void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state);
 void app_ui_set_motion_debug_event(const char *event, const char *reaction);
 void app_ui_show_remote_content(const char *text, uint32_t duration_ms);
+void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms);
 bool app_ui_start_pomodoro(void);
 void app_ui_stop_pomodoro(void);
 void app_ui_show_schedule_page(void);
 void app_ui_add_schedule(const char *item, const char *deadline);
+void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t count);
+void app_ui_set_schedule_event_callback(app_ui_schedule_event_cb_t callback);

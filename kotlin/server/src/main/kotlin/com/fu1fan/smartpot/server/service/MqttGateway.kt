@@ -4,6 +4,9 @@ import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.AppConfig
 import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.focusSessionFrom
+import com.fu1fan.smartpot.server.scheduleItemFrom
+import com.fu1fan.smartpot.server.scheduleState
+import com.fu1fan.smartpot.server.syncSchedule
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
@@ -16,7 +19,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -116,6 +121,7 @@ class MqttGateway(
                     store.saveFocusSession(session)
                     realtime.publish(RealtimeEvent(RealtimeEventType.FOCUS, pot.id, appJson.encodeToJsonElement(session)))
                 }
+                handleScheduleEvent(pot, event)
             }
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
@@ -124,6 +130,64 @@ class MqttGateway(
                 realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(online)))
             }
         }
+    }
+
+    private suspend fun handleScheduleEvent(pot: PotProfile, event: DeviceEvent) {
+        when (event.type) {
+            DeviceEventType.SCHEDULE_ADDED -> {
+                val title = event.data.stringValue("title").trim()
+                if (title.isBlank()) return
+                val displayTime = event.data.stringValue("displayTime")
+                    .ifBlank { event.data.stringValue("deadline") }
+                val dueAt = event.data.stringValue("dueAt").takeIf { it.isNotBlank() }
+                    ?: event.data.epochInstantValue("dueAtEpochSeconds")
+                val existing = store.listScheduleItems(pot.id).firstOrNull {
+                    !it.completed && it.title == title && it.displayTime == displayTime
+                }
+                val item = existing?.copy(
+                    dueAt = dueAt ?: existing.dueAt,
+                    displayTime = displayTime.ifBlank { existing.displayTime },
+                    source = "ESP",
+                    updatedAt = event.occurredAt,
+                ) ?: scheduleItemFrom(
+                    pot,
+                    CreateScheduleItemRequest(
+                        title = title,
+                        dueAt = dueAt,
+                        displayTime = displayTime,
+                    ),
+                    source = "ESP",
+                    now = Instant.parse(event.occurredAt),
+                )
+                store.saveScheduleItem(item)
+                publishScheduleUpdate(pot)
+            }
+            DeviceEventType.SCHEDULE_COMPLETED -> {
+                if (event.data["kind"]?.jsonPrimitive?.contentOrNull == "pomodoro") return
+                val scheduleId = event.data.stringValue("scheduleId").ifBlank { event.data.stringValue("id") }
+                val title = event.data.stringValue("title")
+                val items = store.listScheduleItems(pot.id)
+                val current = items.firstOrNull { it.id == scheduleId }
+                    ?: items.firstOrNull { !it.completed && it.title == title }
+                    ?: return
+                store.saveScheduleItem(
+                    current.copy(
+                        completed = true,
+                        completedAt = event.occurredAt,
+                        updatedAt = event.occurredAt,
+                    ),
+                )
+                publishScheduleUpdate(pot)
+            }
+            else -> Unit
+        }
+    }
+
+    private suspend fun publishScheduleUpdate(pot: PotProfile) {
+        val items = store.listScheduleItems(pot.id)
+        realtime.publish(RealtimeEvent(RealtimeEventType.SCHEDULE, pot.id, appJson.encodeToJsonElement(scheduleState(items))))
+        runCatching { commandService?.syncSchedule(pot, items) }
+            .onFailure { System.err.println("Schedule MQTT resync skipped: ${it.message}") }
     }
 
     override fun close() {
@@ -150,3 +214,9 @@ private fun DeviceEvent.focusMinutes(): Int =
     data["minutes"]?.jsonPrimitive?.intOrNull
         ?: data["durationMinutes"]?.jsonPrimitive?.intOrNull
         ?: 25
+
+private fun JsonObject.stringValue(key: String): String =
+    this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
+
+private fun JsonObject.epochInstantValue(key: String): String? =
+    this[key]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 }?.let { Instant.ofEpochSecond(it).toString() }

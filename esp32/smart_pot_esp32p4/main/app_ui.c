@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include "esp_log.h"
 #include "lvgl.h"
 #include "bsp/esp-bsp.h"
@@ -15,6 +16,7 @@
 #define UI_SCREEN_W 800
 #define UI_SCREEN_H 480
 #define SCHEDULE_MAX_ITEMS 4
+#define SCHEDULE_ID_LEN 48
 #define SCHEDULE_ITEM_LEN 96
 #define SCHEDULE_DEADLINE_LEN 64
 
@@ -30,6 +32,7 @@ static void update_schedule_page(void);
 static void check_schedule_reminders(void);
 static bool normalize_pending_schedule_times(void);
 static void touch_event_cb(lv_event_t *event);
+static void notify_schedule_event(const char *event_type, uint8_t index);
 
 typedef enum {
     UI_PAGE_FACE = 0,
@@ -64,6 +67,13 @@ static lv_obj_t *s_network_icon;
 static lv_obj_t *s_network_label;
 static lv_obj_t *s_voice_label;
 static lv_obj_t *s_dialog_label;
+static lv_obj_t *s_emoji_overlay;
+static lv_obj_t *s_emoji_stage;
+static lv_obj_t *s_emoji_body;
+static lv_obj_t *s_emoji_accent;
+static lv_obj_t *s_emoji_eye_left;
+static lv_obj_t *s_emoji_eye_right;
+static lv_obj_t *s_emoji_mouth;
 static lv_obj_t *s_mode_label_face;
 static lv_obj_t *s_mode_label_schedule;
 static lv_obj_t *s_motion_status_label;
@@ -112,9 +122,11 @@ static lv_timer_t *s_schedule_blink_timer;
 static lv_timer_t *s_schedule_blink_restore_timer;
 static lv_timer_t *s_pomodoro_timer;
 static lv_timer_t *s_schedule_cleanup_timer;
+static lv_timer_t *s_emoji_overlay_timer;
 static int32_t s_pomodoro_remaining_sec;
 static pomodoro_phase_t s_pomodoro_phase = POMODORO_IDLE;
 static char s_schedule_items[SCHEDULE_MAX_ITEMS][SCHEDULE_ITEM_LEN];
+static char s_schedule_ids[SCHEDULE_MAX_ITEMS][SCHEDULE_ID_LEN];
 static char s_schedule_deadlines[SCHEDULE_MAX_ITEMS][SCHEDULE_DEADLINE_LEN];
 static time_t s_schedule_due_ts[SCHEDULE_MAX_ITEMS];
 static bool s_schedule_completed[SCHEDULE_MAX_ITEMS];
@@ -130,6 +142,7 @@ static bool s_touch_blink_active;
 static bool s_motion_reaction_active;
 static app_ui_motion_reaction_t s_motion_reaction;
 static ui_page_t s_current_page = UI_PAGE_FACE;
+static app_ui_schedule_event_cb_t s_schedule_event_cb;
 
 static lv_point_precise_t s_cat_happy_eye_pts[] = { { 0, 9 }, { 16, 2 }, { 32, 9 } };
 static lv_point_precise_t s_cat_blink_eye_pts[] = { { 0, 5 }, { 32, 5 } };
@@ -582,6 +595,8 @@ static void remove_schedule_at(uint8_t index)
         return;
     }
     if (index + 1 < s_schedule_count) {
+        memmove(s_schedule_ids[index], s_schedule_ids[index + 1],
+                sizeof(s_schedule_ids[0]) * (s_schedule_count - index - 1));
         memmove(s_schedule_items[index], s_schedule_items[index + 1],
                 sizeof(s_schedule_items[0]) * (s_schedule_count - index - 1));
         memmove(s_schedule_deadlines[index], s_schedule_deadlines[index + 1],
@@ -594,6 +609,7 @@ static void remove_schedule_at(uint8_t index)
                 sizeof(s_schedule_reminded[0]) * (s_schedule_count - index - 1));
     }
     s_schedule_count--;
+    s_schedule_ids[s_schedule_count][0] = '\0';
     s_schedule_items[s_schedule_count][0] = '\0';
     s_schedule_deadlines[s_schedule_count][0] = '\0';
     s_schedule_due_ts[s_schedule_count] = 0;
@@ -672,6 +688,20 @@ static void update_schedule_page(void)
     }
 }
 
+static void notify_schedule_event(const char *event_type, uint8_t index)
+{
+    if (s_schedule_event_cb == NULL || event_type == NULL || index >= s_schedule_count) {
+        return;
+    }
+
+    s_schedule_event_cb(event_type,
+                        s_schedule_ids[index],
+                        s_schedule_items[index],
+                        s_schedule_deadlines[index],
+                        s_schedule_due_ts[index],
+                        s_schedule_completed[index]);
+}
+
 static void schedule_complete_event_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED) {
@@ -704,6 +734,7 @@ static void schedule_complete_event_cb(lv_event_t *event)
     (void)app_tts_play_success_chime();
     schedule_restart_cleanup_timer();
     update_schedule_page();
+    notify_schedule_event("SCHEDULE_COMPLETED", index);
 }
 
 static void update_pomodoro_page(void)
@@ -1976,6 +2007,7 @@ void app_ui_add_schedule(const char *item, const char *deadline)
         }
     }
 
+    uint8_t added_index = s_schedule_count;
     char deadline_display[SCHEDULE_DEADLINE_LEN] = "";
     time_t due_ts = 0;
     if (schedule_parse_due_time(deadline, &due_ts, deadline_display, sizeof(deadline_display))) {
@@ -1985,10 +2017,11 @@ void app_ui_add_schedule(const char *item, const char *deadline)
         copy_or_default(s_schedule_deadlines[s_schedule_count], sizeof(s_schedule_deadlines[s_schedule_count]),
                         deadline, "");
     }
-    copy_or_default(s_schedule_items[s_schedule_count], sizeof(s_schedule_items[s_schedule_count]), item, "Untitled");
-    s_schedule_due_ts[s_schedule_count] = due_ts;
-    s_schedule_completed[s_schedule_count] = false;
-    s_schedule_reminded[s_schedule_count] = false;
+    s_schedule_ids[added_index][0] = '\0';
+    copy_or_default(s_schedule_items[added_index], sizeof(s_schedule_items[added_index]), item, "Untitled");
+    s_schedule_due_ts[added_index] = due_ts;
+    s_schedule_completed[added_index] = false;
+    s_schedule_reminded[added_index] = false;
     s_schedule_count++;
     ESP_LOGI(TAG, "Schedule added: item=%s deadline=%s count=%u",
              s_schedule_items[s_schedule_count - 1], s_schedule_deadlines[s_schedule_count - 1],
@@ -2005,6 +2038,56 @@ void app_ui_add_schedule(const char *item, const char *deadline)
     }
 
     bsp_display_unlock();
+    notify_schedule_event("SCHEDULE_ADDED", added_index);
+}
+
+void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t count)
+{
+    if (items == NULL && count > 0) {
+        return;
+    }
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for schedule sync");
+        return;
+    }
+
+    if (s_schedule_cleanup_timer != NULL) {
+        lv_timer_delete(s_schedule_cleanup_timer);
+        s_schedule_cleanup_timer = NULL;
+    }
+
+    s_schedule_count = count < SCHEDULE_MAX_ITEMS ? count : SCHEDULE_MAX_ITEMS;
+    for (uint8_t i = 0; i < SCHEDULE_MAX_ITEMS; i++) {
+        if (i < s_schedule_count) {
+            copy_or_default(s_schedule_ids[i], sizeof(s_schedule_ids[i]), items[i].id, "");
+            copy_or_default(s_schedule_items[i], sizeof(s_schedule_items[i]), items[i].title, "Untitled");
+            copy_or_default(s_schedule_deadlines[i], sizeof(s_schedule_deadlines[i]), items[i].display_time, "");
+            s_schedule_due_ts[i] = items[i].due_ts;
+            s_schedule_completed[i] = items[i].completed;
+            s_schedule_reminded[i] = false;
+            if (s_schedule_deadlines[i][0] == '\0' && s_schedule_due_ts[i] > 0) {
+                struct tm due_tm = { 0 };
+                localtime_r(&s_schedule_due_ts[i], &due_tm);
+                snprintf(s_schedule_deadlines[i], sizeof(s_schedule_deadlines[i]), "%02d-%02d/%02d:%02d",
+                         due_tm.tm_mon + 1, due_tm.tm_mday, due_tm.tm_hour, due_tm.tm_min);
+            }
+        } else {
+            s_schedule_ids[i][0] = '\0';
+            s_schedule_items[i][0] = '\0';
+            s_schedule_deadlines[i][0] = '\0';
+            s_schedule_due_ts[i] = 0;
+            s_schedule_completed[i] = false;
+            s_schedule_reminded[i] = false;
+        }
+    }
+
+    update_schedule_page();
+    bsp_display_unlock();
+}
+
+void app_ui_set_schedule_event_callback(app_ui_schedule_event_cb_t callback)
+{
+    s_schedule_event_cb = callback;
 }
 
 static void pomodoro_exit_event_cb(lv_event_t *event)
@@ -2575,6 +2658,143 @@ void app_ui_set_dialog_status(const char *status)
     }
 }
 
+static void emoji_stage_scale_cb(void *obj, int32_t value)
+{
+    lv_obj_set_style_transform_scale((lv_obj_t *)obj, value, LV_PART_MAIN);
+}
+
+static void emoji_overlay_hide_cb(lv_timer_t *timer)
+{
+    if (s_emoji_overlay != NULL) {
+        lv_obj_fade_out(s_emoji_overlay, 360, 0);
+    }
+    s_emoji_overlay_timer = NULL;
+    lv_timer_delete(timer);
+}
+
+static void ensure_emoji_overlay(void)
+{
+    if (s_emoji_overlay != NULL) {
+        return;
+    }
+
+    s_emoji_overlay = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_emoji_overlay);
+    lv_obj_set_size(s_emoji_overlay, UI_SCREEN_W, UI_SCREEN_H);
+    lv_obj_set_style_bg_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_overlay, lv_color_hex(0x050706), LV_PART_MAIN);
+    lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    s_emoji_stage = lv_obj_create(s_emoji_overlay);
+    lv_obj_remove_style_all(s_emoji_stage);
+    lv_obj_set_size(s_emoji_stage, 430, 340);
+    lv_obj_set_style_bg_opa(s_emoji_stage, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_stage, lv_color_hex(0x102118), LV_PART_MAIN);
+    lv_obj_set_style_radius(s_emoji_stage, 42, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_emoji_stage, 3, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_emoji_stage, lv_color_hex(0xd8ffe3), LV_PART_MAIN);
+    lv_obj_align(s_emoji_stage, LV_ALIGN_CENTER, 0, 0);
+
+    s_emoji_body = lv_obj_create(s_emoji_stage);
+    lv_obj_remove_style_all(s_emoji_body);
+    lv_obj_set_size(s_emoji_body, 224, 224);
+    lv_obj_set_style_radius(s_emoji_body, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_emoji_body, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(s_emoji_body, LV_ALIGN_CENTER, 0, 8);
+
+    s_emoji_accent = lv_obj_create(s_emoji_stage);
+    lv_obj_remove_style_all(s_emoji_accent);
+    lv_obj_set_size(s_emoji_accent, 82, 82);
+    lv_obj_set_style_radius(s_emoji_accent, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_emoji_accent, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(s_emoji_accent, LV_ALIGN_CENTER, 110, -88);
+
+    s_emoji_eye_left = lv_obj_create(s_emoji_body);
+    lv_obj_remove_style_all(s_emoji_eye_left);
+    lv_obj_set_size(s_emoji_eye_left, 30, 30);
+    lv_obj_set_style_radius(s_emoji_eye_left, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_emoji_eye_left, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_eye_left, lv_color_hex(0x07110d), LV_PART_MAIN);
+    lv_obj_align(s_emoji_eye_left, LV_ALIGN_CENTER, -46, -28);
+
+    s_emoji_eye_right = lv_obj_create(s_emoji_body);
+    lv_obj_remove_style_all(s_emoji_eye_right);
+    lv_obj_set_size(s_emoji_eye_right, 30, 30);
+    lv_obj_set_style_radius(s_emoji_eye_right, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_emoji_eye_right, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_eye_right, lv_color_hex(0x07110d), LV_PART_MAIN);
+    lv_obj_align(s_emoji_eye_right, LV_ALIGN_CENTER, 46, -28);
+
+    s_emoji_mouth = lv_obj_create(s_emoji_body);
+    lv_obj_remove_style_all(s_emoji_mouth);
+    lv_obj_set_size(s_emoji_mouth, 90, 18);
+    lv_obj_set_style_radius(s_emoji_mouth, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_emoji_mouth, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_mouth, lv_color_hex(0x07110d), LV_PART_MAIN);
+    lv_obj_align(s_emoji_mouth, LV_ALIGN_CENTER, 0, 48);
+}
+
+void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
+{
+    if (bsp_display_lock(200) != ESP_OK) {
+        return;
+    }
+
+    ensure_emoji_overlay();
+    const char *id = emoji_id != NULL ? emoji_id : "";
+    lv_color_t body = lv_color_hex(0x76e39a);
+    lv_color_t stage = lv_color_hex(0x102118);
+    lv_color_t accent = lv_color_hex(0xf4ff89);
+    int32_t mouth_y = 48;
+    int32_t mouth_h = 18;
+
+    if (strcmp(id, "heart") == 0) {
+        body = lv_color_hex(0xff5f7d); stage = lv_color_hex(0x301018); accent = lv_color_hex(0xffb4c4);
+    } else if (strcmp(id, "water") == 0 || strcmp(id, "thirsty") == 0) {
+        body = lv_color_hex(0x65cfff); stage = lv_color_hex(0x071d2a); accent = lv_color_hex(0xb8f3ff); mouth_y = 56;
+    } else if (strcmp(id, "sun") == 0 || strcmp(id, "happy") == 0) {
+        body = lv_color_hex(0xffd95a); stage = lv_color_hex(0x2d2408); accent = lv_color_hex(0xfff3a6);
+    } else if (strcmp(id, "dark") == 0 || strcmp(id, "sleep") == 0) {
+        body = lv_color_hex(0x8688ff); stage = lv_color_hex(0x11122c); accent = lv_color_hex(0xd8d9ff); mouth_y = 58; mouth_h = 10;
+    } else if (strcmp(id, "weak") == 0) {
+        body = lv_color_hex(0xbfc6d0); stage = lv_color_hex(0x1d2026); accent = lv_color_hex(0xffd68d); mouth_y = 60; mouth_h = 10;
+    } else if (strcmp(id, "flower") == 0) {
+        body = lv_color_hex(0xff9bcc); stage = lv_color_hex(0x2b1023); accent = lv_color_hex(0xfff0a8);
+    } else if (strcmp(id, "star") == 0) {
+        body = lv_color_hex(0xffef6b); stage = lv_color_hex(0x2e2708); accent = lv_color_hex(0xffffff);
+    } else if (strcmp(id, "wave") == 0) {
+        body = lv_color_hex(0x83e58d); stage = lv_color_hex(0x102816); accent = lv_color_hex(0x5fc7ff);
+    }
+
+    lv_obj_set_style_bg_color(s_emoji_stage, stage, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_body, body, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_emoji_accent, accent, LV_PART_MAIN);
+    lv_obj_set_size(s_emoji_mouth, 90, mouth_h);
+    lv_obj_align(s_emoji_mouth, LV_ALIGN_CENTER, 0, mouth_y);
+    lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_emoji_overlay);
+    lv_obj_set_style_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale(s_emoji_stage, 224, LV_PART_MAIN);
+
+    lv_anim_t scale;
+    lv_anim_init(&scale);
+    lv_anim_set_var(&scale, s_emoji_stage);
+    lv_anim_set_exec_cb(&scale, emoji_stage_scale_cb);
+    lv_anim_set_values(&scale, 224, 268);
+    lv_anim_set_duration(&scale, 180);
+    lv_anim_set_playback_duration(&scale, 180);
+    lv_anim_set_path_cb(&scale, lv_anim_path_ease_out);
+    lv_anim_start(&scale);
+
+    if (s_emoji_overlay_timer != NULL) {
+        lv_timer_delete(s_emoji_overlay_timer);
+    }
+    s_emoji_overlay_timer = lv_timer_create(emoji_overlay_hide_cb, duration_ms > 0 ? duration_ms : 2000, NULL);
+    lv_timer_set_repeat_count(s_emoji_overlay_timer, 1);
+    bsp_display_unlock();
+}
+
 static void remote_content_hide_cb(lv_timer_t *timer)
 {
     if (s_dialog_label != NULL) lv_obj_add_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
@@ -2587,11 +2807,12 @@ void app_ui_show_remote_content(const char *text, uint32_t duration_ms)
     if (text == NULL || text[0] == '\0' || s_dialog_label == NULL) return;
     if (bsp_display_lock(200) != ESP_OK) return;
     lv_label_set_text(s_dialog_label, text);
-    lv_obj_set_width(s_dialog_label, 500);
+    lv_label_set_long_mode(s_dialog_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_dialog_label, 560);
     lv_obj_set_style_text_align(s_dialog_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_style_text_font(s_dialog_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_dialog_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_align(s_dialog_label, LV_ALIGN_BOTTOM_MID, 0, -62);
+    lv_obj_align(s_dialog_label, LV_ALIGN_BOTTOM_MID, 0, -54);
     lv_obj_remove_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
     if (s_remote_content_timer != NULL) lv_timer_delete(s_remote_content_timer);
     s_remote_content_timer = lv_timer_create(remote_content_hide_cb, duration_ms > 0 ? duration_ms : 20000, NULL);

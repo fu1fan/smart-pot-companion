@@ -6,13 +6,17 @@ import com.fu1fan.smartpot.protocol.CareType
 import com.fu1fan.smartpot.protocol.CreateCareLogRequest
 import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
+import com.fu1fan.smartpot.protocol.CreateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.DailyFocusSummary
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
+import com.fu1fan.smartpot.protocol.ScheduleItem
+import com.fu1fan.smartpot.protocol.ScheduleSyncState
 import com.fu1fan.smartpot.protocol.ShareCode
 import com.fu1fan.smartpot.protocol.ShareSession
 import com.fu1fan.smartpot.protocol.UpdatePotRequest
+import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -150,5 +154,39 @@ class ApplicationTest {
         val summaries = api.get("/api/v1/pots/${pot.id}/focus/daily?days=5") { bearerAuth(config.demoToken) }.body<List<DailyFocusSummary>>()
         assertEquals(5, summaries.size)
         assertEquals(2, summaries.last().pomodoroCount)
+    }
+
+    @Test
+    fun `owner can create and complete schedule items`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+
+        val pot = api.post("/api/v1/pots") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-schedule-001", "小麦", "pothos"))
+        }.body<PotProfile>()
+
+        val created = api.post("/api/v1/pots/${pot.id}/schedule") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreateScheduleItemRequest(title = "浇水", displayTime = "今晚 8 点"))
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        val item = created.body<ScheduleItem>()
+
+        val list = api.get("/api/v1/pots/${pot.id}/schedule") { bearerAuth(config.demoToken) }.body<ScheduleSyncState>()
+        assertEquals(1, list.items.size)
+        assertEquals("浇水", list.items.first().title)
+
+        val completed = api.patch("/api/v1/pots/${pot.id}/schedule/${item.id}") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(UpdateScheduleItemRequest(completed = true))
+        }.body<ScheduleItem>()
+        assertTrue(completed.completed)
+
+        val overview = api.get("/api/v1/pots/${pot.id}/care-overview") { bearerAuth(config.demoToken) }.body<CareDayOverview>()
+        assertEquals(100, overview.focus.scheduleCompletionPercent)
     }
 }

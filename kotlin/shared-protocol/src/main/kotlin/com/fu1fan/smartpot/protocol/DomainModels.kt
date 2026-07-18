@@ -200,6 +200,41 @@ data class CareDayOverview(
 )
 
 @Serializable
+data class ScheduleItem(
+    val id: String,
+    val potId: String,
+    val title: String,
+    val dueAt: String? = null,
+    val displayTime: String = "",
+    val completed: Boolean = false,
+    val completedAt: String? = null,
+    val source: String = "APP",
+    val createdAt: String,
+    val updatedAt: String,
+)
+
+@Serializable
+data class CreateScheduleItemRequest(
+    val title: String,
+    val dueAt: String? = null,
+    val displayTime: String = "",
+)
+
+@Serializable
+data class UpdateScheduleItemRequest(
+    val title: String? = null,
+    val dueAt: String? = null,
+    val displayTime: String? = null,
+    val completed: Boolean? = null,
+)
+
+@Serializable
+data class ScheduleSyncState(
+    val revision: Long,
+    val items: List<ScheduleItem>,
+)
+
+@Serializable
 data class CreatePotRequest(
     val deviceId: String,
     val displayName: String,
@@ -221,6 +256,8 @@ data class DeviceControlRequest(
     val text: String? = null,
     val emojiId: String? = null,
     val durationSeconds: Int? = null,
+    val scheduleRevision: Long? = null,
+    val scheduleItems: List<ScheduleItem> = emptyList(),
 )
 
 @Serializable
@@ -243,7 +280,7 @@ data class RedeemShareRequest(val code: String, val actorName: String)
 data class ShareSession(val token: String, val potId: String, val actorName: String, val expiresAt: String)
 
 @Serializable
-enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS }
+enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS, SCHEDULE }
 
 @Serializable
 data class RealtimeEvent(

@@ -21,6 +21,7 @@ class InMemorySmartPotStore : SmartPotStore {
     private val affinityEventKeys = ConcurrentHashMap.newKeySet<String>()
     private val diaries = ConcurrentHashMap<String, MutableList<PlantDiary>>()
     private val focusSessions = ConcurrentHashMap<String, MutableList<FocusSession>>()
+    private val scheduleItems = ConcurrentHashMap<String, MutableList<ScheduleItem>>()
     private val shares = ConcurrentHashMap<String, Pair<String, ShareCode>>()
 
     override suspend fun seedSpecies(species: List<PlantSpecies>) = lock.withLock {
@@ -111,6 +112,22 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun saveFocusSession(session: FocusSession) {
         val list = focusSessions.computeIfAbsent(session.potId) { mutableListOf() }
         synchronized(list) { list.removeAll { it.id == session.id }; list += session }
+    }
+
+    override suspend fun listScheduleItems(potId: String): List<ScheduleItem> =
+        scheduleItems[potId]?.let { list ->
+            synchronized(list) {
+                list.sortedWith(
+                    compareBy<ScheduleItem> { it.completed }
+                        .thenBy { it.dueAt ?: it.displayTime }
+                        .thenBy { it.createdAt },
+                )
+            }
+        } ?: emptyList()
+
+    override suspend fun saveScheduleItem(item: ScheduleItem) {
+        val list = scheduleItems.computeIfAbsent(item.potId) { mutableListOf() }
+        synchronized(list) { list.removeAll { it.id == item.id }; list += item }
     }
 
     override suspend fun saveShareCode(code: ShareCode, potId: String) { shares[code.code] = potId to code }
