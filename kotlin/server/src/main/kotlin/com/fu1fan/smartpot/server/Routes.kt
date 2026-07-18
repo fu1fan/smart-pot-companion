@@ -61,7 +61,7 @@ fun Application.configureRoutes(services: ServerServices) {
             route("/api/v1") {
                 get("/pots") {
                     val access = call.accessIdentity(services)
-                    call.respond(services.store.listPots().filter { access.owner || access.allowedPotId == it.id })
+                    call.respond(services.pots.listCurrent().filter { access.owner || access.allowedPotId == it.id })
                 }
                 post("/pots") {
                     call.requireOwner(services)
@@ -213,5 +213,5 @@ private suspend fun ApplicationCall.requirePot(services: ServerServices, ownerOn
     if (ownerOnly) require(access.owner) { "仅主人可以执行此操作" }
     val id = requireNotNull(parameters["potId"]) { "缺少盆栽 ID" }
     require(access.owner || access.allowedPotId == id) { "无权访问该盆栽" }
-    return requireNotNull(services.store.findPot(id)) { "盆栽不存在" }
+    return requireNotNull(services.pots.findCurrent(id)) { "盆栽不存在" }
 }

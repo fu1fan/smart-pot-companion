@@ -28,7 +28,7 @@ class PotService(
     }
 
     suspend fun update(id: String, request: UpdatePotRequest): PotProfile {
-        val current = requireNotNull(store.findPot(id)) { "盆栽不存在" }
+        val current = requireNotNull(findCurrent(id)) { "盆栽不存在" }
         val species = request.speciesId?.let { requireNotNull(store.findSpecies(it)) { "植物品种不存在" } } ?: current.species
         val name = request.displayName?.also { require(it.isNotBlank() && it.length <= 32) } ?: current.displayName
         val updated = store.savePot(current.copy(displayName = name, species = species))
@@ -37,7 +37,7 @@ class PotService(
     }
 
     suspend fun ensureForDevice(deviceId: String): PotProfile {
-        store.findPotByDevice(deviceId)?.let { return it }
+        store.findPotByDevice(deviceId)?.let { return refreshSpecies(it) }
         val species = requireNotNull(store.findSpecies("pothos"))
         return store.savePot(
             PotProfile(
@@ -50,8 +50,12 @@ class PotService(
         )
     }
 
+    suspend fun findCurrent(id: String): PotProfile? = store.findPot(id)?.let { refreshSpecies(it) }
+
+    suspend fun listCurrent(): List<PotProfile> = store.listPots().map { refreshSpecies(it) }
+
     suspend fun snapshot(id: String): PotSnapshot {
-        val pot = requireNotNull(store.findPot(id)) { "盆栽不存在" }
+        val pot = requireNotNull(findCurrent(id)) { "盆栽不存在" }
         val telemetry = store.latestTelemetry(id)
         val state = store.deviceState(pot.deviceId)
         return PotSnapshot(
@@ -68,5 +72,11 @@ class PotService(
 
     suspend fun publishSnapshot(id: String) {
         realtime.publish(RealtimeEvent(RealtimeEventType.SNAPSHOT, id, appJson.encodeToJsonElement(snapshot(id))))
+    }
+
+    private suspend fun refreshSpecies(pot: PotProfile): PotProfile {
+        val latest = store.findSpecies(pot.species.id) ?: return pot
+        if (latest == pot.species) return pot
+        return store.savePot(pot.copy(species = latest))
     }
 }

@@ -4,6 +4,9 @@ import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PlantThresholds
 
 object SpeciesCatalog {
+    private const val SensorLuxDivisor = 3
+    private const val SensorLuxStep = 50
+
     private data class Seed(
         val id: String,
         val zh: String,
@@ -69,6 +72,7 @@ object SpeciesCatalog {
     )
 
     val all: List<PlantSpecies> = seeds.map { seed ->
+        val sensorLightRange = seed.light.toBh1750SensorLuxRange()
         PlantSpecies(
             id = seed.id,
             chineseName = seed.zh,
@@ -76,8 +80,8 @@ object SpeciesCatalog {
             thresholds = PlantThresholds(
                 soilMinPercent = seed.soil.first,
                 soilMaxPercent = seed.soil.last,
-                lightMinLux = seed.light.first,
-                lightMaxLux = seed.light.last,
+                lightMinLux = sensorLightRange.first,
+                lightMaxLux = sensorLightRange.last,
                 temperatureMinC = 15.0,
                 temperatureMaxC = 30.0,
             ),
@@ -87,5 +91,17 @@ object SpeciesCatalog {
             repottingIntervalDays = 365,
             knowledge = seed.note,
         )
+    }
+
+    private fun IntRange.toBh1750SensorLuxRange(): IntRange {
+        val min = first.toBh1750SensorLux()
+        val max = last.toBh1750SensorLux().coerceAtLeast(min)
+        return min..max
+    }
+
+    private fun Int.toBh1750SensorLux(): Int {
+        val scaled = (this + SensorLuxDivisor - 1) / SensorLuxDivisor
+        return (((scaled + SensorLuxStep - 1) / SensorLuxStep) * SensorLuxStep)
+            .coerceAtLeast(SensorLuxStep)
     }
 }

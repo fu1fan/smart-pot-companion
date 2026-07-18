@@ -53,8 +53,8 @@ data class LightStripControlState(
     val offPeriodEnabled: Boolean = false,
     val offStartMinute: Int = 0,
     val offEndMinute: Int = 0,
-    val lightMinLux: Int = 500,
-    val lightMaxLux: Int = 8_000,
+    val lightMinLux: Int = 200,
+    val lightMaxLux: Int = 2_700,
 )
 
 @Serializable

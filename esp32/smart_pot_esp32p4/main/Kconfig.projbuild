@@ -216,6 +216,10 @@ menu "Smart Pot"
             int "Lux value mapped to 100 percent light"
             default 1200
             depends on SMART_POT_BH1750_ENABLE
+            help
+                This only scales the local percentage bar. Physical thresholds and
+                automatic light-strip decisions use BH1750 sensor-position lux from
+                the synced plant profile.
 
         config SMART_POT_LIGHT_STRIP_ENABLE
             bool "Enable light strip breaker output"
@@ -227,7 +231,7 @@ menu "Smart Pot"
                 Do not use GPIO37/GPIO38 because they are used by the console UART.
                 Runtime wiring is pinned in app_board_config.h so local sdkconfig
                 cannot accidentally override synced board GPIO assignments.
-                Light thresholds use lux and are synced from the plant profile;
+                Light thresholds use BH1750 sensor-position lux and are synced from the plant profile;
                 app_board_config.h provides the fallback lux range and debounce time.
 
         config SMART_POT_LIGHT_STRIP_GPIO
