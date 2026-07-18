@@ -217,6 +217,39 @@ menu "Smart Pot"
             default 1200
             depends on SMART_POT_BH1750_ENABLE
 
+        config SMART_POT_LIGHT_STRIP_ENABLE
+            bool "Enable light strip breaker output"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+            help
+                Drive an external normally-open breaker or relay for the plant light strip.
+                The default wiring uses GPIO37 and turns the strip on with a high level.
+
+        config SMART_POT_LIGHT_STRIP_GPIO
+            int "GPIO connected to light strip breaker"
+            default 37
+            depends on SMART_POT_LIGHT_STRIP_ENABLE
+
+        config SMART_POT_LIGHT_STRIP_ACTIVE_HIGH
+            bool "Light strip breaker is active high"
+            default y
+            depends on SMART_POT_LIGHT_STRIP_ENABLE
+
+        config SMART_POT_LIGHT_STRIP_ON_PERCENT
+            int "Turn light strip on below this light percent"
+            default 25
+            range 0 100
+            depends on SMART_POT_LIGHT_STRIP_ENABLE
+
+        config SMART_POT_LIGHT_STRIP_OFF_PERCENT
+            int "Turn light strip off at or above this light percent"
+            default 35
+            range 0 100
+            depends on SMART_POT_LIGHT_STRIP_ENABLE
+            help
+                Keep this higher than the on threshold to avoid rapid toggling
+                around the low-light boundary.
+
         config SMART_POT_MPU6050_ENABLE
             bool "Enable MPU-6050 posture sensor"
             default y

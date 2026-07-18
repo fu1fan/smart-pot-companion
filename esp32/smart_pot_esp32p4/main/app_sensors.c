@@ -54,6 +54,26 @@
 #define CONFIG_SMART_POT_BH1750_MAX_LUX 1200
 #endif
 
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ENABLE
+#define CONFIG_SMART_POT_LIGHT_STRIP_ENABLE 0
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_GPIO
+#define CONFIG_SMART_POT_LIGHT_STRIP_GPIO 37
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH
+#define CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH 1
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT
+#define CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT 25
+#endif
+
+#ifndef CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT
+#define CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT 35
+#endif
+
 #ifndef CONFIG_SMART_POT_TTP223_ENABLE
 #define CONFIG_SMART_POT_TTP223_ENABLE 0
 #endif
@@ -167,6 +187,9 @@ typedef struct {
     gpio_num_t touch_gpio;
     gpio_num_t soil_do_gpio;
     gpio_num_t soil_ao_gpio;
+    gpio_num_t light_strip_gpio;
+    bool light_strip_ready;
+    bool light_strip_on;
     bool last_touch_active;
     uint32_t touch_count;
     uint32_t last_soil_raw;
@@ -399,6 +422,54 @@ static uint8_t lux_to_percent(uint32_t lux)
     return clamp_percent((int32_t)(lux * 100U / max_lux));
 }
 
+static int light_strip_level(bool on)
+{
+    bool active_high = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH;
+    return on == active_high ? 1 : 0;
+}
+
+static void set_light_strip(sensor_hw_t *hw, bool on, uint8_t light_percent, const char *reason)
+{
+    if (hw == NULL || !hw->light_strip_ready) {
+        return;
+    }
+
+    if (gpio_set_level(hw->light_strip_gpio, light_strip_level(on)) != ESP_OK) {
+        ESP_LOGW(TAG, "Light strip GPIO%d set failed", hw->light_strip_gpio);
+        return;
+    }
+
+    if (hw->light_strip_on != on) {
+        ESP_LOGI(TAG, "Light strip %s: light=%u%% reason=%s GPIO%d level=%d",
+                 on ? "on" : "off", light_percent, reason != NULL ? reason : "",
+                 hw->light_strip_gpio, light_strip_level(on));
+    }
+    hw->light_strip_on = on;
+}
+
+static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool light_ok)
+{
+    if (hw == NULL || !hw->light_strip_ready) {
+        return;
+    }
+    if (!light_ok) {
+        ESP_LOGW(TAG, "Light strip unchanged because BH1750 reading is unavailable");
+        return;
+    }
+
+    uint8_t on_threshold = clamp_percent(CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT);
+    uint8_t off_threshold = clamp_percent(CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT);
+    if (off_threshold < on_threshold) {
+        off_threshold = on_threshold;
+    }
+
+    if (!hw->light_strip_on && light_percent < on_threshold) {
+        set_light_strip(hw, true, light_percent, "below required light");
+    } else if (hw->light_strip_on && light_percent >= off_threshold) {
+        set_light_strip(hw, false, light_percent, "light enough");
+    }
+}
+
 static uint8_t soil_raw_to_percent(uint32_t raw)
 {
     int32_t dry = CONFIG_SMART_POT_SOIL_ADC_DRY_RAW;
@@ -575,6 +646,31 @@ static esp_err_t read_bh1750(sensor_hw_t *hw, uint32_t *lux)
     return ESP_OK;
 }
 
+static void init_light_strip(sensor_hw_t *hw)
+{
+    if (!CONFIG_SMART_POT_LIGHT_STRIP_ENABLE ||
+        !gpio_configured(CONFIG_SMART_POT_LIGHT_STRIP_GPIO)) {
+        return;
+    }
+
+    hw->light_strip_gpio = (gpio_num_t)CONFIG_SMART_POT_LIGHT_STRIP_GPIO;
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << hw->light_strip_gpio,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&cfg));
+    hw->light_strip_ready = true;
+    set_light_strip(hw, false, 100, "startup default");
+    ESP_LOGI(TAG, "Light strip breaker configured on GPIO%d active_%s on<%d%% off>=%d%%",
+             hw->light_strip_gpio,
+             CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? "high" : "low",
+             CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT,
+             CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT);
+}
+
 static void init_touch(sensor_hw_t *hw)
 {
     if (!CONFIG_SMART_POT_TTP223_ENABLE || !gpio_configured(CONFIG_SMART_POT_TTP223_GPIO)) {
@@ -701,6 +797,7 @@ static void init_hardware(sensor_hw_t *hw)
     hw->touch_gpio = GPIO_NUM_NC;
     hw->soil_do_gpio = GPIO_NUM_NC;
     hw->soil_ao_gpio = GPIO_NUM_NC;
+    hw->light_strip_gpio = GPIO_NUM_NC;
     if (!hw->hardware_enabled) {
         ESP_LOGI(TAG, "Sensor hardware disabled; using simulated readings");
         return;
@@ -708,12 +805,13 @@ static void init_hardware(sensor_hw_t *hw)
 
     init_bh1750(hw);
 #if !BH1750_ONLY_I2C_TEST
+    init_light_strip(hw);
     init_touch(hw);
     init_soil_module(hw);
 #endif
 
-    ESP_LOGI(TAG, "Sensor hardware summary: BH1750=%d TTP223=%d soil_module=%d",
-             hw->bh1750_ready, hw->touch_ready, hw->soil_ready);
+    ESP_LOGI(TAG, "Sensor hardware summary: BH1750=%d light_strip=%d TTP223=%d soil_module=%d",
+             hw->bh1750_ready, hw->light_strip_ready, hw->touch_ready, hw->soil_ready);
 }
 
 static void update_touch(sensor_hw_t *hw)
@@ -791,6 +889,7 @@ static void sensor_task(void *arg)
             .soil_digital_dry = soil_ok ? soil_dry : false,
         };
         state.mood = calculate_mood(state.soil_percent, state.light_percent);
+        update_light_strip(&hw, state.light_percent, light_ok);
         update_environment_voice_reminder(&hw, state.soil_percent, state.light_percent,
                                           soil_ok, light_ok);
 
