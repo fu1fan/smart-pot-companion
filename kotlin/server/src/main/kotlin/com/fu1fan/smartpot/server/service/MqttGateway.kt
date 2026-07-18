@@ -5,6 +5,7 @@ import com.fu1fan.smartpot.server.AppConfig
 import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.focusSessionFrom
 import com.fu1fan.smartpot.server.scheduleItemFrom
+import com.fu1fan.smartpot.server.scheduleRevision
 import com.fu1fan.smartpot.server.scheduleState
 import com.fu1fan.smartpot.server.syncSchedule
 import com.fu1fan.smartpot.server.store.SmartPotStore
@@ -100,6 +101,7 @@ class MqttGateway(
                 val reported = appJson.decodeFromString<DeviceReportedState>(payload)
                 require(reported.deviceId == deviceId)
                 store.saveReportedState(reported)
+                resyncScheduleIfNeeded(pot, reported.scheduleRevision, "reported")
                 potService.publishSnapshot(pot.id)
             }
             "acks" -> commandService?.acceptAck(pot.id, appJson.decodeFromString(payload))
@@ -127,9 +129,21 @@ class MqttGateway(
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
                 require(online.deviceId == deviceId)
                 store.setOnline(deviceId, online.online, online.changedAt)
+                if (online.online) {
+                    resyncScheduleIfNeeded(pot, null, "online")
+                }
                 realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(online)))
             }
         }
+    }
+
+    private suspend fun resyncScheduleIfNeeded(pot: PotProfile, deviceRevision: Long?, reason: String) {
+        val items = store.listScheduleItems(pot.id)
+        if (items.isEmpty()) return
+        val serverRevision = scheduleRevision(items)
+        if (deviceRevision != null && deviceRevision >= serverRevision) return
+        runCatching { commandService?.syncSchedule(pot, items) }
+            .onFailure { System.err.println("Schedule MQTT resync on $reason skipped: ${it.message}") }
     }
 
     private suspend fun handleScheduleEvent(pot: PotProfile, event: DeviceEvent) {

@@ -1,5 +1,6 @@
 #include "app_cloud.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -158,6 +159,40 @@ static void publish_schedule_event(const char *event_type,
     publish_event_with_data(event_type, data);
 }
 
+static time_t parse_iso_utc_time(const char *value)
+{
+    if (value == NULL || value[0] == '\0') {
+        return 0;
+    }
+
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (sscanf(value, "%d-%d-%dT%d:%d:%dZ", &year, &month, &day, &hour, &minute, &second) != 6) {
+        return 0;
+    }
+    if (year < 2024 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 60) {
+        return 0;
+    }
+    static const int days_before_month[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    const bool leap = ((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0);
+    const int month_days = month == 2 ? (leap ? 29 : 28) :
+                           (month == 4 || month == 6 || month == 9 || month == 11 ? 30 : 31);
+    if (day > month_days) {
+        return 0;
+    }
+
+    int64_t days = 0;
+    for (int y = 1970; y < year; y++) {
+        days += (((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0)) ? 366 : 365;
+    }
+    days += days_before_month[month - 1];
+    if (leap && month > 2) {
+        days += 1;
+    }
+    days += day - 1;
+    return (time_t)(days * 86400 + hour * 3600 + minute * 60 + second);
+}
+
 static void sync_schedule_from_payload(cJSON *payload)
 {
     cJSON *revision = cJSON_GetObjectItem(payload, "revision");
@@ -189,6 +224,7 @@ static void sync_schedule_from_payload(cJSON *payload)
         items[count].title = title->valuestring;
         items[count].display_time = cJSON_IsString(display) && display->valuestring[0] ? display->valuestring :
                                     (cJSON_IsString(due_at) ? due_at->valuestring : "");
+        items[count].due_ts = cJSON_IsString(due_at) ? parse_iso_utc_time(due_at->valuestring) : 0;
         items[count].completed = cJSON_IsBool(completed) && cJSON_IsTrue(completed);
         count++;
     }
@@ -226,7 +262,7 @@ static void handle_command(const char *json)
             app_ui_show_emoji(emoji->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 2) * 1000U);
             if (strcmp(emoji->valuestring, "heart") == 0) app_ui_play_touch_reaction();
         } else if (cJSON_IsString(text) && text->valuestring[0] != '\0') {
-            app_ui_show_remote_content(text->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 20) * 1000U);
+            app_ui_show_remote_content(text->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 2) * 1000U);
         } else {
             ok = false;
         }

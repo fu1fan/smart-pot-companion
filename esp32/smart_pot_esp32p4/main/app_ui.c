@@ -74,6 +74,10 @@ static lv_obj_t *s_emoji_accent;
 static lv_obj_t *s_emoji_eye_left;
 static lv_obj_t *s_emoji_eye_right;
 static lv_obj_t *s_emoji_mouth;
+static lv_obj_t *s_emoji_symbol_label;
+static lv_obj_t *s_emoji_caption_label;
+static lv_obj_t *s_remote_popup;
+static lv_obj_t *s_remote_popup_label;
 static lv_obj_t *s_mode_label_face;
 static lv_obj_t *s_mode_label_schedule;
 static lv_obj_t *s_motion_status_label;
@@ -123,6 +127,8 @@ static lv_timer_t *s_schedule_blink_restore_timer;
 static lv_timer_t *s_pomodoro_timer;
 static lv_timer_t *s_schedule_cleanup_timer;
 static lv_timer_t *s_emoji_overlay_timer;
+static lv_timer_t *s_emoji_overlay_finish_timer;
+static lv_timer_t *s_remote_popup_finish_timer;
 static int32_t s_pomodoro_remaining_sec;
 static pomodoro_phase_t s_pomodoro_phase = POMODORO_IDLE;
 static char s_schedule_items[SCHEDULE_MAX_ITEMS][SCHEDULE_ITEM_LEN];
@@ -2663,10 +2669,43 @@ static void emoji_stage_scale_cb(void *obj, int32_t value)
     lv_obj_set_style_transform_scale((lv_obj_t *)obj, value, LV_PART_MAIN);
 }
 
+static const char *emoji_symbol_for_id(const char *id)
+{
+    if (strcmp(id, "heart") == 0) return "♥\n爱心";
+    if (strcmp(id, "smile") == 0) return "^_^\n微笑";
+    if (strcmp(id, "happy") == 0) return "^O^\n开心";
+    if (strcmp(id, "thirsty") == 0) return "水\n喝水";
+    if (strcmp(id, "dark") == 0) return "月\n月亮";
+    if (strcmp(id, "weak") == 0) return "T_T\n委屈";
+    if (strcmp(id, "wave") == 0) return "Hi\n挥手";
+    if (strcmp(id, "star") == 0) return "★\n星星";
+    if (strcmp(id, "flower") == 0) return "花\n花朵";
+    if (strcmp(id, "water") == 0) return "水\n水滴";
+    if (strcmp(id, "sun") == 0) return "日\n阳光";
+    if (strcmp(id, "sleep") == 0) return "Zzz\n睡觉";
+    return "^_^\n微笑";
+}
+
+static void emoji_overlay_finish_cb(lv_timer_t *timer)
+{
+    if (s_emoji_overlay != NULL) {
+        lv_obj_add_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_transform_scale(s_emoji_stage, 256, LV_PART_MAIN);
+    }
+    s_emoji_overlay_finish_timer = NULL;
+    lv_timer_delete(timer);
+}
+
 static void emoji_overlay_hide_cb(lv_timer_t *timer)
 {
     if (s_emoji_overlay != NULL) {
         lv_obj_fade_out(s_emoji_overlay, 360, 0);
+        if (s_emoji_overlay_finish_timer != NULL) {
+            lv_timer_delete(s_emoji_overlay_finish_timer);
+        }
+        s_emoji_overlay_finish_timer = lv_timer_create(emoji_overlay_finish_cb, 380, NULL);
+        lv_timer_set_repeat_count(s_emoji_overlay_finish_timer, 1);
     }
     s_emoji_overlay_timer = NULL;
     lv_timer_delete(timer);
@@ -2702,6 +2741,7 @@ static void ensure_emoji_overlay(void)
     lv_obj_set_style_radius(s_emoji_body, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_emoji_body, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(s_emoji_body, LV_ALIGN_CENTER, 0, 8);
+    lv_obj_add_flag(s_emoji_body, LV_OBJ_FLAG_HIDDEN);
 
     s_emoji_accent = lv_obj_create(s_emoji_stage);
     lv_obj_remove_style_all(s_emoji_accent);
@@ -2709,6 +2749,7 @@ static void ensure_emoji_overlay(void)
     lv_obj_set_style_radius(s_emoji_accent, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_emoji_accent, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(s_emoji_accent, LV_ALIGN_CENTER, 110, -88);
+    lv_obj_add_flag(s_emoji_accent, LV_OBJ_FLAG_HIDDEN);
 
     s_emoji_eye_left = lv_obj_create(s_emoji_body);
     lv_obj_remove_style_all(s_emoji_eye_left);
@@ -2733,6 +2774,26 @@ static void ensure_emoji_overlay(void)
     lv_obj_set_style_bg_opa(s_emoji_mouth, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_emoji_mouth, lv_color_hex(0x07110d), LV_PART_MAIN);
     lv_obj_align(s_emoji_mouth, LV_ALIGN_CENTER, 0, 48);
+
+    s_emoji_symbol_label = lv_label_create(s_emoji_stage);
+    lv_label_set_text(s_emoji_symbol_label, "^_^\n微笑");
+    lv_obj_set_width(s_emoji_symbol_label, 360);
+    lv_obj_set_style_text_align(s_emoji_symbol_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_emoji_symbol_label,
+                               s_schedule_title_font != NULL ? s_schedule_title_font : &lv_font_source_han_sans_sc_16_cjk,
+                               LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_emoji_symbol_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_transform_scale(s_emoji_symbol_label, 300, LV_PART_MAIN);
+    lv_obj_align(s_emoji_symbol_label, LV_ALIGN_CENTER, 0, -48);
+
+    s_emoji_caption_label = lv_label_create(s_emoji_stage);
+    lv_label_set_text(s_emoji_caption_label, "用户向你投递了一个表情。");
+    lv_label_set_long_mode(s_emoji_caption_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_emoji_caption_label, 370);
+    lv_obj_set_style_text_align(s_emoji_caption_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_emoji_caption_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_emoji_caption_label, lv_color_hex(0xeefbf2), LV_PART_MAIN);
+    lv_obj_align(s_emoji_caption_label, LV_ALIGN_BOTTOM_MID, 0, -34);
 }
 
 void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
@@ -2746,19 +2807,17 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
     lv_color_t body = lv_color_hex(0x76e39a);
     lv_color_t stage = lv_color_hex(0x102118);
     lv_color_t accent = lv_color_hex(0xf4ff89);
-    int32_t mouth_y = 48;
-    int32_t mouth_h = 18;
 
     if (strcmp(id, "heart") == 0) {
         body = lv_color_hex(0xff5f7d); stage = lv_color_hex(0x301018); accent = lv_color_hex(0xffb4c4);
     } else if (strcmp(id, "water") == 0 || strcmp(id, "thirsty") == 0) {
-        body = lv_color_hex(0x65cfff); stage = lv_color_hex(0x071d2a); accent = lv_color_hex(0xb8f3ff); mouth_y = 56;
+        body = lv_color_hex(0x65cfff); stage = lv_color_hex(0x071d2a); accent = lv_color_hex(0xb8f3ff);
     } else if (strcmp(id, "sun") == 0 || strcmp(id, "happy") == 0) {
         body = lv_color_hex(0xffd95a); stage = lv_color_hex(0x2d2408); accent = lv_color_hex(0xfff3a6);
     } else if (strcmp(id, "dark") == 0 || strcmp(id, "sleep") == 0) {
-        body = lv_color_hex(0x8688ff); stage = lv_color_hex(0x11122c); accent = lv_color_hex(0xd8d9ff); mouth_y = 58; mouth_h = 10;
+        body = lv_color_hex(0x8688ff); stage = lv_color_hex(0x11122c); accent = lv_color_hex(0xd8d9ff);
     } else if (strcmp(id, "weak") == 0) {
-        body = lv_color_hex(0xbfc6d0); stage = lv_color_hex(0x1d2026); accent = lv_color_hex(0xffd68d); mouth_y = 60; mouth_h = 10;
+        body = lv_color_hex(0xbfc6d0); stage = lv_color_hex(0x1d2026); accent = lv_color_hex(0xffd68d);
     } else if (strcmp(id, "flower") == 0) {
         body = lv_color_hex(0xff9bcc); stage = lv_color_hex(0x2b1023); accent = lv_color_hex(0xfff0a8);
     } else if (strcmp(id, "star") == 0) {
@@ -2770,8 +2829,8 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
     lv_obj_set_style_bg_color(s_emoji_stage, stage, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_emoji_body, body, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_emoji_accent, accent, LV_PART_MAIN);
-    lv_obj_set_size(s_emoji_mouth, 90, mouth_h);
-    lv_obj_align(s_emoji_mouth, LV_ALIGN_CENTER, 0, mouth_y);
+    lv_label_set_text(s_emoji_symbol_label, emoji_symbol_for_id(id));
+    lv_label_set_text(s_emoji_caption_label, "用户向你投递了一个表情。");
     lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_emoji_overlay);
     lv_obj_set_style_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
@@ -2790,32 +2849,101 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
     if (s_emoji_overlay_timer != NULL) {
         lv_timer_delete(s_emoji_overlay_timer);
     }
+    if (s_emoji_overlay_finish_timer != NULL) {
+        lv_timer_delete(s_emoji_overlay_finish_timer);
+        s_emoji_overlay_finish_timer = NULL;
+    }
     s_emoji_overlay_timer = lv_timer_create(emoji_overlay_hide_cb, duration_ms > 0 ? duration_ms : 2000, NULL);
     lv_timer_set_repeat_count(s_emoji_overlay_timer, 1);
     bsp_display_unlock();
 }
 
+static void remote_popup_finish_cb(lv_timer_t *timer)
+{
+    if (s_remote_popup != NULL) {
+        lv_obj_add_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_y(s_remote_popup, -132);
+    }
+    s_remote_popup_finish_timer = NULL;
+    lv_timer_delete(timer);
+}
+
 static void remote_content_hide_cb(lv_timer_t *timer)
 {
-    if (s_dialog_label != NULL) lv_obj_add_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
+    if (s_remote_popup != NULL) {
+        lv_anim_t slide;
+        lv_anim_init(&slide);
+        lv_anim_set_var(&slide, s_remote_popup);
+        lv_anim_set_exec_cb(&slide, (lv_anim_exec_xcb_t)lv_obj_set_y);
+        lv_anim_set_values(&slide, lv_obj_get_y(s_remote_popup), -132);
+        lv_anim_set_duration(&slide, 220);
+        lv_anim_set_path_cb(&slide, lv_anim_path_ease_in);
+        lv_anim_start(&slide);
+        if (s_remote_popup_finish_timer != NULL) {
+            lv_timer_delete(s_remote_popup_finish_timer);
+        }
+        s_remote_popup_finish_timer = lv_timer_create(remote_popup_finish_cb, 240, NULL);
+        lv_timer_set_repeat_count(s_remote_popup_finish_timer, 1);
+    }
     s_remote_content_timer = NULL;
     lv_timer_delete(timer);
 }
 
+static void ensure_remote_popup(void)
+{
+    if (s_remote_popup != NULL) {
+        return;
+    }
+
+    s_remote_popup = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_remote_popup);
+    lv_obj_set_size(s_remote_popup, UI_SCREEN_W - 56, UI_SCREEN_H / 4);
+    lv_obj_set_style_radius(s_remote_popup, 28, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_remote_popup, 230, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_remote_popup, lv_color_hex(0x18221b), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_remote_popup, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_remote_popup, lv_color_hex(0x9ee5b3), LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_remote_popup, 18, LV_PART_MAIN);
+    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(s_remote_popup, LV_ALIGN_TOP_MID, 0, -132);
+    lv_obj_add_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
+
+    s_remote_popup_label = lv_label_create(s_remote_popup);
+    lv_label_set_text(s_remote_popup_label, "");
+    lv_label_set_long_mode(s_remote_popup_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_remote_popup_label, UI_SCREEN_W - 112);
+    lv_obj_set_style_text_align(s_remote_popup_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_remote_popup_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_remote_popup_label, lv_color_hex(0xf7fff8), LV_PART_MAIN);
+    lv_obj_align(s_remote_popup_label, LV_ALIGN_CENTER, 0, 0);
+}
+
 void app_ui_show_remote_content(const char *text, uint32_t duration_ms)
 {
-    if (text == NULL || text[0] == '\0' || s_dialog_label == NULL) return;
+    if (text == NULL || text[0] == '\0') return;
     if (bsp_display_lock(200) != ESP_OK) return;
-    lv_label_set_text(s_dialog_label, text);
-    lv_label_set_long_mode(s_dialog_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_dialog_label, 560);
-    lv_obj_set_style_text_align(s_dialog_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_dialog_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_dialog_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_align(s_dialog_label, LV_ALIGN_BOTTOM_MID, 0, -54);
-    lv_obj_remove_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
+    ensure_remote_popup();
+    lv_label_set_text(s_remote_popup_label, text);
+    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_remote_popup);
+    lv_obj_set_y(s_remote_popup, -132);
+
+    lv_anim_t slide;
+    lv_anim_init(&slide);
+    lv_anim_set_var(&slide, s_remote_popup);
+    lv_anim_set_exec_cb(&slide, (lv_anim_exec_xcb_t)lv_obj_set_y);
+    lv_anim_set_values(&slide, -132, 12);
+    lv_anim_set_duration(&slide, 220);
+    lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
+    lv_anim_start(&slide);
+
     if (s_remote_content_timer != NULL) lv_timer_delete(s_remote_content_timer);
-    s_remote_content_timer = lv_timer_create(remote_content_hide_cb, duration_ms > 0 ? duration_ms : 20000, NULL);
+    if (s_remote_popup_finish_timer != NULL) {
+        lv_timer_delete(s_remote_popup_finish_timer);
+        s_remote_popup_finish_timer = NULL;
+    }
+    s_remote_content_timer = lv_timer_create(remote_content_hide_cb, duration_ms > 0 ? duration_ms : 2000, NULL);
     lv_timer_set_repeat_count(s_remote_content_timer, 1);
     bsp_display_unlock();
 }

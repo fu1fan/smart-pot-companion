@@ -68,7 +68,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary)
+                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary, viewModel::toggleSchedule)
                     tab == 2 -> ControlScreen(state, viewModel::control, viewModel::addSchedule, viewModel::toggleSchedule, viewModel::createShare, viewModel::redeemShare)
                     else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory)
                 }
@@ -220,6 +220,7 @@ private fun CareScreen(
     generateDiary: () -> Unit,
     recordPomodoro: () -> Unit,
     speakDiary: (PlantDiary) -> Unit,
+    toggleSchedule: (ScheduleItem, Boolean) -> Unit,
 ) {
     var note by remember { mutableStateOf("") }
     val careActions = listOf(CareType.WATER, CareType.FERTILIZE, CareType.PRUNE, CareType.REPOT, CareType.NEW_LEAF)
@@ -228,6 +229,7 @@ private fun CareScreen(
         item { GrowthTimelineCard(state) }
         item { TodayCareDiaryWeatherCard(state, generateDiary, speakDiary) }
         item { FocusGrowthCard(state, recordPomodoro) }
+        item { TodayCommonScheduleCard(state, toggleSchedule) }
         item {
             Text("养护日志", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             OutlinedTextField(note, { note = it }, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth())
@@ -258,6 +260,39 @@ private fun CareScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TodayCommonScheduleCard(state: SmartPotUiState, toggleSchedule: (ScheduleItem, Boolean) -> Unit) {
+    val items = todayScheduleItems(state)
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("当日共同日程", fontWeight = FontWeight.Bold)
+                Text("${items.count { it.completed }}/${items.size}", color = Leaf, fontWeight = FontWeight.SemiBold)
+            }
+            if (items.isEmpty()) {
+                Text("今天还没有共同日程", color = Color.Gray)
+            } else {
+                items.forEachIndexed { index, item ->
+                    if (index > 0) HorizontalDivider()
+                    TodayScheduleLine(item, onCheckedChange = { checked -> toggleSchedule(item, checked) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayScheduleLine(item: ScheduleItem, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = item.completed, onCheckedChange = onCheckedChange)
+        Column(Modifier.weight(1f)) {
+            Text(item.title, fontWeight = FontWeight.SemiBold)
+            Text("${scheduleSourceLabel(item.source)} · ${scheduleTimeText(item)}", fontSize = 12.sp, color = Color.Gray)
+        }
+        Text(if (item.completed) "已完成" else "待完成", color = if (item.completed) Leaf else Color.Gray, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -417,7 +452,7 @@ private fun ControlScreen(
             )
             Button(
                 onClick = {
-                    control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, text = text, durationSeconds = 30))
+                    control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, text = text, durationSeconds = 2))
                     text = ""
                 },
                 enabled = text.isNotBlank(),
@@ -467,8 +502,7 @@ private fun ScheduleRow(item: ScheduleItem, onCheckedChange: (Boolean) -> Unit) 
             Checkbox(checked = item.completed, onCheckedChange = onCheckedChange)
             Column(Modifier.weight(1f)) {
                 Text(item.title, fontWeight = FontWeight.SemiBold)
-                val timeText = item.displayTime.ifBlank { item.dueAt?.take(16)?.replace('T', ' ') ?: "未设置提醒时间" }
-                Text("${if (item.source == "ESP") "ESP 语音" else "手机"} · $timeText", fontSize = 12.sp, color = Color.Gray)
+                Text("${scheduleSourceLabel(item.source)} · ${scheduleTimeText(item)}", fontSize = 12.sp, color = Color.Gray)
             }
             if (item.completed) Text("已完成", color = Leaf, fontWeight = FontWeight.SemiBold)
         }
@@ -524,6 +558,28 @@ private fun diaryMoodEmoji(diary: PlantDiary): String {
         else -> "✨"
     }
 }
+
+private fun todayScheduleItems(state: SmartPotUiState): List<ScheduleItem> {
+    val zone = zoneIdOf(state.snapshot?.pot?.timezone)
+    val today = LocalDate.now(zone)
+    return state.schedule?.items.orEmpty()
+        .filter { item ->
+            val dueDate = item.dueAt?.let(::parseInstant)?.atZone(zone)?.toLocalDate()
+            val createdDate = parseInstant(item.createdAt)?.atZone(zone)?.toLocalDate()
+            when {
+                dueDate != null -> dueDate == today
+                item.displayTime.contains("今") -> true
+                else -> createdDate == today
+            }
+        }
+        .sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
+}
+
+private fun scheduleTimeText(item: ScheduleItem): String =
+    item.displayTime.ifBlank { item.dueAt?.take(16)?.replace('T', ' ') ?: "未设置提醒时间" }
+
+private fun scheduleSourceLabel(source: String): String =
+    if (source == "ESP") "ESP 语音" else "手机"
 
 private fun dashboardMetrics(state: SmartPotUiState): DashboardMetrics {
     val snap = state.snapshot
