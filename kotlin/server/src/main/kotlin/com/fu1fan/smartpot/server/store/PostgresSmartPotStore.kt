@@ -209,7 +209,7 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         listPotJson("schedule_items", potId, "completed, COALESCE(due_at, updated_at), updated_at")
 
     override suspend fun saveScheduleItem(item: ScheduleItem) = saveJsonRecord(
-        "INSERT INTO schedule_items(id,pot_id,due_at,completed,updated_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?,?,?::jsonb) ON CONFLICT(id) DO UPDATE SET due_at=EXCLUDED.due_at,completed=EXCLUDED.completed,updated_at=EXCLUDED.updated_at,data=EXCLUDED.data",
+        "INSERT INTO schedule_items(id,pot_id,due_at,completed,updated_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?,?::timestamptz,?::jsonb) ON CONFLICT(id) DO UPDATE SET due_at=EXCLUDED.due_at,completed=EXCLUDED.completed,updated_at=EXCLUDED.updated_at,data=EXCLUDED.data",
         item.id, item.potId, item.dueAt, item.completed, item.updatedAt, encode(item),
     )
 
