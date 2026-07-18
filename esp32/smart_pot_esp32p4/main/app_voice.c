@@ -15,6 +15,7 @@
 #include "model_path.h"
 
 #include "app_asr.h"
+#include "app_board_config.h"
 #include "app_llm.h"
 #include "app_tts.h"
 #include "app_ui.h"
@@ -43,6 +44,18 @@
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
+
+#ifndef APP_BOARD_WAKENET_ENABLE
+#define APP_BOARD_WAKENET_ENABLE 0
+#endif
+
+#ifndef APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES
+#define APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES 1600
+#endif
+
+#ifndef APP_BOARD_VOICE_TASK_STACK_BYTES
+#define APP_BOARD_VOICE_TASK_STACK_BYTES 12288
+#endif
 
 static const char *TAG = "app_voice";
 static volatile bool s_pause_requested;
@@ -187,6 +200,8 @@ static bool open_microphone(esp_codec_dev_handle_t mic)
     return true;
 }
 
+static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_phrase);
+
 static void drain_microphone_frames(esp_codec_dev_handle_t mic, int16_t *samples,
                                     size_t bytes, int frames)
 {
@@ -195,6 +210,123 @@ static void drain_microphone_frames(esp_codec_dev_handle_t mic, int16_t *samples
     }
     for (int i = 0; i < frames; i++) {
         (void)esp_codec_dev_read(mic, samples, bytes);
+    }
+}
+
+static bool service_microphone_pause(esp_codec_dev_handle_t mic, int16_t *samples,
+                                     size_t bytes, const char *ready_status)
+{
+    if (s_pause_requested) {
+        if (!s_mic_paused) {
+            if (esp_codec_dev_close(mic) != ESP_CODEC_DEV_OK) {
+                ESP_LOGW(TAG, "Failed to pause microphone codec");
+            } else {
+                s_mic_paused = true;
+                ESP_LOGI(TAG, "Microphone paused for speaker playback");
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+        return true;
+    }
+
+    if (s_mic_paused) {
+        if (!open_microphone(mic)) {
+            app_ui_set_voice_status("Wake: mic resume failed");
+            vTaskDelay(pdMS_TO_TICKS(200));
+            return true;
+        }
+        drain_microphone_frames(mic, samples, bytes, VOICE_REARM_DRAIN_FRAMES);
+        s_mic_paused = false;
+        s_wakenet_rearm_requested = true;
+        app_ui_set_voice_status(ready_status);
+        ESP_LOGI(TAG, "Microphone resumed after speaker playback");
+    }
+
+    return false;
+}
+
+static bool service_pending_voice_request(esp_codec_dev_handle_t mic)
+{
+    if (s_manual_request) {
+        s_manual_request = false;
+        ESP_LOGI(TAG, "Manual voice conversation requested");
+        app_ui_set_voice_status("ASR: listening");
+        transcribe_and_reply(mic, false);
+        return true;
+    }
+
+    if (s_followup_request) {
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(now - s_followup_deadline) >= 0) {
+            s_followup_request = false;
+            app_ui_set_voice_status(VOICE_WAKE_HINT);
+        } else {
+            s_followup_request = false;
+            ESP_LOGI(TAG, "Follow-up voice conversation requested");
+            app_ui_set_voice_status("ASR: follow-up");
+            transcribe_and_reply(mic, false);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
+{
+    size_t sample_count = APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES;
+    int16_t *samples = calloc(sample_count, sizeof(int16_t));
+    if (samples == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate direct voice wake buffer");
+        app_ui_set_voice_status("Wake: no memory");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    TickType_t last_wake_tick = 0;
+    int wake_energy_packets = 0;
+    s_voice_ready = true;
+    s_wakenet_rearm_requested = false;
+    app_ui_set_voice_status(VOICE_WAKE_HINT);
+    ESP_LOGW(TAG, "WakeNet inference disabled by board config; using ASR wake phrase confirmation");
+
+    while (true) {
+        if (service_microphone_pause(mic, samples, sample_count * sizeof(int16_t), VOICE_WAKE_HINT)) {
+            continue;
+        }
+        if (s_wakenet_rearm_requested) {
+            s_wakenet_rearm_requested = false;
+        }
+
+        int ret = esp_codec_dev_read(mic, samples, sample_count * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            ESP_LOGW(TAG, "Microphone read failed: %d", ret);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        if (service_pending_voice_request(mic)) {
+            continue;
+        }
+
+        TickType_t wake_now = xTaskGetTickCount();
+        int level = average_sample_level(samples, sample_count);
+        if (!s_conversation_busy && level >= CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD) {
+            wake_energy_packets++;
+        } else {
+            wake_energy_packets = 0;
+        }
+        if (!s_conversation_busy && wake_energy_packets >= VOICE_WAKE_ENERGY_PACKETS &&
+            cooldown_done(wake_now, last_wake_tick)) {
+            last_wake_tick = wake_now;
+            wake_energy_packets = 0;
+            ESP_LOGI(TAG, "Energy wake candidate level=%d threshold=%d",
+                     level, CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD);
+            app_ui_set_voice_status("Wake: checking phrase");
+            transcribe_and_reply(mic, true);
+        } else if (!s_conversation_busy && cooldown_done(wake_now, last_wake_tick)) {
+            app_ui_set_voice_status(VOICE_WAKE_HINT);
+        }
     }
 }
 
@@ -298,6 +430,12 @@ static void voice_task(void *arg)
         return;
     }
 
+    if (!APP_BOARD_WAKENET_ENABLE) {
+        run_energy_wake_loop(mic);
+        vTaskDelete(NULL);
+        return;
+    }
+
     srmodel_list_t *models = esp_srmodel_init("model");
     if (models == NULL) {
         ESP_LOGE(TAG, "Failed to load ESP-SR models from model partition");
@@ -333,6 +471,16 @@ static void voice_task(void *arg)
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
 
     const esp_afe_sr_iface_t *afe_handle = esp_afe_handle_from_config(afe_config);
+    if (afe_handle == NULL || afe_handle->create_from_config == NULL ||
+        afe_handle->feed == NULL || afe_handle->fetch_with_delay == NULL ||
+        afe_handle->get_feed_chunksize == NULL || afe_handle->get_feed_channel_num == NULL ||
+        afe_handle->destroy == NULL) {
+        ESP_LOGE(TAG, "Invalid AFE interface");
+        app_ui_set_voice_status("Wake: AFE invalid");
+        afe_config_free(afe_config);
+        vTaskDelete(NULL);
+        return;
+    }
     esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
     afe_config_free(afe_config);
     if (afe_data == NULL) {
@@ -345,6 +493,14 @@ static void voice_task(void *arg)
 
     int feed_chunksize = afe_handle->get_feed_chunksize(afe_data);
     int feed_channels = afe_handle->get_feed_channel_num(afe_data);
+    if (feed_chunksize <= 0 || feed_channels <= 0) {
+        ESP_LOGE(TAG, "Invalid AFE feed shape: chunks=%d channels=%d",
+                 feed_chunksize, feed_channels);
+        app_ui_set_voice_status("Wake: AFE shape invalid");
+        afe_handle->destroy(afe_data);
+        vTaskDelete(NULL);
+        return;
+    }
     int16_t *samples = calloc(feed_chunksize * feed_channels, sizeof(int16_t));
     if (samples == NULL) {
         app_ui_set_voice_status("Wake: no memory");
@@ -363,32 +519,10 @@ static void voice_task(void *arg)
              CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT, threshold_result);
 
     while (true) {
-        if (s_pause_requested) {
-            if (!s_mic_paused) {
-                if (esp_codec_dev_close(mic) != ESP_CODEC_DEV_OK) {
-                    ESP_LOGW(TAG, "Failed to pause microphone codec");
-                } else {
-                    s_mic_paused = true;
-                    ESP_LOGI(TAG, "Microphone paused for speaker playback");
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(20));
+        if (service_microphone_pause(mic, samples,
+                                     feed_chunksize * feed_channels * sizeof(int16_t),
+                                     VOICE_WAKE_HINT)) {
             continue;
-        }
-
-        if (s_mic_paused) {
-            if (!open_microphone(mic)) {
-                app_ui_set_voice_status("Wake: mic resume failed");
-                vTaskDelay(pdMS_TO_TICKS(200));
-                continue;
-            }
-            drain_microphone_frames(mic, samples,
-                                    feed_chunksize * feed_channels * sizeof(int16_t),
-                                    VOICE_REARM_DRAIN_FRAMES);
-            s_mic_paused = false;
-            s_wakenet_rearm_requested = true;
-            app_ui_set_voice_status(VOICE_WAKE_HINT);
-            ESP_LOGI(TAG, "Microphone resumed after speaker playback");
         }
 
         if (s_wakenet_rearm_requested) {
@@ -403,26 +537,8 @@ static void voice_task(void *arg)
             continue;
         }
 
-        if (s_manual_request) {
-            s_manual_request = false;
-            ESP_LOGI(TAG, "Manual voice conversation requested");
-            app_ui_set_voice_status("ASR: listening");
-            transcribe_and_reply(mic, false);
+        if (service_pending_voice_request(mic)) {
             continue;
-        }
-
-        if (s_followup_request) {
-            TickType_t now = xTaskGetTickCount();
-            if ((int32_t)(now - s_followup_deadline) >= 0) {
-                s_followup_request = false;
-                app_ui_set_voice_status(VOICE_WAKE_HINT);
-            } else {
-                s_followup_request = false;
-                ESP_LOGI(TAG, "Follow-up voice conversation requested");
-                app_ui_set_voice_status("ASR: follow-up");
-                transcribe_and_reply(mic, false);
-                continue;
-            }
         }
 
         TickType_t wake_now = xTaskGetTickCount();
@@ -465,7 +581,12 @@ static void voice_task(void *arg)
 
 void app_voice_start(void)
 {
-    xTaskCreate(voice_task, "smart_pot_wakenet", 8192, NULL, 5, NULL);
+    BaseType_t created = xTaskCreate(voice_task, "smart_pot_voice",
+                                     APP_BOARD_VOICE_TASK_STACK_BYTES, NULL, 5, NULL);
+    if (created != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create voice task");
+        app_ui_set_voice_status("Wake: task failed");
+    }
 }
 
 void app_voice_request_conversation(void)

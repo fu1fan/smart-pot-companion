@@ -17,6 +17,7 @@
 
 #include "app_time.h"
 #include "app_tts.h"
+#include "app_board_config.h"
 
 #ifndef CONFIG_SMART_POT_SENSOR_HARDWARE_ENABLE
 #define CONFIG_SMART_POT_SENSOR_HARDWARE_ENABLE 0
@@ -448,7 +449,7 @@ static uint8_t lux_to_percent(uint32_t lux)
 
 static int light_strip_level(bool on)
 {
-    bool active_high = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH;
+    bool active_high = APP_BOARD_LIGHT_STRIP_ACTIVE_HIGH;
     return on == active_high ? 1 : 0;
 }
 
@@ -492,8 +493,8 @@ static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool ligh
         return;
     }
 
-    uint8_t on_threshold = clamp_percent(CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT);
-    uint8_t off_threshold = clamp_percent(CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT);
+    uint8_t on_threshold = clamp_percent(APP_BOARD_LIGHT_STRIP_ON_PERCENT);
+    uint8_t off_threshold = clamp_percent(APP_BOARD_LIGHT_STRIP_OFF_PERCENT);
     if (off_threshold < on_threshold) {
         off_threshold = on_threshold;
     }
@@ -521,18 +522,18 @@ static void update_light_strip(sensor_hw_t *hw, uint8_t light_percent, bool ligh
     if (!hw->light_strip_on &&
         low_light &&
         light_strip_elapsed(hw->light_strip_low_since_us, now_us,
-                            CONFIG_SMART_POT_LIGHT_STRIP_ON_CONFIRM_MS) &&
+                            APP_BOARD_LIGHT_STRIP_ON_CONFIRM_MS) &&
         light_strip_elapsed(hw->light_strip_changed_us, now_us,
-                            CONFIG_SMART_POT_LIGHT_STRIP_MIN_OFF_MS)) {
+                            APP_BOARD_LIGHT_STRIP_MIN_OFF_MS)) {
         set_light_strip(hw, true, light_percent, "below required light");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
     } else if (hw->light_strip_on &&
                enough_light &&
                light_strip_elapsed(hw->light_strip_high_since_us, now_us,
-                                   CONFIG_SMART_POT_LIGHT_STRIP_OFF_CONFIRM_MS) &&
+                                   APP_BOARD_LIGHT_STRIP_OFF_CONFIRM_MS) &&
                light_strip_elapsed(hw->light_strip_changed_us, now_us,
-                                   CONFIG_SMART_POT_LIGHT_STRIP_MIN_ON_MS)) {
+                                   APP_BOARD_LIGHT_STRIP_MIN_ON_MS)) {
         set_light_strip(hw, false, light_percent, "light enough");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
@@ -717,23 +718,28 @@ static esp_err_t read_bh1750(sensor_hw_t *hw, uint32_t *lux)
 
 static void init_light_strip(sensor_hw_t *hw)
 {
-    if (!CONFIG_SMART_POT_LIGHT_STRIP_ENABLE ||
-        !gpio_configured(CONFIG_SMART_POT_LIGHT_STRIP_GPIO)) {
+    if (!APP_BOARD_LIGHT_STRIP_ENABLE ||
+        !gpio_configured(APP_BOARD_LIGHT_STRIP_GPIO)) {
         return;
     }
-    if (gpio_reserved_for_console(CONFIG_SMART_POT_LIGHT_STRIP_GPIO)) {
+    if (gpio_reserved_for_console(APP_BOARD_LIGHT_STRIP_GPIO)) {
         ESP_LOGE(TAG, "Light strip GPIO%d is reserved for console UART; light strip output disabled",
-                 CONFIG_SMART_POT_LIGHT_STRIP_GPIO);
+                 APP_BOARD_LIGHT_STRIP_GPIO);
         return;
     }
 
-    hw->light_strip_gpio = (gpio_num_t)CONFIG_SMART_POT_LIGHT_STRIP_GPIO;
+    if (CONFIG_SMART_POT_LIGHT_STRIP_GPIO != APP_BOARD_LIGHT_STRIP_GPIO) {
+        ESP_LOGW(TAG, "Ignoring local sdkconfig light-strip GPIO%d; using board GPIO%d",
+                 CONFIG_SMART_POT_LIGHT_STRIP_GPIO, APP_BOARD_LIGHT_STRIP_GPIO);
+    }
+
+    hw->light_strip_gpio = (gpio_num_t)APP_BOARD_LIGHT_STRIP_GPIO;
     gpio_set_level(hw->light_strip_gpio, light_strip_level(false));
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << hw->light_strip_gpio,
         .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
-        .pull_down_en = CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = APP_BOARD_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
+        .pull_down_en = APP_BOARD_LIGHT_STRIP_ACTIVE_HIGH ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
@@ -742,9 +748,9 @@ static void init_light_strip(sensor_hw_t *hw)
     hw->light_strip_changed_us = esp_timer_get_time();
     ESP_LOGI(TAG, "Light strip breaker configured on GPIO%d active_%s on<%d%% off>=%d%%",
              hw->light_strip_gpio,
-             CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH ? "high" : "low",
-             CONFIG_SMART_POT_LIGHT_STRIP_ON_PERCENT,
-             CONFIG_SMART_POT_LIGHT_STRIP_OFF_PERCENT);
+             APP_BOARD_LIGHT_STRIP_ACTIVE_HIGH ? "high" : "low",
+             APP_BOARD_LIGHT_STRIP_ON_PERCENT,
+             APP_BOARD_LIGHT_STRIP_OFF_PERCENT);
 }
 
 static void init_touch(sensor_hw_t *hw)

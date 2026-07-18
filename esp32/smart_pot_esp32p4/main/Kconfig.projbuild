@@ -225,6 +225,8 @@ menu "Smart Pot"
                 Drive an external normally-open breaker or relay for the plant light strip.
                 The default wiring uses GPIO21 and turns the strip on with a high level.
                 Do not use GPIO37/GPIO38 because they are used by the console UART.
+                Runtime wiring is pinned in app_board_config.h so local sdkconfig
+                cannot accidentally override synced board GPIO assignments.
 
         config SMART_POT_LIGHT_STRIP_GPIO
             int "GPIO connected to light strip breaker"
