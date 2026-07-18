@@ -11,6 +11,7 @@ import com.fu1fan.smartpot.server.scheduleRevision
 import com.fu1fan.smartpot.server.scheduleState
 import com.fu1fan.smartpot.server.syncProfile
 import com.fu1fan.smartpot.server.syncSchedule
+import com.fu1fan.smartpot.server.visibleScheduleItems
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
@@ -158,9 +159,8 @@ class MqttGateway(
 
     private suspend fun resyncScheduleIfNeeded(pot: PotProfile, deviceRevision: Long?, reason: String) {
         val items = store.listScheduleItems(pot.id)
-        if (items.isEmpty()) return
-        val serverRevision = scheduleRevision(items)
-        if (deviceRevision != null && deviceRevision >= serverRevision) return
+        val serverRevision = scheduleRevision(visibleScheduleItems(items))
+        if (deviceRevision != null && deviceRevision == serverRevision) return
         runCatching { commandService?.syncSchedule(pot, items) }
             .onFailure { System.err.println("Schedule MQTT resync on $reason skipped: ${it.message}") }
     }
@@ -200,13 +200,14 @@ class MqttGateway(
                 val scheduleId = event.data.stringValue("scheduleId").ifBlank { event.data.stringValue("id") }
                 val title = event.data.stringValue("title")
                 val items = store.listScheduleItems(pot.id)
+                val completed = event.data["completed"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
                 val current = items.firstOrNull { it.id == scheduleId }
-                    ?: items.firstOrNull { !it.completed && it.title == title }
+                    ?: items.firstOrNull { it.completed != completed && it.title == title }
                     ?: return
                 store.saveScheduleItem(
                     current.copy(
-                        completed = true,
-                        completedAt = event.occurredAt,
+                        completed = completed,
+                        completedAt = if (completed) current.completedAt ?: event.occurredAt else null,
                         updatedAt = event.occurredAt,
                     ),
                 )

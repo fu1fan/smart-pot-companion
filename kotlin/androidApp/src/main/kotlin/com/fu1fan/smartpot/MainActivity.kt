@@ -12,7 +12,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import com.fu1fan.smartpot.ui.SmartPotApp
 import com.fu1fan.smartpot.ui.SmartPotViewModel
 import kotlinx.coroutines.launch
@@ -25,13 +24,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannel()
+        createScheduleNotificationChannel(this)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         lifecycleScope.launch {
-            repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                viewModel.state.collect { state ->
-                    state.snapshot?.activeAlerts?.filter { notified.add(it.id) }?.forEach { alert ->
+            viewModel.state.collect { state ->
+                state.schedule?.items?.let { items ->
+                    ScheduleReminderScheduler.sync(this@MainActivity, items, state.snapshot?.pot?.displayName.orEmpty())
+                }
+                state.snapshot?.activeAlerts?.filter { notified.add(it.id) }?.forEach { alert ->
                         getSystemService(NotificationManager::class.java).notify(
                             alert.id.hashCode(),
                             NotificationCompat.Builder(this@MainActivity, "plant_alerts")
@@ -42,7 +44,6 @@ class MainActivity : ComponentActivity() {
                                 .setAutoCancel(true)
                                 .build(),
                         )
-                    }
                 }
             }
         }

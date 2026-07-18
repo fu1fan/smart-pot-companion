@@ -12,15 +12,31 @@ import com.fu1fan.smartpot.server.service.CommandService
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.math.roundToInt
 
-private const val MaxSyncedScheduleItems = 8
+private const val MaxSyncedScheduleItems = 4
+private const val CompletedScheduleVisibleSeconds = 120L
 
-internal fun scheduleState(items: List<ScheduleItem>): ScheduleSyncState =
-    ScheduleSyncState(scheduleRevision(items), items)
+internal fun scheduleState(items: List<ScheduleItem>, now: Instant = Instant.now()): ScheduleSyncState {
+    val visible = visibleScheduleItems(items, now)
+    return ScheduleSyncState(scheduleRevision(visible), visible)
+}
+
+internal fun visibleScheduleItems(items: List<ScheduleItem>, now: Instant = Instant.now()): List<ScheduleItem> =
+    items.filter { item ->
+        if (!item.completed) return@filter true
+        val completedAt = item.completedAt?.let { value -> runCatching { Instant.parse(value) }.getOrNull() } ?: return@filter true
+        completedAt.plusSeconds(CompletedScheduleVisibleSeconds).isAfter(now)
+    }.sortedWith(
+        compareBy<ScheduleItem> { it.completed }
+            .thenBy { it.dueAt ?: it.displayTime }
+            .thenBy { it.createdAt },
+    )
 
 internal fun scheduleRevision(items: List<ScheduleItem>): Long =
     items.maxOfOrNull { runCatching { Instant.parse(it.updatedAt).toEpochMilli() }.getOrDefault(0L) } ?: 0L
@@ -33,10 +49,13 @@ internal fun scheduleItemFrom(
 ): ScheduleItem {
     val title = request.title.trim()
     require(title.isNotBlank() && title.length <= 80) { "日程内容应为 1-80 个字符" }
-    val dueAt = request.dueAt?.trim()?.takeIf { it.isNotBlank() }?.also {
+    val requestedDueAt = request.dueAt?.trim()?.takeIf { it.isNotBlank() }?.also {
         require(runCatching { Instant.parse(it) }.isSuccess) { "日程时间格式应为 ISO-8601" }
     }
-    val displayTime = request.displayTime.trim().take(40)
+    val requestedDisplayTime = request.displayTime.trim().take(40)
+    val dueAt = requestedDueAt ?: parseScheduleDueAt(pot, requestedDisplayTime, now)?.toString()
+    val displayTime = dueAt?.let { scheduleDisplayTime(pot, Instant.parse(it)) }
+        ?: requestedDisplayTime
     return ScheduleItem(
         id = UUID.randomUUID().toString(),
         potId = pot.id,
@@ -74,17 +93,17 @@ internal fun updatedScheduleItem(
     )
 }
 
-internal suspend fun CommandService.syncSchedule(pot: PotProfile, items: List<ScheduleItem>) =
+internal suspend fun CommandService.syncSchedule(pot: PotProfile, items: List<ScheduleItem>) {
+    val visible = visibleScheduleItems(items)
     submit(
         pot,
         DeviceControlRequest(
             type = DeviceCommandType.SYNC_SCHEDULE,
-            scheduleRevision = scheduleRevision(items),
-            scheduleItems = items
-                .sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
-                .take(MaxSyncedScheduleItems),
+            scheduleRevision = scheduleRevision(visible),
+            scheduleItems = visible.take(MaxSyncedScheduleItems),
         ),
     )
+}
 
 internal suspend fun CommandService.syncProfile(pot: PotProfile) =
     submit(pot, DeviceControlRequest(type = DeviceCommandType.SYNC_PROFILE))
@@ -112,6 +131,9 @@ internal suspend fun mergeDeviceScheduleItems(
         val dueAt = reported.dueAt?.trim()?.takeIf { it.isNotBlank() && runCatching { Instant.parse(it) }.isSuccess }
             ?: reported.dueAtEpochSeconds?.takeIf { it > 0 }?.let { Instant.ofEpochSecond(it).toString() }
         val reportedId = reported.id.trim().validUuidOrNull()
+        val reportedCompletedAt = reported.completedAtEpochSeconds
+            ?.takeIf { it > 0 }
+            ?.let { Instant.ofEpochSecond(it).toString() }
         val current = reportedId?.let { id -> existing.firstOrNull { it.id == id } }
             ?: existing.firstOrNull { item ->
                 item.title == title &&
@@ -125,9 +147,9 @@ internal suspend fun mergeDeviceScheduleItems(
                 title = title,
                 dueAt = dueAt ?: item.dueAt,
                 displayTime = displayTime.ifBlank { item.displayTime },
-                completed = reported.completed,
+                completed = item.completed || reported.completed,
                 completedAt = when {
-                    reported.completed -> item.completedAt ?: nowText
+                    item.completed || reported.completed -> item.completedAt ?: reportedCompletedAt ?: nowText
                     else -> null
                 },
                 source = source,
@@ -140,7 +162,7 @@ internal suspend fun mergeDeviceScheduleItems(
             dueAt = dueAt,
             displayTime = displayTime,
             completed = reported.completed,
-            completedAt = if (reported.completed) nowText else null,
+            completedAt = if (reported.completed) reportedCompletedAt ?: nowText else null,
             source = "ESP",
             createdAt = nowText,
             updatedAt = nowText,
@@ -166,11 +188,29 @@ internal fun potGrowthDays(pot: PotProfile, now: Instant = Instant.now()): Int {
 
 internal fun scheduleCompletionPercent(items: List<ScheduleItem>, date: LocalDate, zone: ZoneId): Int? {
     val daily = items.filter { item ->
-        (item.dueAt ?: item.createdAt).toLocalDate(zone) == date
+        item.createdAt.toLocalDate(zone) == date
     }
     if (daily.isEmpty()) return null
     return ((daily.count { it.completed }.toDouble() / daily.size) * 100).roundToInt().coerceIn(0, 100)
 }
+
+internal fun parseScheduleDueAt(pot: PotProfile, value: String, now: Instant = Instant.now()): Instant? {
+    val text = value.trim()
+    if (text.isBlank()) return null
+    val zone = zoneIdOf(pot.timezone)
+    val year = now.atZone(zone).year
+    val local = runCatching {
+        LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd/HH:mm"))
+    }.recoverCatching {
+        LocalDateTime.parse("$year-$text", DateTimeFormatter.ofPattern("yyyy-MM-dd/HH:mm"))
+    }.recoverCatching {
+        LocalDateTime.parse(text.replace(' ', '/'), DateTimeFormatter.ofPattern("yyyy-MM-dd/HH:mm"))
+    }.getOrNull() ?: return null
+    return local.atZone(zone).toInstant()
+}
+
+internal fun scheduleDisplayTime(pot: PotProfile, dueAt: Instant): String =
+    DateTimeFormatter.ofPattern("MM-dd/HH:mm").format(dueAt.atZone(zoneIdOf(pot.timezone)))
 
 private fun String.validUuidOrNull(): String? {
     val value = trim()

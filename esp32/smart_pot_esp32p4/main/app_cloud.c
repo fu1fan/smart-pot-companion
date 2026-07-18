@@ -136,6 +136,9 @@ static void publish_reported(void)
             cJSON_AddNumberToObject(item, "dueAtEpochSeconds", (double)schedule_items[i].due_ts);
         }
         cJSON_AddBoolToObject(item, "completed", schedule_items[i].completed);
+        if (schedule_items[i].completed_ts > 0) {
+            cJSON_AddNumberToObject(item, "completedAtEpochSeconds", (double)schedule_items[i].completed_ts);
+        }
         cJSON_AddItemToArray(schedule_json, item);
     }
     cJSON_AddItemToObject(root, "scheduleItems", schedule_json);
@@ -236,7 +239,7 @@ static time_t parse_iso_utc_time(const char *value)
 static void sync_schedule_from_payload(cJSON *payload)
 {
     cJSON *revision = cJSON_GetObjectItem(payload, "revision");
-    if (cJSON_IsNumber(revision) && revision->valuedouble > 0) {
+    if (cJSON_IsNumber(revision) && revision->valuedouble >= 0) {
         s_schedule_revision = (uint64_t)revision->valuedouble;
     }
 
@@ -257,6 +260,7 @@ static void sync_schedule_from_payload(cJSON *payload)
         cJSON *display = cJSON_GetObjectItem(item, "displayTime");
         cJSON *due_at = cJSON_GetObjectItem(item, "dueAt");
         cJSON *completed = cJSON_GetObjectItem(item, "completed");
+        cJSON *completed_at = cJSON_GetObjectItem(item, "completedAt");
         if (!cJSON_IsString(title) || title->valuestring[0] == '\0') {
             continue;
         }
@@ -266,6 +270,7 @@ static void sync_schedule_from_payload(cJSON *payload)
                                     (cJSON_IsString(due_at) ? due_at->valuestring : "");
         items[count].due_ts = cJSON_IsString(due_at) ? parse_iso_utc_time(due_at->valuestring) : 0;
         items[count].completed = cJSON_IsBool(completed) && cJSON_IsTrue(completed);
+        items[count].completed_ts = cJSON_IsString(completed_at) ? parse_iso_utc_time(completed_at->valuestring) : 0;
         count++;
     }
     app_ui_set_schedule_items(items, count);

@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +27,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private val Leaf = Color(0xFF407A52)
@@ -298,7 +300,7 @@ private fun CareScreen(
         item { GrowthTimelineCard(state) }
         item { TodayCareDiaryWeatherCard(state, generateDiary, speakDiary) }
         item { FocusGrowthCard(state, recordPomodoro) }
-        item { TodayCommonScheduleCard(state, toggleSchedule) }
+        item { TodayScheduleCard(state, toggleSchedule) }
         item {
             Text("养护日志", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             OutlinedTextField(note, { note = it }, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth())
@@ -333,16 +335,16 @@ private fun CareScreen(
 }
 
 @Composable
-private fun TodayCommonScheduleCard(state: SmartPotUiState, toggleSchedule: (ScheduleItem, Boolean) -> Unit) {
+private fun TodayScheduleCard(state: SmartPotUiState, toggleSchedule: (ScheduleItem, Boolean) -> Unit) {
     val items = todayScheduleItems(state)
     ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("当日共同日程", fontWeight = FontWeight.Bold)
+                Text("当日日程", fontWeight = FontWeight.Bold)
                 Text("${items.count { it.completed }}/${items.size}", color = Leaf, fontWeight = FontWeight.SemiBold)
             }
             if (items.isEmpty()) {
-                Text("今天还没有共同日程", color = Color.Gray)
+                Text("今天还没有日程", color = Color.Gray)
             } else {
                 items.forEachIndexed { index, item ->
                     if (index > 0) HorizontalDivider()
@@ -359,7 +361,7 @@ private fun TodayScheduleLine(item: ScheduleItem, onCheckedChange: (Boolean) -> 
         Checkbox(checked = item.completed, onCheckedChange = onCheckedChange)
         Column(Modifier.weight(1f)) {
             Text(item.title, fontWeight = FontWeight.SemiBold)
-            Text("${scheduleSourceLabel(item.source)} · ${scheduleTimeText(item)}", fontSize = 12.sp, color = Color.Gray)
+            Text(scheduleTimeText(item), fontSize = 12.sp, color = Color.Gray)
         }
         Text(if (item.completed) "已完成" else "待完成", color = if (item.completed) Leaf else Color.Gray, fontWeight = FontWeight.SemiBold)
     }
@@ -479,6 +481,7 @@ private fun ControlScreen(
     val offStartMinute = parseMinuteOfDay(offStartText)
     val offEndMinute = parseMinuteOfDay(offEndText)
     val offPeriodValid = offStartMinute != null && offEndMinute != null && offStartMinute != offEndMinute
+    val scheduleTimeValid = parseScheduleDueAtInput(scheduleTime, state.snapshot?.pot?.timezone ?: "Asia/Shanghai") != null
 
     LazyColumn(
         Modifier.fillMaxSize().padding(16.dp),
@@ -486,7 +489,7 @@ private fun ControlScreen(
         contentPadding = PaddingValues(bottom = 12.dp),
     ) {
         item {
-            Text("日程同步", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("日程表", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 scheduleTitle,
                 { scheduleTitle = it.take(80) },
@@ -498,9 +501,10 @@ private fun ControlScreen(
                 OutlinedTextField(
                     scheduleTime,
                     { scheduleTime = it.take(40) },
-                    label = { Text("提醒时间") },
+                    label = { Text("提醒时间（MM-dd/HH:mm）") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
+                    isError = scheduleTime.isNotBlank() && !scheduleTimeValid,
                 )
                 Button(
                     onClick = {
@@ -508,11 +512,11 @@ private fun ControlScreen(
                         scheduleTitle = ""
                         scheduleTime = ""
                     },
-                    enabled = scheduleTitle.isNotBlank(),
+                    enabled = scheduleTitle.isNotBlank() && scheduleTimeValid,
                 ) { Text("添加") }
             }
         }
-        item { SharedScheduleTable(schedules, toggleSchedule) }
+        item { ScheduleTable(schedules, toggleSchedule) }
         item {
             ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -649,45 +653,76 @@ private fun ControlScreen(
 }
 
 @Composable
-private fun SharedScheduleTable(
+private fun ScheduleTable(
     schedules: List<ScheduleItem>,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
 ) {
-    val rows = schedules.sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
-    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("共同日程表", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("手机 · ESP", fontSize = 12.sp, color = Color.Gray)
-                }
-                Text("${rows.count { !it.completed }}/${rows.size}", color = Leaf, fontWeight = FontWeight.Bold)
+    var now by remember { mutableStateOf(Instant.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now = Instant.now()
+        }
+    }
+    val rows = schedules.filter { item ->
+        !item.completed || item.completedAt?.let { completedAt ->
+            runCatching { Instant.parse(completedAt).plusSeconds(120).isAfter(now) }.getOrDefault(true)
+        } != false
+    }.sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        color = Color.White,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD5DAD2)),
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFF0F4EE)).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("time", modifier = Modifier.width(112.dp), fontWeight = FontWeight.Bold, color = Color(0xFF3E5544))
+                Text("task", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = Color(0xFF3E5544))
             }
+            HorizontalDivider()
             if (rows.isEmpty()) {
-                Text("暂无共同日程", color = Color.Gray)
-            } else {
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("完成", modifier = Modifier.width(48.dp), fontSize = 12.sp, color = Color.Gray)
-                    Text("时间", modifier = Modifier.width(92.dp), fontSize = 12.sp, color = Color.Gray)
-                    Text("任务", modifier = Modifier.weight(1f), fontSize = 12.sp, color = Color.Gray)
-                    Text("来源", modifier = Modifier.width(62.dp), fontSize = 12.sp, color = Color.Gray)
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("", modifier = Modifier.width(112.dp))
+                    Text("", modifier = Modifier.weight(1f))
                 }
-                HorizontalDivider()
-                rows.forEach { item ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            }
+            rows.forEach { item ->
+                val color = if (item.completed) Color(0xFF9AA09B) else Color(0xFF222622)
+                val decoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        scheduleTimeText(item),
+                        modifier = Modifier.width(112.dp),
+                        fontSize = 13.sp,
+                        color = color,
+                        textDecoration = decoration,
+                    )
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            item.title,
+                            modifier = Modifier.weight(1f),
+                            color = color,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = decoration,
+                        )
                         Checkbox(
                             checked = item.completed,
                             onCheckedChange = { checked -> toggleSchedule(item, checked) },
-                            modifier = Modifier.width(48.dp),
                         )
-                        Text(scheduleTimeText(item), modifier = Modifier.width(92.dp), fontSize = 12.sp, color = Color.Gray)
-                        Column(Modifier.weight(1f)) {
-                            Text(item.title, fontWeight = FontWeight.SemiBold)
-                            if (item.completed) Text("已完成", fontSize = 11.sp, color = Leaf)
-                        }
-                        Text(scheduleSourceLabel(item.source), modifier = Modifier.width(62.dp), fontSize = 12.sp, color = Color.Gray)
                     }
                 }
+                HorizontalDivider()
             }
         }
     }

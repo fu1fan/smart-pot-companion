@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.ZoneId
 
 class ApplicationTest {
     private val config = AppConfig(
@@ -228,5 +229,35 @@ class ApplicationTest {
         assertEquals("晒太阳", items.first().title)
         assertEquals("ESP", items.first().source)
         assertEquals(3, potGrowthDays(pot, Instant.parse("2026-07-18T10:00:00Z")))
+    }
+
+    @Test
+    fun `schedule time completion and two minute visibility use one server model`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.seedSpecies(SpeciesCatalog.all)
+        val pot = PotProfile(
+            id = "22222222-2222-2222-2222-222222222222",
+            deviceId = "esp32-schedule-model",
+            displayName = "小麦",
+            species = requireNotNull(store.findSpecies("pothos")),
+            timezone = "Asia/Shanghai",
+            createdAt = "2026-07-18T00:00:00Z",
+        )
+        val dueAt = parseScheduleDueAt(pot, "07-18/23:20", Instant.parse("2026-07-18T10:00:00Z"))
+        assertEquals(Instant.parse("2026-07-18T15:20:00Z"), dueAt)
+
+        val completed = scheduleItemFrom(
+            pot,
+            CreateScheduleItemRequest("浇水", displayTime = "07-19/23:20"),
+            "APP",
+            Instant.parse("2026-07-18T10:00:00Z"),
+        ).copy(
+            completed = true,
+            completedAt = "2026-07-18T10:01:00Z",
+            updatedAt = "2026-07-18T10:01:00Z",
+        )
+        assertEquals(1, scheduleState(listOf(completed), Instant.parse("2026-07-18T10:02:59Z")).items.size)
+        assertEquals(0, scheduleState(listOf(completed), Instant.parse("2026-07-18T10:03:01Z")).items.size)
+        assertEquals(100, scheduleCompletionPercent(listOf(completed), java.time.LocalDate.parse("2026-07-18"), ZoneId.of("Asia/Shanghai")))
     }
 }

@@ -14,6 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 data class SmartPotUiState(
     val loading: Boolean = true,
@@ -121,7 +125,18 @@ class SmartPotViewModel : ViewModel() {
     }
 
     fun addSchedule(title: String, displayTime: String) = withPot { id ->
-        api.addSchedule(id, CreateScheduleItemRequest(title = title, displayTime = displayTime))
+        val timezone = mutableState.value.snapshot?.pot?.timezone ?: "Asia/Shanghai"
+        val dueAt = requireNotNull(parseScheduleDueAtInput(displayTime, timezone)) {
+            "提醒时间请填写为 MM-dd/HH:mm，例如 07-18/23:20"
+        }
+        api.addSchedule(
+            id,
+            CreateScheduleItemRequest(
+                title = title,
+                dueAt = dueAt.toString(),
+                displayTime = scheduleDisplayTime(dueAt, timezone),
+            ),
+        )
         mutableState.update { it.copy(schedule = api.schedule(id), careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
@@ -177,4 +192,31 @@ class SmartPotViewModel : ViewModel() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T = SmartPotViewModel() as T
         }
     }
+}
+
+internal fun parseScheduleDueAtInput(
+    value: String,
+    timezone: String,
+    now: Instant = Instant.now(),
+): Instant? {
+    val text = value.trim()
+    if (text.isBlank()) return null
+    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+    val current = now.atZone(zone)
+    val fullFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd/HH:mm")
+    val local = runCatching { LocalDateTime.parse(text.replace(' ', '/'), fullFormatter) }
+        .recoverCatching { LocalDateTime.parse("${current.year}-$text", fullFormatter) }
+        .recoverCatching {
+            val time = java.time.LocalTime.parse(text, DateTimeFormatter.ofPattern("HH:mm"))
+            var dateTime = current.toLocalDate().atTime(time)
+            if (!dateTime.atZone(zone).toInstant().isAfter(now)) dateTime = dateTime.plusDays(1)
+            dateTime
+        }
+        .getOrNull() ?: return null
+    return local.atZone(zone).toInstant()
+}
+
+internal fun scheduleDisplayTime(dueAt: Instant, timezone: String): String {
+    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+    return DateTimeFormatter.ofPattern("MM-dd/HH:mm").format(dueAt.atZone(zone))
 }

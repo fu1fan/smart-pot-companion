@@ -142,6 +142,9 @@ fun Application.configureRoutes(services: ServerServices) {
                     }
                     post("/schedule") {
                         val pot = call.requirePot(services)
+                        require(visibleScheduleItems(services.store.listScheduleItems(pot.id)).count { !it.completed } < 4) {
+                            "ESP 日程表最多同时显示 4 条未完成日程"
+                        }
                         val item = scheduleItemFrom(pot, call.receive<CreateScheduleItemRequest>(), "APP")
                         services.store.saveScheduleItem(item)
                         syncScheduleToDevice(services.store, services.commands, pot)

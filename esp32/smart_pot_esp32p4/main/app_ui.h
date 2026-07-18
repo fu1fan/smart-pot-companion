@@ -18,6 +18,7 @@ typedef struct {
     const char *display_time;
     time_t due_ts;
     bool completed;
+    time_t completed_ts;
 } app_ui_schedule_sync_item_t;
 
 typedef void (*app_ui_schedule_event_cb_t)(const char *event_type,

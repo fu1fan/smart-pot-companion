@@ -78,8 +78,10 @@ fun Application.module(
     val commands = CommandService(store, mqtt, realtime)
     mqtt.commandService = commands
     if (startMqtt) mqtt.start()
+    val scheduleMaintenance = ScheduleMaintenanceService(store, commands, realtime)
     diary.start(scope)
     maintenance.start(scope)
+    scheduleMaintenance.start(scope)
     configureRoutes(ServerServices(config, store, pots, care, ai, diary, commands, realtime, shares))
 
     monitor.subscribe(ApplicationStopped) {

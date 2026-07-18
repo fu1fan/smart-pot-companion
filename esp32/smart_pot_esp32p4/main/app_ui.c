@@ -137,6 +137,7 @@ static char s_schedule_ids[SCHEDULE_MAX_ITEMS][SCHEDULE_ID_LEN];
 static char s_schedule_deadlines[SCHEDULE_MAX_ITEMS][SCHEDULE_DEADLINE_LEN];
 static time_t s_schedule_due_ts[SCHEDULE_MAX_ITEMS];
 static bool s_schedule_completed[SCHEDULE_MAX_ITEMS];
+static time_t s_schedule_completed_ts[SCHEDULE_MAX_ITEMS];
 static bool s_schedule_reminded[SCHEDULE_MAX_ITEMS];
 static uint8_t s_schedule_count;
 static uint32_t s_growth_days = 1;
@@ -587,9 +588,9 @@ static void check_schedule_reminders(void)
             continue;
         }
         int64_t seconds_left = (int64_t)s_schedule_due_ts[i] - (int64_t)now;
-        if (seconds_left <= 3 * 60 * 60 && seconds_left > 0) {
+        if (seconds_left <= 0) {
             char text[160];
-            snprintf(text, sizeof(text), "提醒一下，%s快要截止了。", s_schedule_items[i]);
+            snprintf(text, sizeof(text), "日程提醒，%s。", s_schedule_items[i]);
             if (app_tts_speak_text_no_followup(text)) {
                 s_schedule_reminded[i] = true;
             }
@@ -613,6 +614,8 @@ static void remove_schedule_at(uint8_t index)
                 sizeof(s_schedule_due_ts[0]) * (s_schedule_count - index - 1));
         memmove(&s_schedule_completed[index], &s_schedule_completed[index + 1],
                 sizeof(s_schedule_completed[0]) * (s_schedule_count - index - 1));
+        memmove(&s_schedule_completed_ts[index], &s_schedule_completed_ts[index + 1],
+                sizeof(s_schedule_completed_ts[0]) * (s_schedule_count - index - 1));
         memmove(&s_schedule_reminded[index], &s_schedule_reminded[index + 1],
                 sizeof(s_schedule_reminded[0]) * (s_schedule_count - index - 1));
     }
@@ -622,33 +625,44 @@ static void remove_schedule_at(uint8_t index)
     s_schedule_deadlines[s_schedule_count][0] = '\0';
     s_schedule_due_ts[s_schedule_count] = 0;
     s_schedule_completed[s_schedule_count] = false;
+    s_schedule_completed_ts[s_schedule_count] = 0;
     s_schedule_reminded[s_schedule_count] = false;
 }
 
-static void cleanup_completed_schedules(void)
+static bool cleanup_completed_schedules(void)
 {
+    bool changed = false;
+    time_t now = time(NULL);
     for (int32_t i = (int32_t)s_schedule_count - 1; i >= 0; i--) {
-        if (s_schedule_completed[i]) {
+        if (s_schedule_completed[i] && s_schedule_completed_ts[i] > 0 &&
+            now >= s_schedule_completed_ts[i] + 120) {
             remove_schedule_at((uint8_t)i);
+            changed = true;
         }
     }
+    return changed;
 }
 
 static void schedule_cleanup_timer_cb(lv_timer_t *timer)
 {
-    s_schedule_cleanup_timer = NULL;
-    cleanup_completed_schedules();
-    update_schedule_page();
-    lv_timer_delete(timer);
+    if (cleanup_completed_schedules()) {
+        update_schedule_page();
+    }
+    bool has_completed = false;
+    for (uint8_t i = 0; i < s_schedule_count; i++) {
+        has_completed = has_completed || s_schedule_completed[i];
+    }
+    if (!has_completed) {
+        s_schedule_cleanup_timer = NULL;
+        lv_timer_delete(timer);
+    }
 }
 
-static void schedule_restart_cleanup_timer(void)
+static void schedule_ensure_cleanup_timer(void)
 {
-    if (s_schedule_cleanup_timer != NULL) {
-        lv_timer_delete(s_schedule_cleanup_timer);
+    if (s_schedule_cleanup_timer == NULL) {
+        s_schedule_cleanup_timer = lv_timer_create(schedule_cleanup_timer_cb, 1000, NULL);
     }
-    s_schedule_cleanup_timer = lv_timer_create(schedule_cleanup_timer_cb, 120000, NULL);
-    lv_timer_set_repeat_count(s_schedule_cleanup_timer, 1);
 }
 
 static void update_growth_days_label(void)
@@ -732,8 +746,10 @@ static void schedule_complete_event_cb(lv_event_t *event)
     if (!lv_obj_has_state(checkbox, LV_STATE_CHECKED)) {
         if (index < s_schedule_count && s_schedule_completed[index]) {
             s_schedule_completed[index] = false;
+            s_schedule_completed_ts[index] = 0;
             ESP_LOGI(TAG, "Schedule completion canceled: row=%u", (unsigned int)index);
             update_schedule_page();
+            notify_schedule_event("SCHEDULE_COMPLETED", index);
         }
         return;
     }
@@ -748,10 +764,11 @@ static void schedule_complete_event_cb(lv_event_t *event)
     }
 
     s_schedule_completed[index] = true;
+    s_schedule_completed_ts[index] = time(NULL);
     ESP_LOGI(TAG, "Schedule completed: row=%u pending_removal=%u",
              (unsigned int)index, (unsigned int)s_schedule_count);
     (void)app_tts_play_success_chime();
-    schedule_restart_cleanup_timer();
+    schedule_ensure_cleanup_timer();
     update_schedule_page();
     notify_schedule_event("SCHEDULE_COMPLETED", index);
 }
@@ -2040,6 +2057,7 @@ void app_ui_add_schedule(const char *item, const char *deadline)
     copy_or_default(s_schedule_items[added_index], sizeof(s_schedule_items[added_index]), item, "Untitled");
     s_schedule_due_ts[added_index] = due_ts;
     s_schedule_completed[added_index] = false;
+    s_schedule_completed_ts[added_index] = 0;
     s_schedule_reminded[added_index] = false;
     s_schedule_count++;
     ESP_LOGI(TAG, "Schedule added: item=%s deadline=%s count=%u",
@@ -2052,10 +2070,6 @@ void app_ui_add_schedule(const char *item, const char *deadline)
     set_page_visible(s_schedule_page, true);
     set_page_visible(s_pomodoro_page, false);
     update_schedule_page();
-    if (s_schedule_cleanup_timer != NULL) {
-        schedule_restart_cleanup_timer();
-    }
-
     bsp_display_unlock();
     notify_schedule_event("SCHEDULE_ADDED", added_index);
 }
@@ -2070,10 +2084,15 @@ void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t
         return;
     }
 
-    if (s_schedule_cleanup_timer != NULL) {
-        lv_timer_delete(s_schedule_cleanup_timer);
-        s_schedule_cleanup_timer = NULL;
-    }
+    char old_ids[SCHEDULE_MAX_ITEMS][SCHEDULE_ID_LEN];
+    time_t old_due_ts[SCHEDULE_MAX_ITEMS];
+    time_t old_completed_ts[SCHEDULE_MAX_ITEMS];
+    bool old_reminded[SCHEDULE_MAX_ITEMS];
+    uint8_t old_count = s_schedule_count;
+    memcpy(old_ids, s_schedule_ids, sizeof(old_ids));
+    memcpy(old_due_ts, s_schedule_due_ts, sizeof(old_due_ts));
+    memcpy(old_completed_ts, s_schedule_completed_ts, sizeof(old_completed_ts));
+    memcpy(old_reminded, s_schedule_reminded, sizeof(old_reminded));
 
     s_schedule_count = count < SCHEDULE_MAX_ITEMS ? count : SCHEDULE_MAX_ITEMS;
     for (uint8_t i = 0; i < SCHEDULE_MAX_ITEMS; i++) {
@@ -2083,7 +2102,21 @@ void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t
             copy_or_default(s_schedule_deadlines[i], sizeof(s_schedule_deadlines[i]), items[i].display_time, "");
             s_schedule_due_ts[i] = items[i].due_ts;
             s_schedule_completed[i] = items[i].completed;
+            s_schedule_completed_ts[i] = items[i].completed ? items[i].completed_ts : 0;
             s_schedule_reminded[i] = false;
+            for (uint8_t old = 0; old < old_count; old++) {
+                if (s_schedule_ids[i][0] != '\0' && strcmp(s_schedule_ids[i], old_ids[old]) == 0 &&
+                    s_schedule_due_ts[i] == old_due_ts[old]) {
+                    s_schedule_reminded[i] = old_reminded[old];
+                    if (s_schedule_completed[i] && s_schedule_completed_ts[i] <= 0) {
+                        s_schedule_completed_ts[i] = old_completed_ts[old];
+                    }
+                    break;
+                }
+            }
+            if (s_schedule_completed[i] && s_schedule_completed_ts[i] <= 0) {
+                s_schedule_completed_ts[i] = time(NULL);
+            }
             if (s_schedule_deadlines[i][0] == '\0' && s_schedule_due_ts[i] > 0) {
                 struct tm due_tm = { 0 };
                 localtime_r(&s_schedule_due_ts[i], &due_tm);
@@ -2096,8 +2129,20 @@ void app_ui_set_schedule_items(const app_ui_schedule_sync_item_t *items, uint8_t
             s_schedule_deadlines[i][0] = '\0';
             s_schedule_due_ts[i] = 0;
             s_schedule_completed[i] = false;
+            s_schedule_completed_ts[i] = 0;
             s_schedule_reminded[i] = false;
         }
+    }
+
+    bool has_completed = false;
+    for (uint8_t i = 0; i < s_schedule_count; i++) {
+        has_completed = has_completed || s_schedule_completed[i];
+    }
+    if (has_completed) {
+        schedule_ensure_cleanup_timer();
+    } else if (s_schedule_cleanup_timer != NULL) {
+        lv_timer_delete(s_schedule_cleanup_timer);
+        s_schedule_cleanup_timer = NULL;
     }
 
     update_schedule_page();
@@ -2121,6 +2166,7 @@ uint8_t app_ui_get_schedule_items(app_ui_schedule_sync_item_t *items, uint8_t ma
         items[i].display_time = s_schedule_deadlines[i];
         items[i].due_ts = s_schedule_due_ts[i];
         items[i].completed = s_schedule_completed[i];
+        items[i].completed_ts = s_schedule_completed_ts[i];
     }
 
     bsp_display_unlock();

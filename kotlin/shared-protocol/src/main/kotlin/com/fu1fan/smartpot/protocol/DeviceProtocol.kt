@@ -65,6 +65,7 @@ data class DeviceScheduleItem(
     val dueAt: String? = null,
     val dueAtEpochSeconds: Long? = null,
     val completed: Boolean = false,
+    val completedAtEpochSeconds: Long? = null,
 )
 
 @Serializable
