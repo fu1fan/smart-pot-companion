@@ -1,7 +1,12 @@
 package com.fu1fan.smartpot.server
 
 import com.fu1fan.smartpot.protocol.CreatePotRequest
+import com.fu1fan.smartpot.protocol.CareDayOverview
+import com.fu1fan.smartpot.protocol.CareType
+import com.fu1fan.smartpot.protocol.CreateCareLogRequest
+import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
+import com.fu1fan.smartpot.protocol.DailyFocusSummary
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
@@ -108,5 +113,42 @@ class ApplicationTest {
         }
         assertEquals(HttpStatusCode.BadRequest, edit.status)
         assertTrue(edit.body<String>().contains("仅主人"))
+    }
+
+    @Test
+    fun `care overview includes new leaf and focus progress`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+
+        val pot = api.post("/api/v1/pots") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-focus-001", "小麦", "pothos"))
+        }.body<PotProfile>()
+
+        val care = api.post("/api/v1/pots/${pot.id}/care") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreateCareLogRequest(CareType.NEW_LEAF, note = "第一片新叶冒出来了"))
+        }
+        assertEquals(HttpStatusCode.Created, care.status)
+
+        repeat(2) {
+            val focus = api.post("/api/v1/pots/${pot.id}/focus/sessions") {
+                bearerAuth(config.demoToken)
+                contentType(ContentType.Application.Json)
+                setBody(CreateFocusSessionRequest(minutes = 25, source = "APP"))
+            }
+            assertEquals(HttpStatusCode.Created, focus.status)
+        }
+
+        val overview = api.get("/api/v1/pots/${pot.id}/care-overview") { bearerAuth(config.demoToken) }.body<CareDayOverview>()
+        assertEquals(2, overview.focus.pomodoroCount)
+        assertEquals(50, overview.focus.focusMinutes)
+        assertEquals(50, overview.focus.scheduleCompletionPercent)
+
+        val summaries = api.get("/api/v1/pots/${pot.id}/focus/daily?days=5") { bearerAuth(config.demoToken) }.body<List<DailyFocusSummary>>()
+        assertEquals(5, summaries.size)
+        assertEquals(2, summaries.last().pomodoroCount)
     }
 }

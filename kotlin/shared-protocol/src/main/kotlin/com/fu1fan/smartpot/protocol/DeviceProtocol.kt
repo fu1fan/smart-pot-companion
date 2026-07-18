@@ -128,6 +128,7 @@ enum class DeviceEventType {
     TILT_SEVERE,
     TILT_RECOVERED,
     SCHEDULE_COMPLETED,
+    POMODORO_COMPLETED,
     CONVERSATION,
 }
 

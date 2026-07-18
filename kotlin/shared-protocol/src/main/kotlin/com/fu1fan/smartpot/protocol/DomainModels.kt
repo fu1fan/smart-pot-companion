@@ -70,7 +70,7 @@ data class PlantAlert(
 )
 
 @Serializable
-enum class CareType { WATER, FERTILIZE, PRUNE, REPOT, OTHER }
+enum class CareType { WATER, FERTILIZE, PRUNE, REPOT, NEW_LEAF, OTHER }
 
 @Serializable
 data class CareLog(
@@ -159,6 +159,47 @@ data class PlantDiary(
 )
 
 @Serializable
+data class CareWeather(
+    val date: String,
+    val condition: String,
+    val averageLightLux: Int? = null,
+    val maxLightLux: Int? = null,
+    val hint: String = "",
+)
+
+@Serializable
+data class FocusSession(
+    val id: String,
+    val potId: String,
+    val completedAt: String,
+    val minutes: Int = 25,
+    val source: String = "APP",
+)
+
+@Serializable
+data class CreateFocusSessionRequest(
+    val completedAt: String? = null,
+    val minutes: Int = 25,
+    val source: String = "APP",
+)
+
+@Serializable
+data class DailyFocusSummary(
+    val date: String,
+    val pomodoroCount: Int,
+    val focusMinutes: Int,
+    val targetPomodoroCount: Int = 4,
+    val scheduleCompletionPercent: Int,
+)
+
+@Serializable
+data class CareDayOverview(
+    val date: String,
+    val weather: CareWeather,
+    val focus: DailyFocusSummary,
+)
+
+@Serializable
 data class CreatePotRequest(
     val deviceId: String,
     val displayName: String,
@@ -202,7 +243,7 @@ data class RedeemShareRequest(val code: String, val actorName: String)
 data class ShareSession(val token: String, val potId: String, val actorName: String, val expiresAt: String)
 
 @Serializable
-enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY }
+enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS }
 
 @Serializable
 data class RealtimeEvent(

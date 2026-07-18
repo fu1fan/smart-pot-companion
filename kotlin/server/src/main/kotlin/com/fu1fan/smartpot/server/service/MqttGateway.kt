@@ -3,6 +3,7 @@ package com.fu1fan.smartpot.server.service
 import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.AppConfig
 import com.fu1fan.smartpot.server.appJson
+import com.fu1fan.smartpot.server.focusSessionFrom
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
@@ -13,6 +14,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -100,6 +104,18 @@ class MqttGateway(
                 if (event.type in setOf(DeviceEventType.PHYSICAL_TOUCH, DeviceEventType.REMOTE_TOUCH)) {
                     affinityService.award(pot.id, "device-event:${event.eventId}", 1, Instant.parse(event.occurredAt))
                 }
+                if (event.isPomodoroCompleted()) {
+                    val session = focusSessionFrom(
+                        pot,
+                        CreateFocusSessionRequest(
+                            completedAt = event.occurredAt,
+                            minutes = event.focusMinutes(),
+                            source = "ESP",
+                        ),
+                    )
+                    store.saveFocusSession(session)
+                    realtime.publish(RealtimeEvent(RealtimeEventType.FOCUS, pot.id, appJson.encodeToJsonElement(session)))
+                }
             }
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
@@ -125,3 +141,12 @@ internal fun parseDeviceTopic(topic: String): DeviceTopic {
     require(parts[4] in setOf("telemetry", "reported", "acks", "events", "online")) { "invalid device topic kind: $topic" }
     return DeviceTopic(deviceId = parts[3], kind = parts[4])
 }
+
+private fun DeviceEvent.isPomodoroCompleted(): Boolean =
+    type == DeviceEventType.POMODORO_COMPLETED ||
+        (type == DeviceEventType.SCHEDULE_COMPLETED && data["kind"]?.jsonPrimitive?.contentOrNull == "pomodoro")
+
+private fun DeviceEvent.focusMinutes(): Int =
+    data["minutes"]?.jsonPrimitive?.intOrNull
+        ?: data["durationMinutes"]?.jsonPrimitive?.intOrNull
+        ?: 25

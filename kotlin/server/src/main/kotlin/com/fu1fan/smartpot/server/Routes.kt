@@ -16,8 +16,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.JsonObject
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import kotlin.math.roundToInt
 
 data class ServerServices(
     val config: AppConfig,
@@ -105,6 +108,27 @@ fun Application.configureRoutes(services: ServerServices) {
                     post("/diaries/generate") {
                         val pot = call.requirePot(services)
                         call.respond(services.diary.generate(pot.id))
+                    }
+                    get("/care-overview") {
+                        val pot = call.requirePot(services)
+                        val zone = zoneIdOf(pot.timezone)
+                        val today = LocalDate.now(zone)
+                        val telemetry = services.store.telemetryHistory(pot.id, 1_440)
+                            .filter { it.recordedAt.toLocalDate(zone) == today }
+                        val focus = focusSummaries(services.store, pot, days = 1, today = today).first()
+                        call.respond(CareDayOverview(today.toString(), weatherFor(today, telemetry, pot), focus))
+                    }
+                    get("/focus/daily") {
+                        val pot = call.requirePot(services)
+                        val days = call.request.queryParameters["days"]?.toIntOrNull()?.coerceIn(1, 30) ?: 5
+                        call.respond(focusSummaries(services.store, pot, days))
+                    }
+                    post("/focus/sessions") {
+                        val pot = call.requirePot(services)
+                        val request = call.receive<CreateFocusSessionRequest>()
+                        val session = focusSessionFrom(pot, request)
+                        services.store.saveFocusSession(session)
+                        call.respond(HttpStatusCode.Created, session)
                     }
                     post("/control") {
                         val pot = call.requirePot(services)

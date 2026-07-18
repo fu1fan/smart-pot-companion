@@ -187,6 +187,24 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         }
     }
 
+    override suspend fun listFocusSessions(potId: String, since: String?): List<FocusSession> = db { c ->
+        val sql = buildString {
+            append("SELECT data FROM focus_sessions WHERE pot_id=?::uuid")
+            if (since != null) append(" AND completed_at>=?::timestamptz")
+            append(" ORDER BY completed_at")
+        }
+        c.prepareStatement(sql).use { s ->
+            s.setString(1, potId)
+            if (since != null) s.setString(2, since)
+            s.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.decodeColumn<FocusSession>()) } }
+        }
+    }
+
+    override suspend fun saveFocusSession(session: FocusSession) = saveJsonRecord(
+        "INSERT INTO focus_sessions(id,pot_id,completed_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO UPDATE SET completed_at=EXCLUDED.completed_at,data=EXCLUDED.data",
+        session.id, session.potId, session.completedAt, encode(session),
+    )
+
     override suspend fun saveShareCode(code: ShareCode, potId: String) = db { c ->
         c.prepareStatement("INSERT INTO share_codes(code,pot_id,expires_at) VALUES (?,?::uuid,?::timestamptz) ON CONFLICT(code) DO UPDATE SET pot_id=EXCLUDED.pot_id,expires_at=EXCLUDED.expires_at,redeemed_by=NULL").use { s ->
             s.setString(1, code.code); s.setString(2, potId); s.setString(3, code.expiresAt); s.executeUpdate()

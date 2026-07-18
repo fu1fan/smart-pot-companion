@@ -68,7 +68,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary)
+                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary)
                     tab == 2 -> ControlScreen(state, viewModel::control, viewModel::createShare, viewModel::redeemShare)
                     else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory)
                 }
@@ -214,16 +214,139 @@ private fun TelemetryChart(values: List<DeviceTelemetry>) {
 }
 
 @Composable
-private fun CareScreen(state: SmartPotUiState, addCare: (CareType, String) -> Unit, generateDiary: () -> Unit) {
+private fun CareScreen(
+    state: SmartPotUiState,
+    addCare: (CareType, String) -> Unit,
+    generateDiary: () -> Unit,
+    recordPomodoro: () -> Unit,
+    speakDiary: (PlantDiary) -> Unit,
+) {
     var note by remember { mutableStateOf("") }
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("养护日志", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); OutlinedTextField(note, { note = it }, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth()) }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { CareType.entries.take(4).forEach { type -> Button(onClick = { addCare(type, note); note = "" }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(careLabel(type)) } } } }
+    val careActions = listOf(CareType.WATER, CareType.FERTILIZE, CareType.PRUNE, CareType.REPOT, CareType.NEW_LEAF)
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
+        item { Text("我与小麦一起成长", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+        item { GrowthTimelineCard(state) }
+        item { TodayCareDiaryWeatherCard(state, generateDiary, speakDiary) }
+        item { FocusGrowthCard(state, recordPomodoro) }
+        item {
+            Text("养护日志", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            OutlinedTextField(note, { note = it }, label = { Text("备注（可选）") }, modifier = Modifier.fillMaxWidth())
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                careActions.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { type ->
+                            Button(onClick = { addCare(type, note); note = "" }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("${careEmoji(type)} ${careLabel(type)}") }
+                        }
+                    }
+                }
+            }
+        }
         if (state.reminders.isNotEmpty()) item { AdviceCard("下一次养护", state.reminders.take(4).map { "${careLabel(it.type)} · ${it.dueAt.take(10)}" }) }
         item { Text("历史记录", fontWeight = FontWeight.Bold) }
-        items(state.careLogs) { log -> ListItem(headlineContent = { Text(careLabel(log.type)) }, supportingContent = { Text("${log.occurredAt.take(16).replace('T', ' ')}  ${log.note}") }, leadingContent = { Text("✓") }) }
+        items(state.careLogs) { log -> ListItem(headlineContent = { Text(careLabel(log.type)) }, supportingContent = { Text("${log.occurredAt.take(16).replace('T', ' ')}  ${log.note}") }, leadingContent = { Text(careEmoji(log.type)) }) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("盆栽日记", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); OutlinedButton(onClick = generateDiary) { Text("生成今天日记") } } }
-        items(state.diaries) { diary -> ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("${diary.diaryDate} · ${diary.title}", fontWeight = FontWeight.Bold); Text(diary.content, modifier = Modifier.padding(top = 8.dp)) } } }
+        items(state.diaries) { diary ->
+            ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${diaryMoodEmoji(diary)} ${diary.diaryDate} · ${diary.title}", fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { speakDiary(diary) }) { Text("ESP朗读") }
+                    }
+                    Text(diary.content)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GrowthTimelineCard(state: SmartPotUiState) {
+    val events = growthTimeline(state)
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("成长时间轴", fontWeight = FontWeight.Bold)
+            events.take(6).forEach { event ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                    Text(event.emoji, fontSize = 20.sp)
+                    Column {
+                        Text("${event.date} · ${event.title}", fontWeight = FontWeight.SemiBold)
+                        if (event.detail.isNotBlank()) Text(event.detail, fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayCareDiaryWeatherCard(state: SmartPotUiState, generateDiary: () -> Unit, speakDiary: (PlantDiary) -> Unit) {
+    val overview = state.careOverview
+    val diary = state.diaries.firstOrNull { it.diaryDate == overview?.date } ?: state.diaries.firstOrNull()
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("今日天气与日记", fontWeight = FontWeight.Bold)
+                OutlinedButton(onClick = generateDiary) { Text("写今天") }
+            }
+            overview?.weather?.let { weather ->
+                Text("${weather.condition} · 平均光照 ${weather.averageLightLux?.toString() ?: "--"} lux · 最高 ${weather.maxLightLux?.toString() ?: "--"} lux", color = Leaf, fontWeight = FontWeight.SemiBold)
+                Text(weather.hint, color = Color.Gray, fontSize = 12.sp)
+            } ?: Text("等待今日天气", color = Color.Gray)
+            diary?.let {
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("${diaryMoodEmoji(it)} ${it.title}", fontWeight = FontWeight.SemiBold)
+                    TextButton(onClick = { speakDiary(it) }) { Text("ESP朗读") }
+                }
+                Text(it.content)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusGrowthCard(state: SmartPotUiState, recordPomodoro: () -> Unit) {
+    val today = state.careOverview?.focus ?: state.focusDaily.lastOrNull()
+    val completion = today?.scheduleCompletionPercent ?: 0
+    ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("每日番茄钟", fontWeight = FontWeight.Bold)
+                    Text("${today?.pomodoroCount ?: 0} 个 · ${today?.focusMinutes ?: 0} min", color = Color.Gray)
+                }
+                Text("$completion%", color = Leaf, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            }
+            LinearProgressIndicator(progress = { completion / 100f }, modifier = Modifier.fillMaxWidth().height(8.dp), color = Leaf, trackColor = SoftLeaf)
+            OutlinedButton(onClick = recordPomodoro, modifier = Modifier.fillMaxWidth()) { Text("补记 1 个番茄钟") }
+            FocusTrendChart(state.focusDaily)
+        }
+    }
+}
+
+@Composable
+private fun FocusTrendChart(values: List<DailyFocusSummary>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(150.dp).background(Color.White, RoundedCornerShape(8.dp)).padding(12.dp)) {
+            val points = values.takeLast(5)
+            if (points.size < 2) return@Canvas
+            fun pathOf(get: (DailyFocusSummary) -> Float, max: Float): Path = Path().apply {
+                points.forEachIndexed { index, item ->
+                    val x = size.width * index / (points.size - 1)
+                    val y = size.height - (get(item).coerceIn(0f, max) / max * size.height)
+                    if (index == 0) moveTo(x, y) else lineTo(x, y)
+                }
+            }
+            val maxMinutes = points.maxOf { it.focusMinutes }.coerceAtLeast(100).toFloat()
+            drawPath(pathOf({ it.focusMinutes.toFloat() }, maxMinutes), Leaf, style = androidx.compose.ui.graphics.drawscope.Stroke(4f))
+            drawPath(pathOf({ it.scheduleCompletionPercent.toFloat() }, 100f), Color(0xFFF5B642), style = androidx.compose.ui.graphics.drawscope.Stroke(3f))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            values.takeLast(5).forEach { Text(it.date.takeLast(5), fontSize = 11.sp, color = Color.Gray) }
+        }
+        Text("绿色=专注时间 · 黄色=日程完成度", fontSize = 12.sp, color = Color.Gray)
     }
 }
 
@@ -259,8 +382,40 @@ private fun CompanionScreen(state: SmartPotUiState, send: (String) -> Unit, reme
 
 private fun soilLabel(value: SoilStatus?) = when (value) { SoilStatus.TOO_DRY -> "缺水"; SoilStatus.SUITABLE -> "适宜"; SoilStatus.TOO_WET -> "积水风险"; else -> "等待数据" }
 private fun lightLabel(value: LightStatus?) = when (value) { LightStatus.DARK -> "阴暗"; LightStatus.DIFFUSE -> "散射光"; LightStatus.TOO_STRONG -> "强光"; else -> "等待数据" }
-private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.OTHER -> "其他" }
+private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.NEW_LEAF -> "新叶"; CareType.OTHER -> "其他" }
+private fun careEmoji(value: CareType) = when (value) { CareType.WATER -> "💧"; CareType.FERTILIZE -> "🌿"; CareType.PRUNE -> "✂"; CareType.REPOT -> "🪴"; CareType.NEW_LEAF -> "🌱"; CareType.OTHER -> "✓" }
 private fun affinityLabel(value: AffinityLevel) = when (value) { AffinityLevel.STRANGER -> "初次见面"; AffinityLevel.FAMILIAR -> "渐渐熟悉"; AffinityLevel.CLOSE -> "亲密伙伴"; AffinityLevel.TRUSTED -> "彼此信赖"; AffinityLevel.BEST_FRIEND -> "最佳朋友" }
+
+private data class GrowthTimelineEvent(val date: String, val title: String, val detail: String, val emoji: String)
+
+private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
+    val pot = state.snapshot?.pot
+    val created = pot?.createdAt?.take(10)?.let { GrowthTimelineEvent(it, "开始陪伴", pot.displayName, "🌱") }
+    val logs = state.careLogs.sortedBy { it.occurredAt }.map { log ->
+        val firstRepot = state.careLogs.filter { it.type == CareType.REPOT }.minByOrNull { it.occurredAt }?.id == log.id
+        GrowthTimelineEvent(
+            date = log.occurredAt.take(10),
+            title = when {
+                log.type == CareType.REPOT && firstRepot -> "第一次换盆"
+                log.type == CareType.NEW_LEAF -> "长出新叶"
+                else -> careLabel(log.type)
+            },
+            detail = log.note.ifBlank { log.actorName },
+            emoji = careEmoji(log.type),
+        )
+    }
+    return (listOfNotNull(created) + logs).sortedByDescending { it.date }
+}
+
+private fun diaryMoodEmoji(diary: PlantDiary): String {
+    val content = diary.content
+    return when {
+        content.contains("水") || content.contains("湿") -> "💧"
+        content.contains("光") || content.contains("晒") -> "☀️"
+        content.contains("叶") || content.contains("芽") -> "🌱"
+        else -> "✨"
+    }
+}
 
 private fun dashboardMetrics(state: SmartPotUiState): DashboardMetrics {
     val snap = state.snapshot

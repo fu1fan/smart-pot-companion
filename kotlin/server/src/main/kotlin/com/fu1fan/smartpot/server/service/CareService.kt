@@ -1,4 +1,4 @@
-package com.fu1fan.smartpot.server.service
+﻿package com.fu1fan.smartpot.server.service
 
 import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.store.SmartPotStore
@@ -20,6 +20,7 @@ class CareService(
             CareType.FERTILIZE -> pot.species.fertilizingIntervalDays
             CareType.PRUNE -> pot.species.pruningIntervalDays
             CareType.REPOT -> pot.species.repottingIntervalDays
+            CareType.NEW_LEAF -> null
             CareType.OTHER -> null
         }
         interval?.let {
@@ -42,6 +43,6 @@ class CareService(
         CareType.FERTILIZE -> "检查是否需要施肥"
         CareType.PRUNE -> "检查是否需要修剪"
         CareType.REPOT -> "检查是否需要换盆"
-        CareType.OTHER -> "养护提醒"
+        else -> "养护提醒"
     }
 }

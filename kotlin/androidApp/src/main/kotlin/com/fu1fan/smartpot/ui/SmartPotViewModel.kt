@@ -24,6 +24,8 @@ data class SmartPotUiState(
     val telemetry: List<DeviceTelemetry> = emptyList(),
     val careLogs: List<CareLog> = emptyList(),
     val reminders: List<CareReminder> = emptyList(),
+    val careOverview: CareDayOverview? = null,
+    val focusDaily: List<DailyFocusSummary> = emptyList(),
     val memories: List<UserMemory> = emptyList(),
     val messages: List<ChatMessage> = emptyList(),
     val diaries: List<PlantDiary> = emptyList(),
@@ -67,16 +69,18 @@ class SmartPotViewModel : ViewModel() {
         val telemetry = api.telemetry(id)
         val care = api.careLogs(id)
         val reminders = api.reminders(id)
+        val careOverview = api.careOverview(id)
+        val focusDaily = api.focusDaily(id)
         val memories = api.memories(id)
         val messages = api.messages(id)
         val diaries = api.diaries(id)
-        mutableState.update { it.copy(snapshot = snapshot, telemetry = telemetry, careLogs = care, reminders = reminders, memories = memories, messages = messages, diaries = diaries, loading = false, error = null) }
+        mutableState.update { it.copy(snapshot = snapshot, telemetry = telemetry, careLogs = care, reminders = reminders, careOverview = careOverview, focusDaily = focusDaily, memories = memories, messages = messages, diaries = diaries, loading = false, error = null) }
     }.onFailure { fail(it) }
 
     private fun startRealtime(id: String) {
         realtimeJob = viewModelScope.launch {
             while (isActive) {
-                runCatching { api.realtime(id).collect { event -> if (event.type != RealtimeEventType.COMMAND_ACK) refreshSnapshot(id) } }
+                runCatching { api.realtime(id).collect { event -> if (event.type == RealtimeEventType.FOCUS || event.type == RealtimeEventType.DIARY) refreshAll(id) else if (event.type != RealtimeEventType.COMMAND_ACK) refreshSnapshot(id) } }
                 delay(3_000)
             }
         }
@@ -87,7 +91,7 @@ class SmartPotViewModel : ViewModel() {
 
     fun addCare(type: CareType, note: String) = withPot { id ->
         api.addCare(id, CreateCareLogRequest(type, note = note))
-        mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id)) }
+        mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = api.careOverview(id)) }
     }
 
     fun addMemory(text: String) = withPot { id -> mutableState.update { it.copy(memories = it.memories + api.addMemory(id, text)) } }
@@ -101,6 +105,18 @@ class SmartPotViewModel : ViewModel() {
         val diary = api.generateDiary(id)
         mutableState.update { it.copy(diaries = (listOf(diary) + it.diaries).distinctBy(PlantDiary::id)) }
     }
+
+    fun recordPomodoro() = withPot { id ->
+        api.addFocusSession(id)
+        mutableState.update { it.copy(careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }
+    }
+
+    fun speakDiary(diary: PlantDiary) = control(
+        DeviceControlRequest(
+            type = DeviceCommandType.SPEAK_TEXT,
+            text = "${diary.title}。${diary.content}".take(48),
+        ),
+    )
 
     fun control(request: DeviceControlRequest) = withPot { id ->
         val result = api.control(id, request)

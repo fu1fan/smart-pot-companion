@@ -24,7 +24,7 @@ class DiaryService(
     suspend fun generate(potId: String, date: LocalDate = LocalDate.now()): PlantDiary {
         store.listDiaries(potId).firstOrNull { it.diaryDate == date.toString() }?.let { return it }
         val pot = requireNotNull(store.findPot(potId))
-        val content = ai.generateDiary(pot, date.toString())
+        val content = decorateDiaryContent(ai.generateDiary(pot, date.toString()))
         val diary = PlantDiary(UUID.randomUUID().toString(), pot.id, date.toString(), "${pot.displayName}的日记", content, Instant.now().toString())
         if (store.saveDiary(diary)) realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, pot.id, appJson.encodeToJsonElement(diary)))
         return store.listDiaries(potId).first { it.diaryDate == date.toString() }
