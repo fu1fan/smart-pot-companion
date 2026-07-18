@@ -59,7 +59,7 @@
 #endif
 
 #ifndef CONFIG_SMART_POT_LIGHT_STRIP_GPIO
-#define CONFIG_SMART_POT_LIGHT_STRIP_GPIO 37
+#define CONFIG_SMART_POT_LIGHT_STRIP_GPIO 21
 #endif
 
 #ifndef CONFIG_SMART_POT_LIGHT_STRIP_ACTIVE_HIGH
@@ -434,6 +434,11 @@ static bool gpio_configured(int gpio_num)
     return gpio_num >= 0 && gpio_num < GPIO_NUM_MAX;
 }
 
+static bool gpio_reserved_for_console(int gpio_num)
+{
+    return gpio_num == 37 || gpio_num == 38;
+}
+
 static uint8_t lux_to_percent(uint32_t lux)
 {
     uint32_t max_lux = CONFIG_SMART_POT_BH1750_MAX_LUX > 0 ?
@@ -714,6 +719,11 @@ static void init_light_strip(sensor_hw_t *hw)
 {
     if (!CONFIG_SMART_POT_LIGHT_STRIP_ENABLE ||
         !gpio_configured(CONFIG_SMART_POT_LIGHT_STRIP_GPIO)) {
+        return;
+    }
+    if (gpio_reserved_for_console(CONFIG_SMART_POT_LIGHT_STRIP_GPIO)) {
+        ESP_LOGE(TAG, "Light strip GPIO%d is reserved for console UART; light strip output disabled",
+                 CONFIG_SMART_POT_LIGHT_STRIP_GPIO);
         return;
     }
 
