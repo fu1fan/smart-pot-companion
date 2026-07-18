@@ -1,10 +1,10 @@
 pluginManagement {
     repositories {
-        maven("https://maven.aliyun.com/repository/google")
-        maven("https://maven.aliyun.com/repository/gradle-plugin")
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/gradle-plugin")
     }
 }
 
@@ -13,10 +13,10 @@ dependencyResolutionManagement {
     repositories {
         // The mirror keeps Android builds usable on networks where dl.google.com
         // intermittently terminates TLS handshakes. Artifacts remain checksum-verified.
-        maven("https://maven.aliyun.com/repository/google")
-        maven("https://maven.aliyun.com/repository/central")
         google()
         mavenCentral()
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/central")
     }
 }
 
