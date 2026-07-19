@@ -50,6 +50,7 @@ data class PotSnapshot(
     val evaluated: EvaluatedPlantState? = null,
     val activeAlerts: List<PlantAlert> = emptyList(),
     val affinity: AffinityState = AffinityState(),
+    val dailyTouchCount: Int = 0,
 )
 
 @Serializable

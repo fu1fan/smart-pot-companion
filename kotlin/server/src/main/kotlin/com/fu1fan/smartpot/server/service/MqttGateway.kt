@@ -155,7 +155,7 @@ class MqttGateway(
     }
 
     private suspend fun resyncProfileIfNeeded(pot: PotProfile, reported: DeviceReportedState) {
-        if (reported.thresholds == pot.species.thresholds && reported.growthDays == potGrowthDays(pot)) return
+        if (reportedProfileMatches(pot, reported)) return
         runCatching { commandService?.syncProfile(pot) }
             .onFailure { System.err.println("Profile MQTT resync skipped: ${it.message}") }
     }
@@ -237,6 +237,16 @@ class MqttGateway(
     override fun close() {
         client?.disconnect()?.join()
     }
+}
+
+internal fun reportedProfileMatches(pot: PotProfile, reported: DeviceReportedState): Boolean {
+    val actual = reported.thresholds ?: return false
+    val expected = pot.species.thresholds
+    return actual.soilMinPercent == expected.soilMinPercent &&
+        actual.soilMaxPercent == expected.soilMaxPercent &&
+        actual.lightMinLux == expected.lightMinLux &&
+        actual.lightMaxLux == expected.lightMaxLux &&
+        reported.growthDays == potGrowthDays(pot)
 }
 
 internal fun conversationMessagesFromEvent(pot: PotProfile, event: DeviceEvent): ChatResponse? {

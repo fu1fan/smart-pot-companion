@@ -1109,7 +1109,7 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(diary.diaryDate, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
             Spacer(Modifier.width(8.dp))
-            Text(if (diary.author == DiaryAuthor.WHEAT) "小麦写的" else "用户写的", color = Leaf, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (diary.author == DiaryAuthor.WHEAT) "小麦" else "用户", color = Leaf, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(8.dp))
             Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(diaryMoodEmoji(diary), fontSize = 16.sp)
@@ -2052,8 +2052,7 @@ private fun dashboardMetrics(state: SmartPotUiState): DashboardMetrics {
     val thresholds = pot?.species?.thresholds
     val zone = zoneIdOf(pot?.timezone)
     val today = LocalDate.now(zone)
-    val history = telemetryWithLatest(state.telemetry, telemetry).filter { isSameLocalDate(it.recordedAt, today, zone) }
-    val dailyTouchCount = dailyTouchCount(history, today, zone)
+    val dailyTouchCount = snap?.dailyTouchCount ?: 0
     val dailyDialogCount = state.todayMessages.count { it.role == ChatRole.USER && isSameLocalDate(it.createdAt, today, zone) }
     val dailyWaterCount = state.careLogs.count { it.type == CareType.WATER && isSameLocalDate(it.occurredAt, today, zone) }
     val dailyInteractions = dailyDialogCount + dailyTouchCount
@@ -2157,24 +2156,6 @@ private fun healthHint(value: Int?, online: Boolean): String = when {
 private fun telemetryWithLatest(history: List<DeviceTelemetry>, latest: DeviceTelemetry?): List<DeviceTelemetry> {
     if (latest == null) return history
     return if (history.any { it.deviceId == latest.deviceId && it.sequence == latest.sequence }) history else history + latest
-}
-
-private fun dailyTouchCount(values: List<DeviceTelemetry>, today: LocalDate, zone: ZoneId): Int {
-    val sorted = values.sortedBy { parseInstant(it.recordedAt) ?: Instant.EPOCH }
-    if (sorted.isEmpty()) return 0
-    val first = sorted.first()
-    val bootedToday = parseInstant(first.recordedAt)
-        ?.minusSeconds(first.uptimeSeconds)
-        ?.atZone(zone)
-        ?.toLocalDate() == today
-    var total = if (bootedToday) first.touchCount.coerceAtLeast(0) else 0L
-    var previous = first.touchCount
-    sorted.drop(1).forEach { item ->
-        val delta = item.touchCount - previous
-        total += if (delta >= 0) delta else item.touchCount.coerceAtLeast(0)
-        previous = item.touchCount
-    }
-    return total.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
 }
 
 private fun growthDaysSince(createdAt: String?, today: LocalDate, zone: ZoneId): Int? {

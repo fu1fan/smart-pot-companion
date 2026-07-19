@@ -217,6 +217,17 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         }
     }
 
+    override suspend fun countAffinityEvents(potId: String, eventKeyPrefix: String, since: String): Int = db { c ->
+        c.prepareStatement(
+            "SELECT COUNT(*) FROM affinity_events WHERE pot_id=?::uuid AND event_key LIKE ? AND occurred_at>=?::timestamptz",
+        ).use { s ->
+            s.setString(1, potId)
+            s.setString(2, "$eventKeyPrefix%")
+            s.setString(3, since)
+            s.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+        }
+    }
+
     override suspend fun listDiaries(potId: String): List<PlantDiary> = listPotJson("diaries", potId, "diary_date DESC")
     override suspend fun saveDiary(diary: PlantDiary): Boolean = db { c ->
         c.prepareStatement("INSERT INTO diaries(id,pot_id,diary_date,author,data) VALUES (?::uuid,?::uuid,?::date,?,?::jsonb) ON CONFLICT(pot_id,diary_date,author) DO NOTHING").use { s ->

@@ -48,6 +48,7 @@ interface SmartPotStore : AutoCloseable {
     suspend fun affinity(potId: String): AffinityState
     suspend fun saveAffinity(potId: String, affinity: AffinityState)
     suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean
+    suspend fun countAffinityEvents(potId: String, eventKeyPrefix: String, since: String): Int
 
     suspend fun listDiaries(potId: String): List<PlantDiary>
     suspend fun saveDiary(diary: PlantDiary): Boolean

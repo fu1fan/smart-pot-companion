@@ -5,6 +5,7 @@ import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import kotlinx.serialization.json.encodeToJsonElement
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 class PotService(
@@ -58,6 +59,8 @@ class PotService(
         val pot = requireNotNull(findCurrent(id)) { "盆栽不存在" }
         val telemetry = store.latestTelemetry(id)
         val state = store.deviceState(pot.deviceId)
+        val zone = runCatching { ZoneId.of(pot.timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+        val todayStart = Instant.now().atZone(zone).toLocalDate().atStartOfDay(zone).toInstant().toString()
         return PotSnapshot(
             pot = pot,
             telemetry = telemetry,
@@ -67,6 +70,7 @@ class PotService(
             evaluated = telemetry?.let { PlantRules.evaluate(it, pot.species.thresholds) },
             activeAlerts = store.listAlerts(id, activeOnly = true),
             affinity = store.affinity(id),
+            dailyTouchCount = store.countAffinityEvents(id, "device-event:", todayStart),
         )
     }
 

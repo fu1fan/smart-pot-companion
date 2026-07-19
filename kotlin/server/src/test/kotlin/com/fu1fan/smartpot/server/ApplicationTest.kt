@@ -16,6 +16,7 @@ import com.fu1fan.smartpot.protocol.DailyFocusSummary
 import com.fu1fan.smartpot.protocol.DeviceScheduleItem
 import com.fu1fan.smartpot.protocol.DeviceEvent
 import com.fu1fan.smartpot.protocol.DeviceEventType
+import com.fu1fan.smartpot.protocol.DeviceReportedState
 import com.fu1fan.smartpot.protocol.DiaryAuthor
 import com.fu1fan.smartpot.protocol.PlantDiary
 import com.fu1fan.smartpot.protocol.PlantSpecies
@@ -31,6 +32,7 @@ import com.fu1fan.smartpot.protocol.UserMemory
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
 import com.fu1fan.smartpot.server.service.injectServerChatHistory
+import com.fu1fan.smartpot.server.service.reportedProfileMatches
 import com.fu1fan.smartpot.server.service.weatherCodeLabel
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
@@ -435,5 +437,43 @@ class ApplicationTest {
         assertEquals("晴朗", weatherCodeLabel(0))
         assertEquals("有雨", weatherCodeLabel(63))
         assertEquals("雷雨", weatherCodeLabel(95))
+    }
+
+    @Test
+    fun `reported profile ignores unsupported temperature thresholds`() {
+        val species = SpeciesCatalog.all.first { it.thresholds.temperatureMinC != null }
+        val pot = PotProfile(
+            id = "55555555-5555-5555-5555-555555555554",
+            deviceId = "smartpot-profile-test",
+            displayName = "测试盆栽",
+            species = species,
+            createdAt = java.time.Instant.now().toString(),
+        )
+        val reported = DeviceReportedState(
+            deviceId = pot.deviceId,
+            reportedAt = java.time.Instant.now().toString(),
+            brightnessPercent = 70,
+            volumePercent = 60,
+            standby = false,
+            growthDays = potGrowthDays(pot),
+            thresholds = species.thresholds.copy(temperatureMinC = null, temperatureMaxC = null),
+            firmwareVersion = "test",
+        )
+
+        assertTrue(reportedProfileMatches(pot, reported))
+        assertTrue(!reportedProfileMatches(pot, reported.copy(thresholds = reported.thresholds?.copy(lightMinLux = 1))))
+    }
+
+    @Test
+    fun `daily touch events remain countable after later refreshes`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        val now = java.time.Instant.now()
+        val since = now.minusSeconds(60).toString()
+        assertTrue(store.addAffinityEvent("pot", "device-event:touch-1", 1, now.toString()))
+        assertTrue(store.addAffinityEvent("pot", "device-event:touch-2", 1, now.plusSeconds(1).toString()))
+        assertTrue(store.addAffinityEvent("pot", "care:water", 3, now.plusSeconds(2).toString()))
+
+        assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
+        assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
     }
 }

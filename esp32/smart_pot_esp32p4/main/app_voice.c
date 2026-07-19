@@ -512,9 +512,14 @@ static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
 
         if (s_wakenet_rearm_requested) {
             s_wakenet_rearm_requested = false;
-            if (wn_handle->clean != NULL) {
-                wn_handle->clean(wn_data);
+            wn_handle->destroy(wn_data);
+            wn_data = create_wakenet_data(wn_handle, wn_name, sample_count);
+            if (wn_data == NULL) {
+                app_ui_set_voice_status("Wake: model rearm failed");
+                vTaskDelay(pdMS_TO_TICKS(250));
+                continue;
             }
+            ESP_LOGI(TAG, "WakeNet recreated for inference rearm");
         }
 
         int ret = esp_codec_dev_read(mic, samples, (size_t)sample_count * sizeof(int16_t));

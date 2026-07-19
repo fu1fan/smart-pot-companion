@@ -38,6 +38,7 @@ static esp_mqtt_client_handle_t s_client;
 static bool s_connected;
 static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
+static bool s_touch_count_initialized;
 static int s_brightness = 100;
 static bool s_standby;
 static uint32_t s_growth_days = 1;
@@ -335,8 +336,11 @@ static bool sync_profile_from_payload(cJSON *payload)
                                                (uint32_t)light_max->valuedouble);
     cJSON *growth_days = cJSON_GetObjectItem(payload, "growthDays");
     if (ok && cJSON_IsNumber(growth_days) && growth_days->valueint > 0) {
-        s_growth_days = (uint32_t)growth_days->valueint;
-        app_ui_set_growth_days(s_growth_days);
+        uint32_t next_growth_days = (uint32_t)growth_days->valueint;
+        if (next_growth_days != s_growth_days) {
+            s_growth_days = next_growth_days;
+            app_ui_set_growth_days(s_growth_days);
+        }
     }
     return ok;
 }
@@ -541,8 +545,17 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
     cJSON_AddNumberToObject(root, "uptimeSeconds", esp_timer_get_time() / 1000000ULL);
     publish_json("telemetry", root, false);
     cJSON_Delete(root);
-    if (state->touch_count != s_last_touch_count) {
-        if (s_last_touch_count != 0) publish_event("PHYSICAL_TOUCH");
+    if (!s_touch_count_initialized) {
+        s_last_touch_count = state->touch_count;
+        s_touch_count_initialized = true;
+    } else if (state->touch_count > s_last_touch_count) {
+        uint32_t delta = state->touch_count - s_last_touch_count;
+        if (delta > 32) delta = 32;
+        for (uint32_t i = 0; i < delta; i++) {
+            publish_event("PHYSICAL_TOUCH");
+        }
+        s_last_touch_count = state->touch_count;
+    } else if (state->touch_count < s_last_touch_count) {
         s_last_touch_count = state->touch_count;
     }
 }

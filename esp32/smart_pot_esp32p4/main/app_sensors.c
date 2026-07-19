@@ -1228,6 +1228,13 @@ bool app_sensors_set_plant_thresholds(uint8_t soil_min_percent, uint8_t soil_max
     }
 
     light_ctrl_ensure_loaded();
+    light_strip_control_t current = light_ctrl_snapshot();
+    if (current.soil_min_percent == soil_min_percent &&
+        current.soil_max_percent == soil_max_percent &&
+        current.light_min_lux == light_min_lux &&
+        current.light_max_lux == light_max_lux) {
+        return true;
+    }
     if (s_light_ctrl_lock != NULL && xSemaphoreTake(s_light_ctrl_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
         s_light_ctrl.soil_min_percent = soil_min_percent;
         s_light_ctrl.soil_max_percent = soil_max_percent;

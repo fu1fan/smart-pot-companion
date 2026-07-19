@@ -20,7 +20,7 @@ class InMemorySmartPotStore : SmartPotStore {
     private val memories = ConcurrentHashMap<String, MutableList<UserMemory>>()
     private val messages = ConcurrentHashMap<String, MutableList<ChatMessage>>()
     private val affinities = ConcurrentHashMap<String, AffinityState>()
-    private val affinityEventKeys = ConcurrentHashMap.newKeySet<String>()
+    private val affinityEvents = ConcurrentHashMap<String, String>()
     private val diaries = ConcurrentHashMap<String, MutableList<PlantDiary>>()
     private val focusSessions = ConcurrentHashMap<String, MutableList<FocusSession>>()
     private val scheduleItems = ConcurrentHashMap<String, MutableList<ScheduleItem>>()
@@ -124,7 +124,15 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState()
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) { affinities[potId] = affinity }
     override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean =
-        affinityEventKeys.add("$potId:$eventKey")
+        affinityEvents.putIfAbsent("$potId:$eventKey", occurredAt) == null
+
+    override suspend fun countAffinityEvents(potId: String, eventKeyPrefix: String, since: String): Int {
+        val prefix = "$potId:$eventKeyPrefix"
+        val cutoff = Instant.parse(since)
+        return affinityEvents.count { (key, occurredAt) ->
+            key.startsWith(prefix) && !Instant.parse(occurredAt).isBefore(cutoff)
+        }
+    }
 
     override suspend fun listDiaries(potId: String) = diaries[potId]?.let { synchronized(it) { it.sortedByDescending(PlantDiary::diaryDate) } } ?: emptyList()
     override suspend fun saveDiary(diary: PlantDiary): Boolean {
