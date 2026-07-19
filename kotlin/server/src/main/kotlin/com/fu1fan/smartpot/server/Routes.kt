@@ -28,6 +28,7 @@ data class ServerServices(
     val pots: PotService,
     val care: CareService,
     val ai: CloudAiService,
+    val weather: WeatherService,
     val diary: DiaryService,
     val commands: CommandService,
     val realtime: RealtimeHub,
@@ -152,7 +153,15 @@ fun Application.configureRoutes(services: ServerServices) {
                         val telemetry = services.store.telemetryHistory(pot.id, 1_440)
                             .filter { it.recordedAt.toLocalDate(zone) == today }
                         val focus = focusSummaries(services.store, pot, days = 1, today = today).first()
-                        call.respond(CareDayOverview(today.toString(), weatherFor(today, telemetry, pot), focus))
+                        val deviceWeather = weatherFor(today, telemetry, pot)
+                        val latitude = call.request.queryParameters["latitude"]?.toDoubleOrNull()
+                        val longitude = call.request.queryParameters["longitude"]?.toDoubleOrNull()
+                        val weather = if (latitude != null && longitude != null) {
+                            services.weather.current(today, latitude, longitude, deviceWeather)
+                        } else {
+                            deviceWeather
+                        }
+                        call.respond(CareDayOverview(today.toString(), weather, focus))
                     }
                     get("/focus/daily") {
                         val pot = call.requirePot(services)

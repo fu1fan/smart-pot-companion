@@ -1,13 +1,20 @@
 package com.fu1fan.smartpot.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.location.LocationManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -40,12 +47,16 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.os.CancellationSignal
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fu1fan.smartpot.R
 import com.fu1fan.smartpot.protocol.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
@@ -75,8 +86,8 @@ private data class DashboardMetrics(
     val interactionSuitability: Double,
 )
 
-private data class DailyTelemetryPoint(
-    val date: LocalDate,
+private data class HourlyTelemetryPoint(
+    val hour: ZonedDateTime,
     val soilPercent: Float?,
     val lightLux: Float?,
 )
@@ -125,7 +136,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::speakDiary)
+                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::speakDiary, viewModel::refreshWeather)
                     tab == 2 -> CompanionScreen(
                         state,
                         viewModel::sendChat,
@@ -170,31 +181,54 @@ private fun SpeciesPickerDialog(
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val filteredSpecies = remember(species, query) {
+        val keyword = query.trim()
+        if (keyword.isBlank()) species else species.filter { plant ->
+            plant.chineseName.contains(keyword, ignoreCase = true) ||
+                plant.scientificName.contains(keyword, ignoreCase = true) ||
+                plant.id.contains(keyword, ignoreCase = true)
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
         title = { Text("修改植物品种") },
         text = {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(species, key = { it.id }) { plant ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(plant.id) }
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(plant.chineseName, fontWeight = FontWeight.SemiBold)
-                            Text(plant.scientificName, fontSize = 12.sp, color = Color.Gray)
-                            Text(
-                                "湿度 ${plant.thresholds.soilMinPercent}-${plant.thresholds.soilMaxPercent}% · 光照 ${plant.thresholds.lightMinLux}-${plant.thresholds.lightMaxLux} lux",
-                                fontSize = 11.sp,
-                                color = Color.Gray,
-                            )
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("搜索植物品种") },
+                    placeholder = { Text("中文名、英文名") },
+                    singleLine = true,
+                )
+                if (filteredSpecies.isEmpty()) {
+                    Text("没有找到匹配的植物品种", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 18.dp))
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(filteredSpecies, key = { it.id }) { plant ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(plant.id) }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(plant.chineseName, fontWeight = FontWeight.SemiBold)
+                                    Text(plant.scientificName, fontSize = 12.sp, color = Color.Gray)
+                                    Text(
+                                        "湿度 ${plant.thresholds.soilMinPercent}-${plant.thresholds.soilMaxPercent}% · 光照 ${plant.thresholds.lightMinLux}-${plant.thresholds.lightMaxLux} lux",
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                    )
+                                }
+                                if (plant.id == currentSpeciesId) Text("当前", color = Leaf, fontWeight = FontWeight.Bold)
+                            }
                         }
-                        if (plant.id == currentSpeciesId) Text("当前", color = Leaf, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -573,7 +607,7 @@ private fun StarRating(stars: Float) {
 
 @Composable
 private fun TelemetryTrendCard(values: List<DeviceTelemetry>, latest: DeviceTelemetry?, timezone: String?) {
-    val points = remember(values, latest, timezone) { dailyTelemetryPoints(values, latest, timezone) }
+    val points = remember(values, latest, timezone) { hourlyTelemetryPoints(values, latest, timezone) }
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -595,7 +629,7 @@ private fun TelemetryTrendCard(values: List<DeviceTelemetry>, latest: DeviceTele
                     val y = topPadding + chartHeight * index / 2f
                     drawLine(Color(0xFFF0F1ED), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
                 }
-                fun drawSeries(color: Color, valueOf: (DailyTelemetryPoint) -> Float?, max: Float) {
+                fun drawSeries(color: Color, valueOf: (HourlyTelemetryPoint) -> Float?, max: Float) {
                     val path = Path()
                     var drawing = false
                     points.forEachIndexed { index, point ->
@@ -619,7 +653,7 @@ private fun TelemetryTrendCard(values: List<DeviceTelemetry>, latest: DeviceTele
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 points.forEach { point ->
                     Text(
-                        point.date.format(DateTimeFormatter.ofPattern("MM-dd")),
+                        point.hour.format(DateTimeFormatter.ofPattern("HH:00")),
                         color = Muted,
                         fontSize = 9.sp,
                         textAlign = TextAlign.Center,
@@ -694,7 +728,19 @@ private fun CareScreen(
     addCare: (CareType, String) -> Unit,
     saveDiary: (String, String, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
+    refreshWeather: (Double, Double) -> Unit,
 ) {
+    val context = LocalContext.current
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) requestWeatherLocation(context, refreshWeather)
+    }
+    LaunchedEffect(state.selectedPotId) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            requestWeatherLocation(context, refreshWeather)
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
     var note by rememberSaveable { mutableStateOf("") }
     var timelineExpanded by rememberSaveable { mutableStateOf(false) }
     var diariesExpanded by rememberSaveable { mutableStateOf(false) }
@@ -749,7 +795,6 @@ private fun CareScreen(
             )
         }
         item { TodayEnvironmentCard(state) }
-        if (state.reminders.isNotEmpty()) item { AdviceCard("下一次养护", state.reminders.take(4).map { "${careLabel(it.type)} · ${it.dueAt.take(10)}" }) }
     }
 }
 
@@ -1108,13 +1153,14 @@ private fun TodayEnvironmentCard(state: SmartPotUiState) {
                 Text("${weatherEmoji(weather?.condition)} ${weather?.condition ?: "等待数据"}", color = Leaf, fontWeight = FontWeight.SemiBold)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                EnvironmentStat("平均光照", weather?.averageLightLux?.let { "$it lux" } ?: "--", Modifier.weight(1f))
+                EnvironmentStat("温度", weather?.temperatureC?.let { "${it.roundToInt()}°C" } ?: "--", Modifier.weight(1f))
                 VerticalDivider(Modifier.height(42.dp), color = CardBorder)
-                EnvironmentStat("峰值光照", weather?.maxLightLux?.let { "$it lux" } ?: "--", Modifier.weight(1f))
+                EnvironmentStat("空气湿度", weather?.relativeHumidityPercent?.let { "$it%" } ?: "--", Modifier.weight(1f))
                 VerticalDivider(Modifier.height(42.dp), color = CardBorder)
                 EnvironmentStat("环境状态", environmentStatus, Modifier.weight(1f))
             }
             weather?.hint?.takeIf(String::isNotBlank)?.let { Text(it, color = Muted, fontSize = 11.sp) }
+            if (weather?.source == "OPEN_METEO") Text("实时天气 · Open-Meteo", color = Muted, fontSize = 9.sp)
         }
     }
 }
@@ -1649,7 +1695,7 @@ private fun CompanionChatCard(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
 ) {
-    val messages = state.messages.takeLast(4)
+    val messages = state.messages
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -1681,7 +1727,12 @@ private fun CompanionChatCard(
                 if (messages.isEmpty()) {
                     Text("这一天还没有对话记录", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
-                    messages.forEach { message -> CompanionChatBubble(message, zone) }
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        messages.forEach { message -> CompanionChatBubble(message, zone) }
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2022,28 +2073,47 @@ private fun dashboardMetrics(state: SmartPotUiState): DashboardMetrics {
     )
 }
 
-private fun dailyTelemetryPoints(
+private fun hourlyTelemetryPoints(
     values: List<DeviceTelemetry>,
     latest: DeviceTelemetry?,
     timezone: String?,
-): List<DailyTelemetryPoint> {
+): List<HourlyTelemetryPoint> {
     val zone = zoneIdOf(timezone)
-    val today = LocalDate.now(zone)
-    val firstDate = today.minusDays(6)
+    val currentHour = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.HOURS)
+    val firstHour = currentHour.minusHours(5)
     val grouped = telemetryWithLatest(values, latest)
         .mapNotNull { item ->
-            val date = parseInstant(item.recordedAt)?.atZone(zone)?.toLocalDate() ?: return@mapNotNull null
-            if (date.isBefore(firstDate) || date.isAfter(today)) null else date to item
+            val hour = parseInstant(item.recordedAt)?.atZone(zone)?.truncatedTo(ChronoUnit.HOURS) ?: return@mapNotNull null
+            if (hour.isBefore(firstHour) || hour.isAfter(currentHour)) null else hour to item
         }
         .groupBy({ it.first }, { it.second })
-    return (0L..6L).map { offset ->
-        val date = firstDate.plusDays(offset)
-        val daily = grouped[date].orEmpty()
-        DailyTelemetryPoint(
-            date = date,
-            soilPercent = if (daily.isEmpty()) null else daily.map { it.soilPercent }.average().toFloat(),
-            lightLux = if (daily.isEmpty()) null else daily.map { it.lightLux }.average().toFloat(),
+    return (0L..5L).map { offset ->
+        val hour = firstHour.plusHours(offset)
+        val hourly = grouped[hour].orEmpty()
+        HourlyTelemetryPoint(
+            hour = hour,
+            soilPercent = if (hourly.isEmpty()) null else hourly.map { it.soilPercent }.average().toFloat(),
+            lightLux = if (hourly.isEmpty()) null else hourly.map { it.lightLux }.average().toFloat(),
         )
+    }
+}
+
+private fun requestWeatherLocation(context: Context, onLocation: (Double, Double) -> Unit) {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+    val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
+    val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+        .filter { provider -> runCatching { manager.isProviderEnabled(provider) }.getOrDefault(false) }
+    val latest = providers.mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        .maxByOrNull { it.time }
+    latest?.let { onLocation(it.latitude, it.longitude) }
+    val provider = providers.firstOrNull() ?: return
+    runCatching {
+        LocationManagerCompat.getCurrentLocation(
+            manager,
+            provider,
+            CancellationSignal(),
+            ContextCompat.getMainExecutor(context),
+        ) { location -> location?.let { onLocation(it.latitude, it.longitude) } }
     }
 }
 

@@ -75,7 +75,8 @@ class CloudAiService(
     suspend fun proxyOpenAi(request: JsonObject, output: ByteWriteChannel, pot: PotProfile? = null) {
         val key = requireNotNull(config.deepSeekApiKey?.takeIf { it.isNotBlank() }) { "云端模型密钥尚未配置" }
         val history = pot?.let { store.listMessages(it.id, 12) }.orEmpty()
-        val withHistory = injectServerChatHistory(request, history)
+        val memories = pot?.let { store.listMemories(it.id).takeLast(20) }.orEmpty()
+        val withHistory = injectServerChatHistory(request, history, memories)
         val normalized = JsonObject(withHistory + ("model" to JsonPrimitive(config.deepSeekModel)))
         client.preparePost(config.deepSeekEndpoint) {
             bearerAuth(key)
@@ -113,8 +114,12 @@ class CloudAiService(
     override fun close() = client.close()
 }
 
-internal fun injectServerChatHistory(request: JsonObject, history: List<ChatMessage>): JsonObject {
-    if (history.isEmpty()) return request
+internal fun injectServerChatHistory(
+    request: JsonObject,
+    history: List<ChatMessage>,
+    memories: List<UserMemory> = emptyList(),
+): JsonObject {
+    if (history.isEmpty() && memories.isEmpty()) return request
     val incoming = request["messages"] as? JsonArray ?: return request
     val currentUser = incoming.lastOrNull { message ->
         message.jsonObject["role"]?.jsonPrimitive?.contentOrNull == "user"
@@ -124,6 +129,15 @@ internal fun injectServerChatHistory(request: JsonObject, history: List<ChatMess
     }
     val merged = buildJsonArray {
         systemMessages.forEach(::add)
+        if (memories.isNotEmpty()) {
+            add(buildJsonObject {
+                put("role", JsonPrimitive("system"))
+                put(
+                    "content",
+                    JsonPrimitive("主人明确要求你长期记住以下信息，并在相关问题中自然使用：${memories.joinToString("；") { it.content }}"),
+                )
+            })
+        }
         history.takeLast(12).forEach { message ->
             add(buildJsonObject {
                 put("role", JsonPrimitive(message.role.name.lowercase()))

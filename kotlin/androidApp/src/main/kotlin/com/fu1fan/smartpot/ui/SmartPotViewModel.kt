@@ -19,6 +19,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.round
 
 data class SmartPotUiState(
     val loading: Boolean = true,
@@ -49,6 +50,7 @@ class SmartPotViewModel : ViewModel() {
     private val mutableState = MutableStateFlow(SmartPotUiState())
     val state: StateFlow<SmartPotUiState> = mutableState.asStateFlow()
     private var realtimeJob: Job? = null
+    private var weatherLocation: Pair<Double, Double>? = null
 
     init { bootstrap() }
 
@@ -85,7 +87,7 @@ class SmartPotViewModel : ViewModel() {
         val telemetry = api.telemetry(id)
         val care = api.careLogs(id)
         val reminders = api.reminders(id)
-        val careOverview = api.careOverview(id)
+        val careOverview = careOverview(id)
         val focusDaily = api.focusDaily(id)
         val schedule = api.schedule(id)
         val memories = api.memories(id)
@@ -142,7 +144,13 @@ class SmartPotViewModel : ViewModel() {
 
     fun addCare(type: CareType, note: String) = withPot { id ->
         api.addCare(id, CreateCareLogRequest(type, note = note))
-        mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = api.careOverview(id)) }
+        mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = careOverview(id)) }
+    }
+
+    fun refreshWeather(latitude: Double, longitude: Double) = withPot { id ->
+        val coarseLocation = round(latitude * 100.0) / 100.0 to round(longitude * 100.0) / 100.0
+        weatherLocation = coarseLocation
+        mutableState.update { it.copy(careOverview = careOverview(id), error = null) }
     }
 
     fun addMemory(text: String) = withPot { id -> mutableState.update { it.copy(memories = it.memories + api.addMemory(id, text)) } }
@@ -184,7 +192,7 @@ class SmartPotViewModel : ViewModel() {
 
     fun recordPomodoro() = withPot { id ->
         api.addFocusSession(id)
-        mutableState.update { it.copy(careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }
+        mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
     fun addSchedule(title: String, displayTime: String) = withPot { id ->
@@ -200,12 +208,12 @@ class SmartPotViewModel : ViewModel() {
                 displayTime = scheduleDisplayTime(dueAt, timezone),
             ),
         )
-        mutableState.update { it.copy(schedule = api.schedule(id), careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }
+        mutableState.update { it.copy(schedule = api.schedule(id), careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
     fun toggleSchedule(item: ScheduleItem, completed: Boolean) = withPot { id ->
         api.updateSchedule(id, item.id, UpdateScheduleItemRequest(completed = completed))
-        mutableState.update { it.copy(schedule = api.schedule(id), careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }
+        mutableState.update { it.copy(schedule = api.schedule(id), careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
     fun speakDiary(diary: PlantDiary) = control(
@@ -245,6 +253,11 @@ class SmartPotViewModel : ViewModel() {
 
     private fun fail(error: Throwable) {
         mutableState.update { it.copy(loading = false, error = error.message ?: "网络请求失败") }
+    }
+
+    private suspend fun careOverview(id: String): CareDayOverview {
+        val location = weatherLocation
+        return api.careOverview(id, location?.first, location?.second)
     }
 
     private suspend fun refreshChat(id: String) {

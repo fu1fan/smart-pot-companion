@@ -185,6 +185,9 @@ data class CareWeather(
     val averageLightLux: Int? = null,
     val maxLightLux: Int? = null,
     val hint: String = "",
+    val temperatureC: Double? = null,
+    val relativeHumidityPercent: Int? = null,
+    val source: String = "DEVICE",
 )
 
 @Serializable

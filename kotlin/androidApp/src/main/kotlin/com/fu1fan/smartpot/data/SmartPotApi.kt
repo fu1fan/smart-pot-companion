@@ -42,11 +42,14 @@ class SmartPotApi(
     suspend fun createPot(request: CreatePotRequest): PotProfile = postApi("/api/v1/pots", request)
     suspend fun updatePot(id: String, request: UpdatePotRequest): PotProfile = patchApi("/api/v1/pots/$id", request)
     suspend fun snapshot(id: String): PotSnapshot = getApi("/api/v1/pots/$id/snapshot")
-    suspend fun telemetry(id: String): List<DeviceTelemetry> = getApi("/api/v1/pots/$id/telemetry?limit=240")
+    suspend fun telemetry(id: String): List<DeviceTelemetry> = getApi("/api/v1/pots/$id/telemetry?limit=420")
     suspend fun careLogs(id: String): List<CareLog> = getApi("/api/v1/pots/$id/care")
     suspend fun reminders(id: String): List<CareReminder> = getApi("/api/v1/pots/$id/reminders")
     suspend fun addCare(id: String, request: CreateCareLogRequest): CareLog = postApi("/api/v1/pots/$id/care", request)
-    suspend fun careOverview(id: String): CareDayOverview = getApi("/api/v1/pots/$id/care-overview")
+    suspend fun careOverview(id: String, latitude: Double? = null, longitude: Double? = null): CareDayOverview {
+        val locationQuery = if (latitude != null && longitude != null) "?latitude=$latitude&longitude=$longitude" else ""
+        return getApi("/api/v1/pots/$id/care-overview$locationQuery")
+    }
     suspend fun focusDaily(id: String): List<DailyFocusSummary> = getApi("/api/v1/pots/$id/focus/daily?days=5")
     suspend fun addFocusSession(id: String): FocusSession = postApi("/api/v1/pots/$id/focus/sessions", CreateFocusSessionRequest(minutes = 25, source = "APP"))
     suspend fun schedule(id: String): ScheduleSyncState = getApi("/api/v1/pots/$id/schedule")

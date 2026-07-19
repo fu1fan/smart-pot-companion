@@ -27,9 +27,11 @@ import com.fu1fan.smartpot.protocol.ShareCode
 import com.fu1fan.smartpot.protocol.ShareSession
 import com.fu1fan.smartpot.protocol.UpdatePotRequest
 import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
+import com.fu1fan.smartpot.protocol.UserMemory
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
 import com.fu1fan.smartpot.server.service.injectServerChatHistory
+import com.fu1fan.smartpot.server.service.weatherCodeLabel
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -410,9 +412,28 @@ class ApplicationTest {
             ChatMessage("55555555-5555-5555-5555-555555555551", "pot", ChatRole.USER, "服务器记忆", "2026-07-19T00:00:00Z", "ESP"),
             ChatMessage("55555555-5555-5555-5555-555555555552", "pot", ChatRole.ASSISTANT, "已经记住", "2026-07-19T00:00:01Z", "ESP"),
         )
+        val memories = listOf(
+            UserMemory("55555555-5555-5555-5555-555555555553", "pot", "我的生日是8月12日", "2026-07-19T00:00:02Z"),
+        )
 
-        val merged = injectServerChatHistory(request, history)["messages"] as JsonArray
+        val merged = injectServerChatHistory(request, history, memories)["messages"] as JsonArray
         val contents = merged.map { it.jsonObject["content"]!!.jsonPrimitive.content }
-        assertEquals(listOf("你是小麦", "服务器记忆", "已经记住", "现在的问题"), contents)
+        assertEquals(
+            listOf(
+                "你是小麦",
+                "主人明确要求你长期记住以下信息，并在相关问题中自然使用：我的生日是8月12日",
+                "服务器记忆",
+                "已经记住",
+                "现在的问题",
+            ),
+            contents,
+        )
+    }
+
+    @Test
+    fun `open meteo weather codes use readable chinese labels`() {
+        assertEquals("晴朗", weatherCodeLabel(0))
+        assertEquals("有雨", weatherCodeLabel(63))
+        assertEquals("雷雨", weatherCodeLabel(95))
     }
 }
