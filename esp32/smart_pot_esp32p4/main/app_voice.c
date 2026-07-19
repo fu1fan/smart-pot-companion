@@ -63,6 +63,10 @@
 #define APP_BOARD_VOICE_WAKE_ENERGY_PACKETS 2
 #endif
 
+#ifndef APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
+#define APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE 0
+#endif
+
 #ifndef APP_BOARD_VOICE_TASK_STACK_BYTES
 #define APP_BOARD_VOICE_TASK_STACK_BYTES 12288
 #endif
@@ -161,20 +165,19 @@ static bool remove_wake_phrase(char *text)
     };
     trim_voice_text(text);
 
-    char *first = NULL;
     const char *matched = NULL;
     for (size_t i = 0; i < sizeof(wake_variants) / sizeof(wake_variants[0]); i++) {
-        char *pos = strstr(text, wake_variants[i]);
-        if (pos != NULL && (first == NULL || pos < first)) {
-            first = pos;
+        size_t variant_len = strlen(wake_variants[i]);
+        if (strncmp(text, wake_variants[i], variant_len) == 0) {
             matched = wake_variants[i];
+            break;
         }
     }
-    if (first == NULL || matched == NULL) {
+    if (matched == NULL) {
         return false;
     }
 
-    char *after = first + strlen(matched);
+    char *after = text + strlen(matched);
     memmove(text, after, strlen(after) + 1);
     trim_voice_text(text);
     return true;
@@ -274,6 +277,7 @@ static bool service_pending_voice_request(esp_codec_dev_handle_t mic)
         return true;
     }
 
+#if APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
     if (s_followup_request) {
         TickType_t now = xTaskGetTickCount();
         if ((int32_t)(now - s_followup_deadline) >= 0) {
@@ -283,10 +287,11 @@ static bool service_pending_voice_request(esp_codec_dev_handle_t mic)
             s_followup_request = false;
             ESP_LOGI(TAG, "Follow-up voice conversation requested");
             app_ui_set_voice_status("ASR: follow-up");
-            transcribe_and_reply(mic, false);
+            transcribe_and_reply(mic, true);
             return true;
         }
     }
+#endif
 
     return false;
 }
@@ -643,11 +648,16 @@ void app_voice_conversation_complete_with_followup(bool enable_followup)
 {
     s_conversation_busy = false;
     s_wakenet_rearm_requested = true;
+#if APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
     if (enable_followup && s_voice_ready && s_long_conversation_enabled) {
         s_followup_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(VOICE_FOLLOWUP_WINDOW_MS);
         s_followup_request = true;
         app_ui_set_voice_status("ASR: keep talking");
     } else {
+#else
+    (void)enable_followup;
+    {
+#endif
         s_followup_request = false;
         app_ui_set_voice_status(VOICE_WAKE_HINT);
     }
