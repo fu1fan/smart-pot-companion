@@ -38,9 +38,7 @@
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
-#define VOICE_WAKE_ENERGY_PACKETS 3
 #define VOICE_WAKE_PREROLL_PACKETS 12
-#define VOICE_WAKE_THRESHOLD_MAX 4000
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -51,6 +49,18 @@
 
 #ifndef APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES
 #define APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES 1600
+#endif
+
+#ifndef APP_BOARD_VOICE_WAKE_THRESHOLD
+#define APP_BOARD_VOICE_WAKE_THRESHOLD CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD
+#endif
+
+#ifndef APP_BOARD_VOICE_WAKE_THRESHOLD_MAX
+#define APP_BOARD_VOICE_WAKE_THRESHOLD_MAX 300
+#endif
+
+#ifndef APP_BOARD_VOICE_WAKE_ENERGY_PACKETS
+#define APP_BOARD_VOICE_WAKE_ENERGY_PACKETS 2
 #endif
 
 #ifndef APP_BOARD_VOICE_TASK_STACK_BYTES
@@ -146,8 +156,8 @@ static bool remove_wake_phrase(char *text)
         VOICE_WAKE_WORD, "你好，小麦", "你好 小麦", "你好小卖", "你好小脉",
         "你好小迈", "你好晓麦", "你好小妹", "你 好 小 麦", "你好 小 麦",
         "你好 小卖", "你好 小脉", "你好 小迈", "你好 晓麦", "你好 小妹",
-        "你好啊小麦", "你好呀小麦",
-        "小麦", "小 麦", "小卖", "小脉", "小迈", "晓麦", "小妹",
+        "你好小美", "你好 小美", "你好啊小麦", "你好呀小麦",
+        "小麦", "小 麦", "小卖", "小脉", "小迈", "晓麦", "小妹", "小美",
     };
     trim_voice_text(text);
 
@@ -300,9 +310,12 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 
     TickType_t last_wake_tick = 0;
     int wake_energy_packets = 0;
-    int wake_threshold = CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD;
-    if (wake_threshold <= 0 || wake_threshold > VOICE_WAKE_THRESHOLD_MAX) {
-        wake_threshold = VOICE_WAKE_THRESHOLD_MAX;
+    int wake_threshold = APP_BOARD_VOICE_WAKE_THRESHOLD;
+    if (wake_threshold <= 0) {
+        wake_threshold = CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD;
+    }
+    if (wake_threshold <= 0 || wake_threshold > APP_BOARD_VOICE_WAKE_THRESHOLD_MAX) {
+        wake_threshold = APP_BOARD_VOICE_WAKE_THRESHOLD_MAX;
     }
     size_t preroll_head = 0;
     size_t preroll_count = 0;
@@ -347,7 +360,7 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
         } else {
             wake_energy_packets = 0;
         }
-        if (!s_conversation_busy && wake_energy_packets >= VOICE_WAKE_ENERGY_PACKETS &&
+        if (!s_conversation_busy && wake_energy_packets >= APP_BOARD_VOICE_WAKE_ENERGY_PACKETS &&
             cooldown_done(wake_now, last_wake_tick)) {
             last_wake_tick = wake_now;
             wake_energy_packets = 0;

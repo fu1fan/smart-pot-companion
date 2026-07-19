@@ -143,7 +143,7 @@ menu "Smart Pot"
 
     config SMART_POT_VOICE_WAKE_THRESHOLD
         int "Voice wake phrase fallback average PCM threshold"
-        default 300
+        default 120
         depends on SMART_POT_VOICE_WAKE_ENABLE
 
     config SMART_POT_VOICE_WAKE_COOLDOWN_MS
