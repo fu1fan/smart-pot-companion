@@ -4,12 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "bsp/esp-bsp.h"
-#include "esp_afe_config.h"
-#include "esp_afe_sr_iface.h"
-#include "esp_afe_sr_models.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
 #include "esp_wn_iface.h"
+#include "esp_wn_models.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "model_path.h"
@@ -172,6 +170,7 @@ static bool remove_wake_phrase(char *text)
     return true;
 }
 
+#if !APP_BOARD_WAKENET_ENABLE
 static int average_sample_level(const int16_t *samples, size_t sample_count)
 {
     if (samples == NULL || sample_count == 0) {
@@ -184,6 +183,7 @@ static int average_sample_level(const int16_t *samples, size_t sample_count)
     }
     return (int)(sum / (int64_t)sample_count);
 }
+#endif
 
 static bool cooldown_done(TickType_t now, TickType_t last_wake_tick)
 {
@@ -281,6 +281,7 @@ static bool service_pending_voice_request(esp_codec_dev_handle_t mic)
     return false;
 }
 
+#if !APP_BOARD_WAKENET_ENABLE
 static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 {
     size_t sample_count = APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES;
@@ -366,33 +367,118 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
         }
     }
 }
+#endif
 
-#if APP_BOARD_WAKENET_ENABLE
-static int apply_wakenet_threshold(const esp_afe_sr_iface_t *afe_handle,
-                                   esp_afe_sr_data_t *afe_data)
+static float wakenet_threshold_value(void)
 {
-    if (afe_handle == NULL || afe_data == NULL || afe_handle->set_wakenet_threshold == NULL) {
-        return -1;
-    }
     float threshold = (float)CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT / 100.0f;
     if (threshold < 0.4f) {
         threshold = 0.4f;
     } else if (threshold > 0.9999f) {
         threshold = 0.9999f;
     }
-    return afe_handle->set_wakenet_threshold(afe_data, 1, threshold);
+    return threshold;
 }
 
-static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_t *afe_data)
+#if APP_BOARD_WAKENET_ENABLE
+static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
 {
-    int reset_result = afe_handle->reset_buffer != NULL ? afe_handle->reset_buffer(afe_data) : -1;
-    int disable_result = afe_handle->disable_wakenet != NULL ? afe_handle->disable_wakenet(afe_data) : -1;
-    int enable_result = afe_handle->enable_wakenet != NULL ? afe_handle->enable_wakenet(afe_data) : -1;
-    int threshold_result = afe_handle->reset_wakenet_threshold != NULL ?
-                           afe_handle->reset_wakenet_threshold(afe_data, 1) : -1;
-    int custom_threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
-    ESP_LOGI(TAG, "WakeNet rearmed: buffer=%d disable=%d enable=%d reset_threshold=%d set_threshold=%d",
-             reset_result, disable_result, enable_result, threshold_result, custom_threshold_result);
+    srmodel_list_t *models = esp_srmodel_init("model");
+    if (models == NULL) {
+        ESP_LOGE(TAG, "Failed to load ESP-SR models from model partition");
+        app_ui_set_voice_status("Wake: model missing");
+        return;
+    }
+
+    char *wn_name = esp_srmodel_filter(models, "wn9", VOICE_WAKE_MODEL_NAME);
+    if (wn_name == NULL) {
+        ESP_LOGE(TAG, "WakeNet model wn9_%s not found", VOICE_WAKE_MODEL_NAME);
+        app_ui_set_voice_status("Wake: model not found");
+        return;
+    }
+
+    const esp_wn_iface_t *wn_handle = esp_wn_handle_from_name(wn_name);
+    if (wn_handle == NULL || wn_handle->create == NULL || wn_handle->detect == NULL ||
+        wn_handle->get_samp_chunksize == NULL || wn_handle->destroy == NULL) {
+        ESP_LOGE(TAG, "Invalid direct WakeNet interface for %s", wn_name);
+        app_ui_set_voice_status("Wake: model invalid");
+        return;
+    }
+
+    model_iface_data_t *wn_data = wn_handle->create(wn_name, DET_MODE_90);
+    if (wn_data == NULL) {
+        ESP_LOGE(TAG, "Failed to create direct WakeNet data for %s", wn_name);
+        app_ui_set_voice_status("Wake: model failed");
+        return;
+    }
+
+    int sample_count = wn_handle->get_samp_chunksize(wn_data);
+    int sample_rate = wn_handle->get_samp_rate != NULL ? wn_handle->get_samp_rate(wn_data) : 0;
+    int channel_count = wn_handle->get_channel_num != NULL ? wn_handle->get_channel_num(wn_data) : 1;
+    if (sample_count <= 0 || sample_count > 4096) {
+        ESP_LOGE(TAG, "Invalid direct WakeNet sample count: %d", sample_count);
+        app_ui_set_voice_status("Wake: model shape invalid");
+        wn_handle->destroy(wn_data);
+        return;
+    }
+
+    int16_t *samples = calloc((size_t)sample_count, sizeof(int16_t));
+    if (samples == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate direct WakeNet buffer");
+        app_ui_set_voice_status("Wake: no memory");
+        wn_handle->destroy(wn_data);
+        return;
+    }
+
+    float threshold = wakenet_threshold_value();
+    int threshold_result = wn_handle->set_det_threshold != NULL ?
+                           wn_handle->set_det_threshold(wn_data, threshold, 1) : -1;
+    TickType_t last_wake_tick = 0;
+    s_voice_ready = true;
+    s_wakenet_rearm_requested = false;
+    app_ui_set_voice_status(VOICE_WAKE_HINT);
+    ESP_LOGI(TAG, "Direct WakeNet ready: model=%s chunks=%d rate=%d channels=%d threshold=%.2f result=%d",
+             wn_name, sample_count, sample_rate, channel_count, threshold, threshold_result);
+
+    while (true) {
+        if (service_microphone_pause(mic, samples, (size_t)sample_count * sizeof(int16_t),
+                                     VOICE_WAKE_HINT)) {
+            continue;
+        }
+
+        if (s_wakenet_rearm_requested) {
+            s_wakenet_rearm_requested = false;
+            if (wn_handle->clean != NULL) {
+                wn_handle->clean(wn_data);
+            }
+        }
+
+        int ret = esp_codec_dev_read(mic, samples, (size_t)sample_count * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            ESP_LOGW(TAG, "Microphone read failed: %d", ret);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        if (service_pending_voice_request(mic)) {
+            continue;
+        }
+
+        wakenet_state_t state = wn_handle->detect(wn_data, samples);
+        TickType_t now = xTaskGetTickCount();
+        if (state == WAKENET_DETECTED && !s_conversation_busy &&
+            cooldown_done(now, last_wake_tick)) {
+            last_wake_tick = now;
+            int channel = wn_handle->get_triggered_channel != NULL ?
+                          wn_handle->get_triggered_channel(wn_data) : -1;
+            ESP_LOGI(TAG, "Direct WakeNet detected %s channel=%d",
+                     VOICE_WAKE_WORD, channel);
+            app_ui_set_voice_status("Wake: detected");
+            transcribe_and_reply(mic, false);
+        } else if (!s_conversation_busy && cooldown_done(now, last_wake_tick)) {
+            app_ui_set_voice_status(VOICE_WAKE_HINT);
+        }
+    }
 }
 #endif
 
@@ -478,135 +564,13 @@ static void voice_task(void *arg)
         return;
     }
 
-#if !APP_BOARD_WAKENET_ENABLE
+#if APP_BOARD_WAKENET_ENABLE
+    run_direct_wakenet_loop(mic);
+#else
     run_energy_wake_loop(mic);
+#endif
     vTaskDelete(NULL);
     return;
-#else
-
-    srmodel_list_t *models = esp_srmodel_init("model");
-    if (models == NULL) {
-        ESP_LOGE(TAG, "Failed to load ESP-SR models from model partition");
-        app_ui_set_voice_status("Wake: model missing");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    char *wn_name = esp_srmodel_filter(models, "wn9", VOICE_WAKE_MODEL_NAME);
-    if (wn_name == NULL) {
-        ESP_LOGE(TAG, "WakeNet model wn9_%s not found", VOICE_WAKE_MODEL_NAME);
-        app_ui_set_voice_status("Wake: model not found");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    afe_config_t *afe_config = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
-    if (afe_config == NULL) {
-        ESP_LOGE(TAG, "Failed to create AFE config");
-        app_ui_set_voice_status("Wake: AFE config failed");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    afe_config->aec_init = false;
-    afe_config->se_init = false;
-    afe_config->ns_init = false;
-    afe_config->vad_init = false;
-    afe_config->agc_init = true;
-    afe_config->wakenet_init = true;
-    afe_config->wakenet_model_name = wn_name;
-    afe_config->wakenet_mode = DET_MODE_95;
-    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
-
-    const esp_afe_sr_iface_t *afe_handle = esp_afe_handle_from_config(afe_config);
-    if (afe_handle == NULL || afe_handle->create_from_config == NULL ||
-        afe_handle->feed == NULL || afe_handle->fetch_with_delay == NULL ||
-        afe_handle->get_feed_chunksize == NULL || afe_handle->get_feed_channel_num == NULL ||
-        afe_handle->destroy == NULL) {
-        ESP_LOGE(TAG, "Invalid AFE interface");
-        app_ui_set_voice_status("Wake: AFE invalid");
-        afe_config_free(afe_config);
-        vTaskDelete(NULL);
-        return;
-    }
-    esp_afe_sr_data_t *afe_data = afe_handle->create_from_config(afe_config);
-    afe_config_free(afe_config);
-    if (afe_data == NULL) {
-        ESP_LOGE(TAG, "Failed to create AFE data");
-        app_ui_set_voice_status("Wake: AFE start failed");
-        vTaskDelete(NULL);
-        return;
-    }
-    afe_handle->print_pipeline(afe_data);
-
-    int feed_chunksize = afe_handle->get_feed_chunksize(afe_data);
-    int feed_channels = afe_handle->get_feed_channel_num(afe_data);
-    if (feed_chunksize <= 0 || feed_channels <= 0) {
-        ESP_LOGE(TAG, "Invalid AFE feed shape: chunks=%d channels=%d",
-                 feed_chunksize, feed_channels);
-        app_ui_set_voice_status("Wake: AFE shape invalid");
-        afe_handle->destroy(afe_data);
-        vTaskDelete(NULL);
-        return;
-    }
-    int16_t *samples = calloc(feed_chunksize * feed_channels, sizeof(int16_t));
-    if (samples == NULL) {
-        app_ui_set_voice_status("Wake: no memory");
-        afe_handle->destroy(afe_data);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    TickType_t last_wake_tick = 0;
-    s_voice_ready = true;
-    int threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
-    app_ui_set_voice_status(VOICE_WAKE_HINT);
-    ESP_LOGI(TAG, "WakeNet ready: model=%s, chunks=%d, channels=%d threshold=%d%% result=%d",
-             wn_name, feed_chunksize, feed_channels,
-             CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT, threshold_result);
-
-    while (true) {
-        if (service_microphone_pause(mic, samples,
-                                     feed_chunksize * feed_channels * sizeof(int16_t),
-                                     VOICE_WAKE_HINT)) {
-            continue;
-        }
-
-        if (s_wakenet_rearm_requested) {
-            s_wakenet_rearm_requested = false;
-            rearm_wakenet(afe_handle, afe_data);
-        }
-
-        int ret = esp_codec_dev_read(mic, samples, feed_chunksize * feed_channels * sizeof(int16_t));
-        if (ret != ESP_CODEC_DEV_OK) {
-            ESP_LOGW(TAG, "Microphone read failed: %d", ret);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        if (service_pending_voice_request(mic)) {
-            continue;
-        }
-
-        afe_handle->feed(afe_data, samples);
-        afe_fetch_result_t *res = afe_handle->fetch_with_delay(afe_data, 0);
-        if (res == NULL || res->ret_value == ESP_FAIL) {
-            continue;
-        }
-
-        TickType_t now = xTaskGetTickCount();
-        if (res->wakeup_state == WAKENET_DETECTED && !s_conversation_busy &&
-            cooldown_done(now, last_wake_tick)) {
-            last_wake_tick = now;
-            ESP_LOGI(TAG, "WakeNet detected %s, word=%d, model=%d",
-                     VOICE_WAKE_WORD, res->wake_word_index, res->wakenet_model_index);
-            app_ui_set_voice_status("Wake: detected");
-            transcribe_and_reply(mic, false);
-        } else if (!s_conversation_busy && cooldown_done(now, last_wake_tick)) {
-            app_ui_set_voice_status(VOICE_WAKE_HINT);
-        }
-    }
-#endif
 }
 
 void app_voice_start(void)
