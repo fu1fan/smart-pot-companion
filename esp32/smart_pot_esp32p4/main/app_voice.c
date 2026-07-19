@@ -38,9 +38,9 @@
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
-#define VOICE_WAKE_ENERGY_PACKETS 2
+#define VOICE_WAKE_ENERGY_PACKETS 3
 #define VOICE_WAKE_PREROLL_PACKETS 12
-#define VOICE_WAKE_THRESHOLD_MAX 50
+#define VOICE_WAKE_THRESHOLD_MAX 4000
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -369,6 +369,7 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 }
 #endif
 
+#if APP_BOARD_WAKENET_ENABLE
 static float wakenet_threshold_value(void)
 {
     float threshold = (float)CONFIG_SMART_POT_VOICE_WAKE_WAKENET_THRESHOLD_PERCENT / 100.0f;
@@ -380,7 +381,6 @@ static float wakenet_threshold_value(void)
     return threshold;
 }
 
-#if APP_BOARD_WAKENET_ENABLE
 static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
 {
     srmodel_list_t *models = esp_srmodel_init("model");
