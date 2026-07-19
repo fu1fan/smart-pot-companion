@@ -8,6 +8,7 @@
 
 void app_cloud_start(void);
 void app_cloud_update_plant_state(const app_plant_state_t *state);
+void app_cloud_publish_conversation(const char *user_text, const char *assistant_text);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
 void app_cloud_update_motion(app_motion_event_t event, const app_motion_state_t *state);
 #endif

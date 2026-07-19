@@ -40,6 +40,8 @@ interface SmartPotStore : AutoCloseable {
     suspend fun listMemories(potId: String): List<UserMemory>
     suspend fun saveMemory(memory: UserMemory)
     suspend fun listMessages(potId: String, limit: Int = 40): List<ChatMessage>
+    suspend fun listMessagesForDay(potId: String, date: String, timezone: String, limit: Int = 500): List<ChatMessage>
+    suspend fun listMessageDays(potId: String, timezone: String, limit: Int = 90): List<ChatDaySummary>
     suspend fun saveMessage(message: ChatMessage)
 
     suspend fun affinity(potId: String): AffinityState

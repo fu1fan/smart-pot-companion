@@ -3,12 +3,17 @@ package com.fu1fan.smartpot.server
 import com.fu1fan.smartpot.protocol.CreatePotRequest
 import com.fu1fan.smartpot.protocol.CareDayOverview
 import com.fu1fan.smartpot.protocol.CareType
+import com.fu1fan.smartpot.protocol.ChatDaySummary
+import com.fu1fan.smartpot.protocol.ChatMessage
+import com.fu1fan.smartpot.protocol.ChatRole
 import com.fu1fan.smartpot.protocol.CreateCareLogRequest
 import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
 import com.fu1fan.smartpot.protocol.CreateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.DailyFocusSummary
 import com.fu1fan.smartpot.protocol.DeviceScheduleItem
+import com.fu1fan.smartpot.protocol.DeviceEvent
+import com.fu1fan.smartpot.protocol.DeviceEventType
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
@@ -19,6 +24,8 @@ import com.fu1fan.smartpot.protocol.ShareSession
 import com.fu1fan.smartpot.protocol.UpdatePotRequest
 import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
+import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
+import com.fu1fan.smartpot.server.service.injectServerChatHistory
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -35,6 +42,12 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -259,5 +272,78 @@ class ApplicationTest {
         assertEquals(1, scheduleState(listOf(completed), Instant.parse("2026-07-18T10:02:59Z")).items.size)
         assertEquals(0, scheduleState(listOf(completed), Instant.parse("2026-07-18T10:03:01Z")).items.size)
         assertEquals(100, scheduleCompletionPercent(listOf(completed), java.time.LocalDate.parse("2026-07-18"), ZoneId.of("Asia/Shanghai")))
+    }
+
+    @Test
+    fun `chat history is grouped by plant day and can be queried by date`() = testApplication {
+        val store = InMemorySmartPotStore()
+        application { module(config, store, startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+        val pot = api.post("/api/v1/pots") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-chat-history", "小麦", "pothos"))
+        }.body<PotProfile>()
+
+        store.saveMessage(ChatMessage("33333333-3333-3333-3333-333333333331", pot.id, ChatRole.USER, "第一天", "2026-07-18T15:20:00Z", "ESP"))
+        store.saveMessage(ChatMessage("33333333-3333-3333-3333-333333333332", pot.id, ChatRole.ASSISTANT, "我记得", "2026-07-18T15:20:01Z", "ESP"))
+        store.saveMessage(ChatMessage("33333333-3333-3333-3333-333333333333", pot.id, ChatRole.USER, "第二天", "2026-07-19T01:00:00Z", "APP"))
+
+        val days = api.get("/api/v1/pots/${pot.id}/chat/days") { bearerAuth(config.demoToken) }
+            .body<List<ChatDaySummary>>()
+        assertEquals(listOf("2026-07-19", "2026-07-18"), days.map(ChatDaySummary::date))
+        assertEquals(2, days.last().messageCount)
+
+        val firstDay = api.get("/api/v1/pots/${pot.id}/chat?date=2026-07-18") { bearerAuth(config.demoToken) }
+            .body<List<ChatMessage>>()
+        assertEquals(listOf("第一天", "我记得"), firstDay.map(ChatMessage::content))
+    }
+
+    @Test
+    fun `ESP conversation event produces stable shared chat messages`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.seedSpecies(SpeciesCatalog.all)
+        val pot = PotProfile(
+            id = "44444444-4444-4444-4444-444444444444",
+            deviceId = "esp32-chat-event",
+            displayName = "小麦",
+            species = requireNotNull(store.findSpecies("pothos")),
+            createdAt = "2026-07-18T00:00:00Z",
+        )
+        val event = DeviceEvent(
+            eventId = "esp32-chat-event-42",
+            deviceId = pot.deviceId,
+            type = DeviceEventType.CONVERSATION,
+            occurredAt = "2026-07-19T02:30:00Z",
+            data = buildJsonObject {
+                put("userText", "你好小麦")
+                put("assistantText", "我在呢。")
+            },
+        )
+
+        val first = requireNotNull(conversationMessagesFromEvent(pot, event))
+        val replay = requireNotNull(conversationMessagesFromEvent(pot, event))
+        assertEquals(first.userMessage.id, replay.userMessage.id)
+        assertEquals("ESP", first.userMessage.source)
+        assertEquals("我在呢。", first.assistantMessage.content)
+    }
+
+    @Test
+    fun `device model request uses canonical server chat context`() {
+        val request = buildJsonObject {
+            put("messages", buildJsonArray {
+                add(buildJsonObject { put("role", "system"); put("content", "你是小麦") })
+                add(buildJsonObject { put("role", "user"); put("content", "仅在ESP本地的旧内容") })
+                add(buildJsonObject { put("role", "user"); put("content", "现在的问题") })
+            })
+        }
+        val history = listOf(
+            ChatMessage("55555555-5555-5555-5555-555555555551", "pot", ChatRole.USER, "服务器记忆", "2026-07-19T00:00:00Z", "ESP"),
+            ChatMessage("55555555-5555-5555-5555-555555555552", "pot", ChatRole.ASSISTANT, "已经记住", "2026-07-19T00:00:01Z", "ESP"),
+        )
+
+        val merged = injectServerChatHistory(request, history)["messages"] as JsonArray
+        val contents = merged.map { it.jsonObject["content"]!!.jsonPrimitive.content }
+        assertEquals(listOf("你是小麦", "服务器记忆", "已经记住", "现在的问题"), contents)
     }
 }

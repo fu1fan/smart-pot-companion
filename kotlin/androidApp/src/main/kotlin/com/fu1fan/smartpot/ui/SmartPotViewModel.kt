@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -32,6 +33,8 @@ data class SmartPotUiState(
     val focusDaily: List<DailyFocusSummary> = emptyList(),
     val schedule: ScheduleSyncState? = null,
     val memories: List<UserMemory> = emptyList(),
+    val chatDays: List<ChatDaySummary> = emptyList(),
+    val selectedChatDate: String? = null,
     val messages: List<ChatMessage> = emptyList(),
     val diaries: List<PlantDiary> = emptyList(),
     val lastCommand: CommandSubmission? = null,
@@ -85,15 +88,47 @@ class SmartPotViewModel : ViewModel() {
         val focusDaily = api.focusDaily(id)
         val schedule = api.schedule(id)
         val memories = api.memories(id)
-        val messages = api.messages(id)
+        val chatDays = api.chatDays(id)
+        val today = LocalDate.now(zoneId(snapshot.pot.timezone)).toString()
+        val availableChatDays = (listOf(ChatDaySummary(today, 0)) + chatDays).distinctBy(ChatDaySummary::date)
+        val selectedChatDate = mutableState.value.selectedChatDate
+            ?.takeIf { selected -> availableChatDays.any { it.date == selected } }
+            ?: today
+        val messages = api.messages(id, selectedChatDate)
         val diaries = api.diaries(id)
-        mutableState.update { it.copy(snapshot = snapshot, telemetry = telemetry, careLogs = care, reminders = reminders, careOverview = careOverview, focusDaily = focusDaily, schedule = schedule, memories = memories, messages = messages, diaries = diaries, loading = false, error = null) }
+        mutableState.update {
+            it.copy(
+                snapshot = snapshot,
+                telemetry = telemetry,
+                careLogs = care,
+                reminders = reminders,
+                careOverview = careOverview,
+                focusDaily = focusDaily,
+                schedule = schedule,
+                memories = memories,
+                chatDays = availableChatDays,
+                selectedChatDate = selectedChatDate,
+                messages = messages,
+                diaries = diaries,
+                loading = false,
+                error = null,
+            )
+        }
     }.onFailure { fail(it) }
 
     private fun startRealtime(id: String) {
         realtimeJob = viewModelScope.launch {
             while (isActive) {
-                runCatching { api.realtime(id).collect { event -> if (event.type == RealtimeEventType.FOCUS || event.type == RealtimeEventType.DIARY || event.type == RealtimeEventType.SCHEDULE) refreshAll(id) else if (event.type != RealtimeEventType.COMMAND_ACK) refreshSnapshot(id) } }
+                runCatching {
+                    api.realtime(id).collect { event ->
+                        when (event.type) {
+                            RealtimeEventType.FOCUS, RealtimeEventType.DIARY, RealtimeEventType.SCHEDULE -> refreshAll(id)
+                            RealtimeEventType.CHAT -> refreshChat(id)
+                            RealtimeEventType.COMMAND_ACK -> Unit
+                            else -> refreshSnapshot(id)
+                        }
+                    }
+                }
                 delay(3_000)
             }
         }
@@ -110,8 +145,22 @@ class SmartPotViewModel : ViewModel() {
     fun addMemory(text: String) = withPot { id -> mutableState.update { it.copy(memories = it.memories + api.addMemory(id, text)) } }
 
     fun sendChat(text: String) = withPot { id ->
-        val reply = api.chat(id, text)
-        mutableState.update { it.copy(messages = it.messages + reply.userMessage + reply.assistantMessage) }
+        api.chat(id, text)
+        val today = LocalDate.now(zoneId(mutableState.value.snapshot?.pot?.timezone)).toString()
+        val days = api.chatDays(id)
+        val messages = api.messages(id, today)
+        mutableState.update {
+            it.copy(
+                chatDays = (listOf(ChatDaySummary(today, 0)) + days).distinctBy(ChatDaySummary::date),
+                selectedChatDate = today,
+                messages = messages,
+            )
+        }
+    }
+
+    fun selectChatDay(date: String) = withPot { id ->
+        val messages = api.messages(id, date)
+        mutableState.update { it.copy(selectedChatDate = date, messages = messages) }
     }
 
     fun generateDiary() = withPot { id ->
@@ -183,6 +232,25 @@ class SmartPotViewModel : ViewModel() {
     private fun fail(error: Throwable) {
         mutableState.update { it.copy(loading = false, error = error.message ?: "网络请求失败") }
     }
+
+    private suspend fun refreshChat(id: String) {
+        val today = LocalDate.now(zoneId(mutableState.value.snapshot?.pot?.timezone)).toString()
+        val days = api.chatDays(id)
+        val available = (listOf(ChatDaySummary(today, 0)) + days).distinctBy(ChatDaySummary::date)
+        val selected = mutableState.value.selectedChatDate ?: today
+        val messages = api.messages(id, selected)
+        mutableState.update {
+            it.copy(
+                chatDays = available,
+                selectedChatDate = selected,
+                messages = messages,
+                error = null,
+            )
+        }
+    }
+
+    private fun zoneId(timezone: String?): ZoneId =
+        runCatching { ZoneId.of(timezone ?: "Asia/Shanghai") }.getOrDefault(ZoneId.of("Asia/Shanghai"))
 
     override fun onCleared() { api.close() }
 

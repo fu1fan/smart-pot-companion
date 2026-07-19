@@ -54,7 +54,9 @@ class SmartPotApi(
         patchApi("/api/v1/pots/$id/schedule/$scheduleId", request)
     suspend fun memories(id: String): List<UserMemory> = getApi("/api/v1/pots/$id/memories")
     suspend fun addMemory(id: String, text: String): UserMemory = postApi("/api/v1/pots/$id/memories", CreateMemoryRequest(text))
-    suspend fun messages(id: String): List<ChatMessage> = getApi("/api/v1/pots/$id/chat")
+    suspend fun chatDays(id: String): List<ChatDaySummary> = getApi("/api/v1/pots/$id/chat/days")
+    suspend fun messages(id: String, date: String? = null): List<ChatMessage> =
+        getApi("/api/v1/pots/$id/chat${date?.let { "?date=$it" }.orEmpty()}")
     suspend fun chat(id: String, text: String): ChatResponse = postApi("/api/v1/pots/$id/chat", ChatRequest(text))
     suspend fun diaries(id: String): List<PlantDiary> = getApi("/api/v1/pots/$id/diaries")
     suspend fun generateDiary(id: String): PlantDiary = postEmpty("/api/v1/pots/$id/diaries/generate")

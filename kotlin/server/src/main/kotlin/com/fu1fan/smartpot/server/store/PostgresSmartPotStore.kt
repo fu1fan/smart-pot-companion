@@ -170,7 +170,37 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         }
     }
 
-    override suspend fun saveMessage(message: ChatMessage) = saveJsonRecord("INSERT INTO chat_messages(id,pot_id,created_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb)", message.id, message.potId, message.createdAt, encode(message))
+    override suspend fun listMessagesForDay(potId: String, date: String, timezone: String, limit: Int): List<ChatMessage> = db { c ->
+        c.prepareStatement(
+            "SELECT data FROM chat_messages WHERE pot_id=?::uuid " +
+                "AND timezone(?,created_at)::date=?::date ORDER BY created_at LIMIT ?",
+        ).use { s ->
+            s.setString(1, potId)
+            s.setString(2, timezone)
+            s.setString(3, date)
+            s.setInt(4, limit.coerceIn(1, 2_000))
+            s.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.decodeColumn<ChatMessage>()) } }
+        }
+    }
+
+    override suspend fun listMessageDays(potId: String, timezone: String, limit: Int): List<ChatDaySummary> = db { c ->
+        c.prepareStatement(
+            "SELECT to_char(timezone(?,created_at),'YYYY-MM-DD') AS chat_day, COUNT(*) AS message_count " +
+                "FROM chat_messages WHERE pot_id=?::uuid GROUP BY chat_day ORDER BY chat_day DESC LIMIT ?",
+        ).use { s ->
+            s.setString(1, timezone)
+            s.setString(2, potId)
+            s.setInt(3, limit.coerceIn(1, 365))
+            s.executeQuery().use { rs ->
+                buildList { while (rs.next()) add(ChatDaySummary(rs.getString("chat_day"), rs.getInt("message_count"))) }
+            }
+        }
+    }
+
+    override suspend fun saveMessage(message: ChatMessage) = saveJsonRecord(
+        "INSERT INTO chat_messages(id,pot_id,created_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO NOTHING",
+        message.id, message.potId, message.createdAt, encode(message),
+    )
     override suspend fun affinity(potId: String): AffinityState = db { c -> c.prepareStatement("SELECT data FROM affinity WHERE pot_id=?::uuid").use { s -> s.setString(1, potId); s.executeQuery().use { if (it.next()) it.decodeColumn() else AffinityState() } } }
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) = saveJsonRecord("INSERT INTO affinity(pot_id,data) VALUES (?::uuid,?::jsonb) ON CONFLICT(pot_id) DO UPDATE SET data=EXCLUDED.data", potId, encode(affinity))
 

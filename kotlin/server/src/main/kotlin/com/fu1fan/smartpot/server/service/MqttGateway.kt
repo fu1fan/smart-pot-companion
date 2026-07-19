@@ -136,6 +136,9 @@ class MqttGateway(
                     realtime.publish(RealtimeEvent(RealtimeEventType.FOCUS, pot.id, appJson.encodeToJsonElement(session)))
                 }
                 handleScheduleEvent(pot, event)
+                if (event.type == DeviceEventType.CONVERSATION) {
+                    handleConversationEvent(pot, event)
+                }
             }
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
@@ -224,9 +227,45 @@ class MqttGateway(
             .onFailure { System.err.println("Schedule MQTT resync skipped: ${it.message}") }
     }
 
+    private suspend fun handleConversationEvent(pot: PotProfile, event: DeviceEvent) {
+        val response = conversationMessagesFromEvent(pot, event) ?: return
+        store.saveMessage(response.userMessage)
+        store.saveMessage(response.assistantMessage)
+        realtime.publish(RealtimeEvent(RealtimeEventType.CHAT, pot.id, appJson.encodeToJsonElement(response)))
+    }
+
     override fun close() {
         client?.disconnect()?.join()
     }
+}
+
+internal fun conversationMessagesFromEvent(pot: PotProfile, event: DeviceEvent): ChatResponse? {
+    if (event.type != DeviceEventType.CONVERSATION) return null
+    val userText = event.data.stringValue("userText").trim().take(1_000)
+    val assistantText = event.data.stringValue("assistantText").trim().take(4_000)
+    if (userText.isBlank() || assistantText.isBlank()) return null
+    val occurredAt = runCatching { Instant.parse(event.occurredAt) }.getOrElse { Instant.now() }
+    fun messageId(role: String): String = UUID.nameUUIDFromBytes(
+        "${pot.id}:${event.eventId}:$role".toByteArray(StandardCharsets.UTF_8),
+    ).toString()
+    return ChatResponse(
+        userMessage = ChatMessage(
+            id = messageId("user"),
+            potId = pot.id,
+            role = ChatRole.USER,
+            content = userText,
+            createdAt = occurredAt.toString(),
+            source = "ESP",
+        ),
+        assistantMessage = ChatMessage(
+            id = messageId("assistant"),
+            potId = pot.id,
+            role = ChatRole.ASSISTANT,
+            content = assistantText,
+            createdAt = occurredAt.plusNanos(1_000_000).toString(),
+            source = "ESP",
+        ),
+    )
 }
 
 internal data class DeviceTopic(val deviceId: String, val kind: String)

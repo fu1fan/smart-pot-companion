@@ -54,8 +54,11 @@ fun Application.configureRoutes(services: ServerServices) {
             post("/v1/chat/completions") {
                 call.requireOwner(services)
                 val request = call.receive<JsonObject>()
+                val deviceId = call.request.headers["X-Smart-Pot-Device-Id"]
+                    ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{3,64}")) }
+                val pot = deviceId?.let { services.store.findPotByDevice(it) }
                 call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
-                    services.ai.proxyOpenAi(request, this)
+                    services.ai.proxyOpenAi(request, this, pot)
                 }
             }
             route("/api/v1") {
@@ -104,7 +107,20 @@ fun Application.configureRoutes(services: ServerServices) {
                         services.store.saveMemory(memory)
                         call.respond(HttpStatusCode.Created, memory)
                     }
-                    get("/chat") { call.respond(services.store.listMessages(call.requirePot(services).id, 100)) }
+                    get("/chat/days") {
+                        val pot = call.requirePot(services)
+                        call.respond(services.store.listMessageDays(pot.id, pot.timezone, 365))
+                    }
+                    get("/chat") {
+                        val pot = call.requirePot(services)
+                        val date = call.request.queryParameters["date"]
+                        if (date == null) {
+                            call.respond(services.store.listMessages(pot.id, 100))
+                        } else {
+                            require(runCatching { LocalDate.parse(date) }.isSuccess) { "聊天日期格式应为 YYYY-MM-DD" }
+                            call.respond(services.store.listMessagesForDay(pot.id, date, pot.timezone, 2_000))
+                        }
+                    }
                     post("/chat") {
                         val pot = call.requirePot(services)
                         val request = call.receive<ChatRequest>()

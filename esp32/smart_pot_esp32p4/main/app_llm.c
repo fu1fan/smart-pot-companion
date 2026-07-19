@@ -18,6 +18,7 @@
 #include "app_ui.h"
 #include "app_voice.h"
 #include "app_memory.h"
+#include "app_cloud.h"
 #include "app_time.h"
 
 #ifndef CONFIG_SMART_POT_LLM_ENABLE
@@ -34,6 +35,10 @@
 
 #ifndef CONFIG_SMART_POT_DEEPSEEK_MODEL
 #define CONFIG_SMART_POT_DEEPSEEK_MODEL "deepseek-v4-flash"
+#endif
+
+#ifndef CONFIG_SMART_POT_DEVICE_ID
+#define CONFIG_SMART_POT_DEVICE_ID "smartpot-p4-001"
 #endif
 
 #define LLM_RESPONSE_CAPACITY 4096
@@ -461,6 +466,7 @@ static void llm_request_task(void *arg)
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", CONFIG_SMART_POT_DEEPSEEK_API_KEY);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "Authorization", auth_header);
+    esp_http_client_set_header(client, "X-Smart-Pot-Device-Id", CONFIG_SMART_POT_DEVICE_ID);
     esp_http_client_set_post_field(client, body, strlen(body));
 
     esp_err_t err = esp_http_client_perform(client);
@@ -479,6 +485,7 @@ static void llm_request_task(void *arg)
         if (resp.len > 0) {
             app_ui_set_dialog_status(response);
             app_memory_add_exchange(trigger, response);
+            app_cloud_publish_conversation(trigger, response);
             bool stream_finish_queued = false;
             if (resp.tts_started && !resp.tts_failed) {
                 stream_flush_tts(&resp, true);

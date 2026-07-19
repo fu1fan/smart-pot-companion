@@ -41,6 +41,7 @@
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
 #define VOICE_WAKE_ENERGY_PACKETS 2
+#define VOICE_WAKE_PREROLL_PACKETS 6
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -201,6 +202,10 @@ static bool open_microphone(esp_codec_dev_handle_t mic)
 }
 
 static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_phrase);
+static void transcribe_and_reply_with_prefix(esp_codec_dev_handle_t mic,
+                                             bool require_wake_phrase,
+                                             const int16_t *prefix_samples,
+                                             size_t prefix_sample_count);
 
 static void drain_microphone_frames(esp_codec_dev_handle_t mic, int16_t *samples,
                                     size_t bytes, int frames)
@@ -276,15 +281,22 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 {
     size_t sample_count = APP_BOARD_VOICE_WAKE_DIRECT_SAMPLES;
     int16_t *samples = calloc(sample_count, sizeof(int16_t));
-    if (samples == NULL) {
+    int16_t *preroll = calloc(sample_count * VOICE_WAKE_PREROLL_PACKETS, sizeof(int16_t));
+    int16_t *prefix = calloc(sample_count * VOICE_WAKE_PREROLL_PACKETS, sizeof(int16_t));
+    if (samples == NULL || preroll == NULL || prefix == NULL) {
         ESP_LOGE(TAG, "Failed to allocate direct voice wake buffer");
         app_ui_set_voice_status("Wake: no memory");
+        free(samples);
+        free(preroll);
+        free(prefix);
         vTaskDelete(NULL);
         return;
     }
 
     TickType_t last_wake_tick = 0;
     int wake_energy_packets = 0;
+    size_t preroll_head = 0;
+    size_t preroll_count = 0;
     s_voice_ready = true;
     s_wakenet_rearm_requested = false;
     app_ui_set_voice_status(VOICE_WAKE_HINT);
@@ -296,6 +308,8 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
         }
         if (s_wakenet_rearm_requested) {
             s_wakenet_rearm_requested = false;
+            preroll_head = 0;
+            preroll_count = 0;
         }
 
         int ret = esp_codec_dev_read(mic, samples, sample_count * sizeof(int16_t));
@@ -307,6 +321,13 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 
         if (service_pending_voice_request(mic)) {
             continue;
+        }
+
+        memcpy(preroll + preroll_head * sample_count, samples,
+               sample_count * sizeof(int16_t));
+        preroll_head = (preroll_head + 1) % VOICE_WAKE_PREROLL_PACKETS;
+        if (preroll_count < VOICE_WAKE_PREROLL_PACKETS) {
+            preroll_count++;
         }
 
         TickType_t wake_now = xTaskGetTickCount();
@@ -323,7 +344,14 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
             ESP_LOGI(TAG, "Energy wake candidate level=%d threshold=%d",
                      level, CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD);
             app_ui_set_voice_status("Wake: checking phrase");
-            transcribe_and_reply(mic, true);
+            size_t oldest = (preroll_head + VOICE_WAKE_PREROLL_PACKETS - preroll_count) %
+                            VOICE_WAKE_PREROLL_PACKETS;
+            for (size_t i = 0; i < preroll_count; i++) {
+                size_t source = (oldest + i) % VOICE_WAKE_PREROLL_PACKETS;
+                memcpy(prefix + i * sample_count, preroll + source * sample_count,
+                       sample_count * sizeof(int16_t));
+            }
+            transcribe_and_reply_with_prefix(mic, true, prefix, preroll_count * sample_count);
         } else if (!s_conversation_busy && cooldown_done(wake_now, last_wake_tick)) {
             app_ui_set_voice_status(VOICE_WAKE_HINT);
         }
@@ -359,6 +387,14 @@ static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_
 
 static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_phrase)
 {
+    transcribe_and_reply_with_prefix(mic, require_wake_phrase, NULL, 0);
+}
+
+static void transcribe_and_reply_with_prefix(esp_codec_dev_handle_t mic,
+                                             bool require_wake_phrase,
+                                             const int16_t *prefix_samples,
+                                             size_t prefix_sample_count)
+{
     s_conversation_busy = true;
     if (!app_wifi_is_connected()) {
         ESP_LOGW(TAG, "Voice conversation skipped: Wi-Fi offline");
@@ -369,7 +405,8 @@ static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_p
         return;
     }
 
-    char *transcript = app_asr_transcribe_from_mic(mic);
+    char *transcript = app_asr_transcribe_from_mic_with_prefix(
+        mic, prefix_samples, prefix_sample_count);
     if (transcript_has_text(transcript)) {
         ESP_LOGI(TAG, "ASR text: %s", transcript);
         if (require_wake_phrase) {

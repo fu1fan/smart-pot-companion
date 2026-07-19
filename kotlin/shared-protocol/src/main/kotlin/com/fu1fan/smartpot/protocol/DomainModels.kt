@@ -139,6 +139,12 @@ data class ChatResponse(
 )
 
 @Serializable
+data class ChatDaySummary(
+    val date: String,
+    val messageCount: Int,
+)
+
+@Serializable
 enum class AffinityLevel { STRANGER, FAMILIAR, CLOSE, TRUSTED, BEST_FRIEND }
 
 @Serializable
@@ -285,7 +291,7 @@ data class RedeemShareRequest(val code: String, val actorName: String)
 data class ShareSession(val token: String, val potId: String, val actorName: String, val expiresAt: String)
 
 @Serializable
-enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS, SCHEDULE }
+enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS, SCHEDULE, CHAT }
 
 @Serializable
 data class RealtimeEvent(

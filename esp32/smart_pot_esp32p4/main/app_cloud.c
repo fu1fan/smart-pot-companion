@@ -182,6 +182,26 @@ static void publish_event(const char *type)
     publish_event_with_data(type, NULL);
 }
 
+void app_cloud_publish_conversation(const char *user_text, const char *assistant_text)
+{
+    if (user_text == NULL || assistant_text == NULL ||
+        user_text[0] == '\0' || assistant_text[0] == '\0') {
+        return;
+    }
+    if (!s_connected) {
+        ESP_LOGW(TAG, "Conversation retained locally because MQTT is offline");
+        return;
+    }
+    cJSON *data = cJSON_CreateObject();
+    if (data == NULL) {
+        ESP_LOGW(TAG, "Failed to allocate conversation event");
+        return;
+    }
+    cJSON_AddStringToObject(data, "userText", user_text);
+    cJSON_AddStringToObject(data, "assistantText", assistant_text);
+    publish_event_with_data("CONVERSATION", data);
+}
+
 static void publish_schedule_event(const char *event_type,
                                    const char *id,
                                    const char *title,

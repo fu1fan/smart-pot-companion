@@ -363,6 +363,13 @@ static bool send_frame(esp_websocket_client_handle_t client, uint8_t *frame, siz
 
 char *app_asr_transcribe_from_mic(esp_codec_dev_handle_t mic)
 {
+    return app_asr_transcribe_from_mic_with_prefix(mic, NULL, 0);
+}
+
+char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
+                                              const int16_t *prefix_samples,
+                                              size_t prefix_sample_count)
+{
     if (!CONFIG_SMART_POT_ASR_ENABLE || mic == NULL ||
         CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0') {
         ESP_LOGW(TAG, "Volc ASR disabled or API key missing");
@@ -416,6 +423,27 @@ char *app_asr_transcribe_from_mic(esp_codec_dev_handle_t mic)
         return NULL;
     }
 
+    int speech_start_packets = 0;
+    int speech_continue_packets = 0;
+    int speech_ms = 0;
+    int silence_ms = 0;
+    bool speech_detected = false;
+    int prefetched_packets = 0;
+    const size_t samples_per_packet = ASR_PACKET_BYTES / sizeof(int16_t);
+    size_t prefix_packets = prefix_samples != NULL ? prefix_sample_count / samples_per_packet : 0;
+    if (prefix_packets > (size_t)max_packets) {
+        prefix_samples += (prefix_packets - (size_t)max_packets) * samples_per_packet;
+        prefix_packets = (size_t)max_packets;
+    }
+    for (size_t i = 0; i < prefix_packets; i++) {
+        uint8_t *target = prefetch + (size_t)prefetched_packets * ASR_PACKET_BYTES;
+        memcpy(target, prefix_samples + i * samples_per_packet, ASR_PACKET_BYTES);
+        update_speech_state(target, ASR_PACKET_BYTES, &speech_start_packets,
+                            &speech_detected, &silence_ms, &speech_ms,
+                            &speech_continue_packets);
+        prefetched_packets++;
+    }
+
     /* Start capturing immediately. TLS/DNS/WebSocket setup now happens in the
      * background while the user speaks, instead of presenting several seconds
      * of dead time before recording begins. */
@@ -431,13 +459,7 @@ char *app_asr_transcribe_from_mic(esp_codec_dev_handle_t mic)
     }
 
     EventBits_t bits = 0;
-    int speech_start_packets = 0;
-    int speech_continue_packets = 0;
-    int speech_ms = 0;
-    int silence_ms = 0;
-    bool speech_detected = false;
     bool stream_failed = false;
-    int prefetched_packets = 0;
     int64_t connect_deadline = esp_timer_get_time() +
                                (int64_t)ASR_CONNECT_TIMEOUT_MS * 1000;
     while (prefetched_packets < max_packets && esp_timer_get_time() < connect_deadline) {

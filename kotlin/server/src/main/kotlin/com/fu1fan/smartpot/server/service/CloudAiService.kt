@@ -18,7 +18,13 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import io.ktor.utils.io.ByteWriteChannel
 import io.ktor.utils.io.copyTo
 import java.time.Instant
@@ -66,9 +72,11 @@ class CloudAiService(
         return complete("你是名叫小麦的拟人化智能盆栽。只输出日记正文。", listOf(AiMessage("user", prompt)))
     }
 
-    suspend fun proxyOpenAi(request: JsonObject, output: ByteWriteChannel) {
+    suspend fun proxyOpenAi(request: JsonObject, output: ByteWriteChannel, pot: PotProfile? = null) {
         val key = requireNotNull(config.deepSeekApiKey?.takeIf { it.isNotBlank() }) { "云端模型密钥尚未配置" }
-        val normalized = JsonObject(request + ("model" to JsonPrimitive(config.deepSeekModel)))
+        val history = pot?.let { store.listMessages(it.id, 12) }.orEmpty()
+        val withHistory = injectServerChatHistory(request, history)
+        val normalized = JsonObject(withHistory + ("model" to JsonPrimitive(config.deepSeekModel)))
         client.preparePost(config.deepSeekEndpoint) {
             bearerAuth(key)
             contentType(ContentType.Application.Json)
@@ -103,6 +111,28 @@ class CloudAiService(
     }
 
     override fun close() = client.close()
+}
+
+internal fun injectServerChatHistory(request: JsonObject, history: List<ChatMessage>): JsonObject {
+    if (history.isEmpty()) return request
+    val incoming = request["messages"] as? JsonArray ?: return request
+    val currentUser = incoming.lastOrNull { message ->
+        message.jsonObject["role"]?.jsonPrimitive?.contentOrNull == "user"
+    } ?: return request
+    val systemMessages = incoming.filter { message ->
+        message.jsonObject["role"]?.jsonPrimitive?.contentOrNull == "system"
+    }
+    val merged = buildJsonArray {
+        systemMessages.forEach(::add)
+        history.takeLast(12).forEach { message ->
+            add(buildJsonObject {
+                put("role", JsonPrimitive(message.role.name.lowercase()))
+                put("content", JsonPrimitive(message.content))
+            })
+        }
+        add(currentUser)
+    }
+    return JsonObject(request + ("messages" to merged))
 }
 
 @Serializable

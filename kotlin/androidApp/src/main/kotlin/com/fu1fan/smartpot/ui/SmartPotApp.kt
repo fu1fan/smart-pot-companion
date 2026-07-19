@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +27,7 @@ import com.fu1fan.smartpot.protocol.*
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -73,7 +75,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
                     tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::recordPomodoro, viewModel::speakDiary, viewModel::toggleSchedule)
                     tab == 2 -> ControlScreen(state, viewModel::control, viewModel::addSchedule, viewModel::toggleSchedule, viewModel::createShare, viewModel::redeemShare)
-                    else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory)
+                    else -> CompanionScreen(state, viewModel::sendChat, viewModel::addMemory, viewModel::selectChatDay)
                 }
             }
         }
@@ -743,17 +745,80 @@ private fun ScheduleRow(item: ScheduleItem, onCheckedChange: (Boolean) -> Unit) 
 }
 
 @Composable
-private fun CompanionScreen(state: SmartPotUiState, send: (String) -> Unit, remember: (String) -> Unit) {
+private fun CompanionScreen(
+    state: SmartPotUiState,
+    send: (String) -> Unit,
+    remember: (String) -> Unit,
+    selectDay: (String) -> Unit,
+) {
     var input by remember { mutableStateOf("") }
     var memory by remember { mutableStateOf("") }
+    val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
+        .getOrDefault(ZoneId.of("Asia/Shanghai"))
+    val today = LocalDate.now(zone).toString()
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("和小麦聊聊天", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("它会结合品种、实时状态和你的专属记忆回答。", color = Color.Gray) }
-        items(state.messages) { message -> Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.role == ChatRole.USER) Arrangement.End else Arrangement.Start) { Surface(color = if (message.role == ChatRole.USER) Leaf else Color.White, shape = RoundedCornerShape(16.dp)) { Text(message.content, color = if (message.role == ChatRole.USER) Color.White else Color.DarkGray, modifier = Modifier.padding(12.dp).widthIn(max = 280.dp)) } } }
+        item {
+            Text("和小麦聊聊天", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("手机和 ESP 的对话会统一保存在这里。", color = Color.Gray)
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(state.chatDays, key = ChatDaySummary::date) { day ->
+                    FilterChip(
+                        selected = state.selectedChatDate == day.date,
+                        onClick = { selectDay(day.date) },
+                        label = {
+                            Text(
+                                buildString {
+                                    append(if (day.date == today) "今天" else day.date.takeLast(5))
+                                    if (day.messageCount > 0) append("  ${day.messageCount}")
+                                },
+                            )
+                        },
+                    )
+                }
+            }
+        }
+        if (state.messages.isEmpty()) {
+            item { Text("这一天还没有对话记录", color = Color.Gray, modifier = Modifier.padding(vertical = 18.dp)) }
+        }
+        items(state.messages, key = ChatMessage::id) { message ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = if (message.role == ChatRole.USER) Arrangement.End else Arrangement.Start,
+            ) {
+                Surface(
+                    color = if (message.role == ChatRole.USER) Leaf else Color.White,
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Column(Modifier.padding(12.dp).widthIn(max = 280.dp)) {
+                        Text(message.content, color = if (message.role == ChatRole.USER) Color.White else Color.DarkGray)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${chatSourceLabel(message)}  ${chatTimeText(message.createdAt, zone)}",
+                            fontSize = 11.sp,
+                            color = if (message.role == ChatRole.USER) Color.White.copy(alpha = 0.75f) else Color.Gray,
+                        )
+                    }
+                }
+            }
+        }
         item { OutlinedTextField(input, { input = it }, label = { Text("问问绿萝黄叶怎么办……") }, modifier = Modifier.fillMaxWidth()); Button(onClick = { if (input.isNotBlank()) { send(input); input = "" } }, modifier = Modifier.fillMaxWidth()) { Text("发送") } }
         item { HorizontalDivider(); Text("专属记忆库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); OutlinedTextField(memory, { memory = it }, label = { Text("生日、考试、加班时间或想被记住的事") }, modifier = Modifier.fillMaxWidth()); OutlinedButton(onClick = { if (memory.isNotBlank()) { remember(memory); memory = "" } }, modifier = Modifier.fillMaxWidth()) { Text("让小麦记住") } }
         items(state.memories) { item -> ListItem(headlineContent = { Text(item.content) }, leadingContent = { Text("🧠") }) }
     }
 }
+
+private fun chatSourceLabel(message: ChatMessage): String = when {
+    message.role == ChatRole.USER && message.source == "ESP" -> "你 · ESP 语音"
+    message.role == ChatRole.USER -> "你 · 手机"
+    message.source == "ESP" -> "小麦 · ESP"
+    else -> "小麦 · 手机"
+}
+
+private fun chatTimeText(createdAt: String, zone: ZoneId): String = runCatching {
+    DateTimeFormatter.ofPattern("HH:mm").format(Instant.parse(createdAt).atZone(zone))
+}.getOrDefault("--:--")
 
 private fun soilLabel(value: SoilStatus?) = when (value) { SoilStatus.TOO_DRY -> "缺水"; SoilStatus.SUITABLE -> "适宜"; SoilStatus.TOO_WET -> "积水风险"; else -> "等待数据" }
 private fun lightLabel(value: LightStatus?) = when (value) { LightStatus.DARK -> "阴暗"; LightStatus.DIFFUSE -> "散射光"; LightStatus.TOO_STRONG -> "强光"; else -> "等待数据" }

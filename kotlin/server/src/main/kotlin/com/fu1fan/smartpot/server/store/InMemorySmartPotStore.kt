@@ -4,6 +4,8 @@ import com.fu1fan.smartpot.protocol.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
 
 class InMemorySmartPotStore : SmartPotStore {
@@ -85,7 +87,36 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun listMemories(potId: String) = memories[potId]?.let { synchronized(it) { it.toList() } } ?: emptyList()
     override suspend fun saveMemory(memory: UserMemory) { memories.computeIfAbsent(memory.potId) { mutableListOf() }.add(memory) }
     override suspend fun listMessages(potId: String, limit: Int) = messages[potId]?.let { synchronized(it) { it.takeLast(limit) } } ?: emptyList()
-    override suspend fun saveMessage(message: ChatMessage) { messages.computeIfAbsent(message.potId) { mutableListOf() }.add(message) }
+    override suspend fun listMessagesForDay(potId: String, date: String, timezone: String, limit: Int): List<ChatMessage> {
+        val day = LocalDate.parse(date)
+        val zone = ZoneId.of(timezone)
+        return messages[potId]?.let { list ->
+            synchronized(list) {
+                list.filter { Instant.parse(it.createdAt).atZone(zone).toLocalDate() == day }.takeLast(limit)
+            }
+        } ?: emptyList()
+    }
+
+    override suspend fun listMessageDays(potId: String, timezone: String, limit: Int): List<ChatDaySummary> {
+        val zone = ZoneId.of(timezone)
+        return messages[potId]?.let { list ->
+            synchronized(list) {
+                list.groupingBy { Instant.parse(it.createdAt).atZone(zone).toLocalDate().toString() }
+                    .eachCount()
+                    .entries
+                    .sortedByDescending(Map.Entry<String, Int>::key)
+                    .take(limit)
+                    .map { ChatDaySummary(it.key, it.value) }
+            }
+        } ?: emptyList()
+    }
+
+    override suspend fun saveMessage(message: ChatMessage) {
+        val list = messages.computeIfAbsent(message.potId) { mutableListOf() }
+        synchronized(list) {
+            if (list.none { it.id == message.id }) list += message
+        }
+    }
 
     override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState()
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) { affinities[potId] = affinity }
