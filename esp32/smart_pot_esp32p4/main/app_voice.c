@@ -547,7 +547,6 @@ static void voice_task(void *arg)
     }
 
     TickType_t last_wake_tick = 0;
-    int wake_energy_packets = 0;
     s_voice_ready = true;
     int threshold_result = apply_wakenet_threshold(afe_handle, afe_data);
     app_ui_set_voice_status(VOICE_WAKE_HINT);
@@ -575,24 +574,6 @@ static void voice_task(void *arg)
         }
 
         if (service_pending_voice_request(mic)) {
-            continue;
-        }
-
-        TickType_t wake_now = xTaskGetTickCount();
-        int level = average_sample_level(samples, (size_t)feed_chunksize * (size_t)feed_channels);
-        if (!s_conversation_busy && level >= CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD) {
-            wake_energy_packets++;
-        } else {
-            wake_energy_packets = 0;
-        }
-        if (!s_conversation_busy && wake_energy_packets >= VOICE_WAKE_ENERGY_PACKETS &&
-            cooldown_done(wake_now, last_wake_tick)) {
-            last_wake_tick = wake_now;
-            wake_energy_packets = 0;
-            ESP_LOGI(TAG, "Energy wake candidate level=%d threshold=%d",
-                     level, CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD);
-            app_ui_set_voice_status("Wake: checking phrase");
-            transcribe_and_reply(mic, true);
             continue;
         }
 
