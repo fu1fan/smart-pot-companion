@@ -1,6 +1,7 @@
 package com.fu1fan.smartpot.server.service
 
 import com.fu1fan.smartpot.protocol.CreateDiaryRequest
+import com.fu1fan.smartpot.protocol.DiaryAuthor
 import com.fu1fan.smartpot.protocol.PlantDiary
 import com.fu1fan.smartpot.protocol.RealtimeEvent
 import com.fu1fan.smartpot.protocol.RealtimeEventType
@@ -27,11 +28,11 @@ class DiaryService(
         val content = request.content.trim()
         require(title.isNotBlank() && title.length <= 60) { "日记标题应为 1-60 个字符" }
         require(content.isNotBlank() && content.length <= 1_000) { "日记内容应为 1-1000 个字符" }
-        require(request.imageDataUrls.size <= 3) { "每篇日记最多添加 3 张图片" }
-        require(request.imageDataUrls.all(::validDiaryImage)) { "日记图片格式或大小不正确" }
         require(request.moodEmoji == null || request.moodEmoji in setOf("😊", "🌱", "💧", "☀️", "🥰", "😴")) { "不支持的日记表情" }
 
-        val existing = store.listDiaries(potId).firstOrNull { it.diaryDate == date.toString() }
+        val existing = store.listDiaries(potId).firstOrNull {
+            it.diaryDate == date.toString() && it.author == DiaryAuthor.USER
+        }
         val diary = PlantDiary(
             id = existing?.id ?: UUID.randomUUID().toString(),
             potId = potId,
@@ -39,8 +40,9 @@ class DiaryService(
             title = title,
             content = content,
             createdAt = existing?.createdAt ?: Instant.now().toString(),
-            imageDataUrls = request.imageDataUrls,
+            imageDataUrls = emptyList(),
             moodEmoji = request.moodEmoji,
+            author = DiaryAuthor.USER,
         )
         store.upsertDiary(diary)
         realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, potId, appJson.encodeToJsonElement(diary)))
@@ -48,12 +50,24 @@ class DiaryService(
     }
 
     suspend fun generate(potId: String, date: LocalDate = LocalDate.now()): PlantDiary {
-        store.listDiaries(potId).firstOrNull { it.diaryDate == date.toString() }?.let { return it }
+        store.listDiaries(potId).firstOrNull {
+            it.diaryDate == date.toString() && it.author == DiaryAuthor.WHEAT
+        }?.let { return it }
         val pot = requireNotNull(store.findPot(potId))
         val content = decorateDiaryContent(ai.generateDiary(pot, date.toString()))
-        val diary = PlantDiary(UUID.randomUUID().toString(), pot.id, date.toString(), "${pot.displayName}的日记", content, Instant.now().toString())
+        val diary = PlantDiary(
+            UUID.randomUUID().toString(),
+            pot.id,
+            date.toString(),
+            "${pot.displayName}的日记",
+            content,
+            Instant.now().toString(),
+            author = DiaryAuthor.WHEAT,
+        )
         if (store.saveDiary(diary)) realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, pot.id, appJson.encodeToJsonElement(diary)))
-        return store.listDiaries(potId).first { it.diaryDate == date.toString() }
+        return store.listDiaries(potId).first {
+            it.diaryDate == date.toString() && it.author == DiaryAuthor.WHEAT
+        }
     }
 
     fun start(scope: CoroutineScope) = scope.launch {
@@ -64,12 +78,5 @@ class DiaryService(
             }
             delay(1.minutes)
         }
-    }
-
-    private fun validDiaryImage(value: String): Boolean {
-        if (value.length > 500_000) return false
-        return value.startsWith("data:image/jpeg;base64,") ||
-            value.startsWith("data:image/png;base64,") ||
-            value.startsWith("data:image/webp;base64,")
     }
 }

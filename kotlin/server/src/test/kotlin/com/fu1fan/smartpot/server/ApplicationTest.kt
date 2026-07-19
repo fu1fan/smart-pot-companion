@@ -16,6 +16,8 @@ import com.fu1fan.smartpot.protocol.DailyFocusSummary
 import com.fu1fan.smartpot.protocol.DeviceScheduleItem
 import com.fu1fan.smartpot.protocol.DeviceEvent
 import com.fu1fan.smartpot.protocol.DeviceEventType
+import com.fu1fan.smartpot.protocol.DiaryAuthor
+import com.fu1fan.smartpot.protocol.PlantDiary
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
@@ -205,31 +207,46 @@ class ApplicationTest {
     }
 
     @Test
-    fun `owner can write and update a photo diary`() = testApplication {
-        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+    fun `user diary is separate from wheat diary and has no images`() = testApplication {
+        val store = InMemorySmartPotStore()
+        application { module(config, store, startMqtt = false) }
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
         val pot = api.post("/api/v1/pots") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
             setBody(CreatePotRequest("esp32-diary-001", "小麦", "pothos"))
         }.body<PotProfile>()
-        val image = "data:image/jpeg;base64,AQID"
+        store.saveDiary(
+            PlantDiary(
+                id = java.util.UUID.randomUUID().toString(),
+                potId = pot.id,
+                diaryDate = java.time.LocalDate.now(ZoneId.of(pot.timezone)).toString(),
+                title = "小麦的一天",
+                content = "今天晒到了暖暖的太阳。",
+                createdAt = Instant.now().toString(),
+                author = DiaryAuthor.WHEAT,
+            ),
+        )
+        val ignoredImage = "data:image/jpeg;base64,AQID"
 
         val created = api.post("/api/v1/pots/${pot.id}/diaries") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateDiaryRequest("今天的新叶", "小麦长出了一片新叶。", listOf(image), "🌱"))
+            setBody(CreateDiaryRequest("今天的新叶", "小麦长出了一片新叶。", listOf(ignoredImage), "🌱"))
         }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
         val updated = api.post("/api/v1/pots/${pot.id}/diaries") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(image), "😊"))
+            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(ignoredImage), "😊"))
         }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
 
         assertEquals(created.id, updated.id)
         assertEquals("叶片已经完全展开。", updated.content)
-        assertEquals(listOf(image), updated.imageDataUrls)
-        assertEquals(1, api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<com.fu1fan.smartpot.protocol.PlantDiary>>().size)
+        assertEquals(DiaryAuthor.USER, updated.author)
+        assertTrue(updated.imageDataUrls.isEmpty())
+        val diaries = api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<PlantDiary>>()
+        assertEquals(2, diaries.size)
+        assertEquals(setOf(DiaryAuthor.WHEAT, DiaryAuthor.USER), diaries.map(PlantDiary::author).toSet())
     }
 
     @Test

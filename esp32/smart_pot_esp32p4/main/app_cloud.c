@@ -433,7 +433,6 @@ static void handle_command(const char *json)
         }
     } else if (strcmp(type->valuestring, "REMOTE_TOUCH") == 0) {
         app_ui_play_touch_reaction();
-        app_tts_speak_text_no_followup("收到你从远方传来的摸摸啦。");
         publish_event("REMOTE_TOUCH");
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");

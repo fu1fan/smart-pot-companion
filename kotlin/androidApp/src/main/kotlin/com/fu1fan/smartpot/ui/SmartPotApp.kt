@@ -3,11 +3,6 @@ package com.fu1fan.smartpot.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
-import android.util.Base64
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
@@ -48,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fu1fan.smartpot.R
 import com.fu1fan.smartpot.protocol.*
-import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -131,7 +125,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::generateDiary, viewModel::speakDiary)
+                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::speakDiary)
                     tab == 2 -> CompanionScreen(
                         state,
                         viewModel::sendChat,
@@ -698,8 +692,7 @@ private fun AdviceCard(title: String, lines: List<String>, color: Color = SoftLe
 private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String) -> Unit,
-    saveDiary: (String, String, List<String>, String?) -> Unit,
-    generateDiary: () -> Unit,
+    saveDiary: (String, String, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     var note by rememberSaveable { mutableStateOf("") }
@@ -752,7 +745,6 @@ private fun CareScreen(
                 expanded = diariesExpanded,
                 onToggleExpanded = { diariesExpanded = !diariesExpanded },
                 saveDiary = saveDiary,
-                generateDiary = generateDiary,
                 speakDiary = speakDiary,
             )
         }
@@ -776,7 +768,7 @@ private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("好感度等级", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("Lv. $level", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("Lv. $level / 30", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
                     Text("🌿", fontSize = 17.sp)
                 }
                 LinearProgressIndicator(
@@ -786,7 +778,7 @@ private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics
                     trackColor = SoftLeaf,
                 )
                 Text(
-                    if (affinity.score >= 100) "好感度已达到最高等级" else "距离下一级还需 ${10 - affinity.score % 10} 点好感度",
+                    if (level >= 30) "好感度已达到最高等级" else "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度",
                     fontSize = 11.sp,
                     color = Muted,
                 )
@@ -967,31 +959,24 @@ private fun CareDiarySection(
     state: SmartPotUiState,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
-    saveDiary: (String, String, List<String>, String?) -> Unit,
-    generateDiary: () -> Unit,
+    saveDiary: (String, String, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
     val visibleDiaries = if (expanded) diaries else diaries.take(2)
-    val context = LocalContext.current
     val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
         .getOrDefault(ZoneId.of("Asia/Shanghai"))
     val today = LocalDate.now(zone).toString()
-    val todayDiary = diaries.firstOrNull { it.diaryDate == today }
+    val todayDiary = diaries.firstOrNull { it.diaryDate == today && it.author == DiaryAuthor.USER }
     var editorVisible by rememberSaveable { mutableStateOf(false) }
     var title by rememberSaveable { mutableStateOf("") }
     var content by rememberSaveable { mutableStateOf("") }
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
-    var images by remember { mutableStateOf<List<String>>(emptyList()) }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(3)) { uris ->
-        images = uris.take(3).mapNotNull { uri -> encodeDiaryImage(context, uri) }
-    }
 
     fun openEditor() {
         title = todayDiary?.title ?: "今天的小麦"
         content = todayDiary?.content ?: ""
         mood = todayDiary?.moodEmoji
-        images = todayDiary?.imageDataUrls ?: emptyList()
         editorVisible = true
     }
 
@@ -1036,32 +1021,9 @@ private fun CareDiarySection(
                                 )
                             }
                         }
-                        if (images.isNotEmpty()) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                images.forEachIndexed { index, dataUrl ->
-                                    Box(Modifier.weight(1f).height(76.dp)) {
-                                        DiaryPhoto(dataUrl, Modifier.fillMaxSize())
-                                        Surface(
-                                            modifier = Modifier.align(Alignment.TopEnd).clickable { images = images.filterIndexed { i, _ -> i != index } },
-                                            shape = CircleShape,
-                                            color = Color(0xCCFFFFFF),
-                                        ) { Text("×", modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), color = Ink) }
-                                    }
-                                }
-                                repeat(3 - images.size) { Spacer(Modifier.weight(1f)) }
-                            }
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                                modifier = Modifier.weight(1f),
-                                enabled = images.size < 3,
-                            ) { Text("添加图片 ${images.size}/3", fontSize = 11.sp) }
-                            TextButton(onClick = generateDiary, modifier = Modifier.weight(1f)) { Text("AI 生成", fontSize = 11.sp) }
-                        }
                         Button(
                             onClick = {
-                                saveDiary(title.trim(), content.trim(), images, mood)
+                                saveDiary(title.trim(), content.trim(), mood)
                                 editorVisible = false
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -1095,9 +1057,14 @@ private fun CareDiarySection(
 
 @Composable
 private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: () -> Unit) {
+    var expanded by rememberSaveable(diary.id) { mutableStateOf(false) }
+    val displayContent = diaryDisplayContent(diary)
+    val canExpand = displayContent.length > 90 || displayContent.count { it == '\n' } >= 3
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(diary.diaryDate, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
+            Spacer(Modifier.width(8.dp))
+            Text(if (diary.author == DiaryAuthor.WHEAT) "小麦写的" else "用户写的", color = Leaf, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(8.dp))
             Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(diaryMoodEmoji(diary), fontSize = 16.sp)
@@ -1105,70 +1072,17 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
                 Text("▷ ESP朗读", fontSize = 11.sp)
             }
         }
-        Text(diaryDisplayContent(diary), fontSize = 12.sp, color = Color(0xFF4D534E), maxLines = 3, overflow = TextOverflow.Ellipsis)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (diary.imageDataUrls.isNotEmpty()) {
-                diary.imageDataUrls.take(3).forEach { dataUrl -> DiaryPhoto(dataUrl, Modifier.weight(1f).height(66.dp)) }
-                repeat(3 - diary.imageDataUrls.take(3).size) { Spacer(Modifier.weight(1f)) }
-            } else {
-                repeat(3) { index -> DiaryVisualThumbnail(diary, index, Modifier.weight(1f).height(66.dp)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DiaryPhoto(dataUrl: String, modifier: Modifier = Modifier) {
-    val image = remember(dataUrl) {
-        runCatching {
-            val bytes = Base64.decode(dataUrl.substringAfter(','), Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-        }.getOrNull()
-    }
-    if (image != null) {
-        Image(
-            bitmap = image,
-            contentDescription = "日记图片",
-            modifier = modifier.background(Color(0xFFF0F2EE), RoundedCornerShape(6.dp)),
-            contentScale = ContentScale.Crop,
+        Text(
+            displayContent,
+            fontSize = 12.sp,
+            color = Color(0xFF4D534E),
+            maxLines = if (expanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
         )
-    } else {
-        Box(modifier.background(Color(0xFFF0F2EE), RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
-            Text("图片不可用", color = Muted, fontSize = 10.sp)
-        }
-    }
-}
-
-private fun encodeDiaryImage(context: Context, uri: Uri): String? = runCatching {
-    val source = context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream) ?: return null
-    val maxDimension = maxOf(source.width, source.height)
-    val scale = (640f / maxDimension).coerceAtMost(1f)
-    val output = if (scale < 1f) {
-        Bitmap.createScaledBitmap(source, (source.width * scale).roundToInt(), (source.height * scale).roundToInt(), true)
-    } else {
-        source
-    }
-    val bytes = ByteArrayOutputStream()
-    output.compress(Bitmap.CompressFormat.JPEG, 68, bytes)
-    if (output !== source) output.recycle()
-    source.recycle()
-    "data:image/jpeg;base64,${Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)}"
-}.getOrNull()
-
-@Composable
-private fun DiaryVisualThumbnail(diary: PlantDiary, index: Int, modifier: Modifier = Modifier) {
-    val skies = listOf(Color(0xFFCFE7D0), Color(0xFFCDE4F3), Color(0xFFE5E9CF))
-    Canvas(modifier.background(skies[index % skies.size], RoundedCornerShape(6.dp))) {
-        val sunColor = if (diary.content.contains("光") || index == 1) Sun else Color(0xFFFFE2A5)
-        drawCircle(sunColor, radius = size.minDimension * 0.10f, center = Offset(size.width * 0.78f, size.height * 0.22f))
-        drawRect(Color(0xFF8DAA69), Offset(0f, size.height * 0.72f), Size(size.width, size.height * 0.28f))
-        val stemX = size.width * (0.42f + index * 0.06f)
-        drawLine(Color(0xFF3E7D46), Offset(stemX, size.height * 0.78f), Offset(stemX, size.height * 0.34f), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-        rotate(-25f, Offset(stemX - size.width * 0.10f, size.height * 0.45f)) {
-            drawOval(Color(0xFF4E9957), Offset(stemX - size.width * 0.22f, size.height * 0.38f), Size(size.width * 0.24f, size.height * 0.18f))
-        }
-        rotate(25f, Offset(stemX + size.width * 0.10f, size.height * 0.50f)) {
-            drawOval(Color(0xFF76AB49), Offset(stemX, size.height * 0.42f), Size(size.width * 0.25f, size.height * 0.18f))
+        if (canExpand) {
+            TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
+                Text(if (expanded) "收起" else "展开全文", fontSize = 11.sp)
+            }
         }
     }
 }
@@ -1475,7 +1389,7 @@ private fun ControlProjectionCard(
     onSendText: () -> Unit,
     onSendEmoji: (String) -> Unit,
 ) {
-    val emojis = listOf("heart" to "❤️", "smile" to "😊", "happy" to "😄", "thirsty" to "🥤", "dark" to "🌙", "weak" to "🥺", "wave" to "👋", "star" to "⭐", "flower" to "🌸", "water" to "💧", "sun" to "☀️", "sleep" to "💤")
+    val emojis = listOf("heart", "smile", "happy", "thirsty", "dark", "weak", "wave", "star", "flower", "water", "sun", "sleep")
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -1495,13 +1409,19 @@ private fun ControlProjectionCard(
             if (mode == "emoji") {
                 emojis.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { emoji ->
+                        row.forEach { emojiId ->
                             OutlinedButton(
-                                onClick = { onSendEmoji(emoji.first) },
+                                onClick = { onSendEmoji(emojiId) },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(6.dp),
-                                contentPadding = PaddingValues(vertical = 7.dp),
-                            ) { Text(emoji.second, fontSize = 18.sp) }
+                                contentPadding = PaddingValues(4.dp),
+                            ) {
+                                Image(
+                                    painter = painterResource(emojiStickerResource(emojiId)),
+                                    contentDescription = "投送表情 $emojiId",
+                                    modifier = Modifier.size(34.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -1981,8 +1901,41 @@ private fun parseMinuteOfDay(value: String): Int? {
 private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.NEW_LEAF -> "新叶"; CareType.OTHER -> "其他" }
 private fun careEmoji(value: CareType) = when (value) { CareType.WATER -> "💧"; CareType.FERTILIZE -> "🌿"; CareType.PRUNE -> "✂"; CareType.REPOT -> "🪴"; CareType.NEW_LEAF -> "🌱"; CareType.OTHER -> "✓" }
 private fun affinityLabel(value: AffinityLevel) = when (value) { AffinityLevel.STRANGER -> "初次见面"; AffinityLevel.FAMILIAR -> "渐渐熟悉"; AffinityLevel.CLOSE -> "亲密伙伴"; AffinityLevel.TRUSTED -> "彼此信赖"; AffinityLevel.BEST_FRIEND -> "最佳朋友" }
-private fun affinityLevelNumber(score: Int): Int = (score.coerceIn(0, 100) / 10 + 1).coerceAtMost(11)
-private fun affinityLevelProgress(score: Int): Float = if (score >= 100) 1f else (score.coerceAtLeast(0) % 10) / 10f
+private const val MaxAffinityLevel = 30
+private fun affinityLevelNumber(score: Int): Int =
+    (score.coerceIn(0, 100) * (MaxAffinityLevel - 1) / 100 + 1).coerceAtMost(MaxAffinityLevel)
+
+private fun affinityLevelProgress(score: Int): Float {
+    val safeScore = score.coerceIn(0, 100)
+    if (safeScore >= 100) return 1f
+    val level = affinityLevelNumber(safeScore)
+    val start = ((level - 1) * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
+    val end = (level * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
+    return ((safeScore - start).toFloat() / (end - start).coerceAtLeast(1)).coerceIn(0f, 1f)
+}
+
+private fun affinityPointsToNextLevel(score: Int): Int {
+    val safeScore = score.coerceIn(0, 100)
+    if (safeScore >= 100) return 0
+    val level = affinityLevelNumber(safeScore)
+    val nextThreshold = (level * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
+    return (nextThreshold - safeScore).coerceAtLeast(1)
+}
+
+private fun emojiStickerResource(id: String): Int = when (id) {
+    "heart" -> R.drawable.emoji_sticker_heart
+    "happy" -> R.drawable.emoji_sticker_happy
+    "thirsty" -> R.drawable.emoji_sticker_thirsty
+    "dark" -> R.drawable.emoji_sticker_dark
+    "weak" -> R.drawable.emoji_sticker_weak
+    "wave" -> R.drawable.emoji_sticker_wave
+    "star" -> R.drawable.emoji_sticker_star
+    "flower" -> R.drawable.emoji_sticker_flower
+    "water" -> R.drawable.emoji_sticker_water
+    "sun" -> R.drawable.emoji_sticker_sun
+    "sleep" -> R.drawable.emoji_sticker_sleep
+    else -> R.drawable.emoji_sticker_smile
+}
 private fun weatherEmoji(condition: String?): String = when {
     condition == null -> "◌"
     condition.contains("雨") -> "🌧"

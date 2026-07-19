@@ -244,11 +244,8 @@ static void sensor_update_cb(const app_plant_state_t *state, void *user_ctx)
     if (state->touch_count != last_touch_count) {
         int64_t now_us = esp_timer_get_time();
         if (now_us - last_touch_reaction_us > 3000000) {
+            // Keep touch feedback visual so repeated touches do not churn WakeNet through TTS playback.
             app_ui_play_touch_reaction();
-            const touch_feedback_t *feedback = select_touch_feedback(state->mood);
-            if (!app_tts_speak_text_with_tone(feedback->text, feedback->tone)) {
-                ESP_LOGW(TAG, "Touch reaction TTS queue failed");
-            }
             last_touch_reaction_us = now_us;
         }
         last_touch_count = state->touch_count;

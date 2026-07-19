@@ -26,6 +26,18 @@ static const char *TAG = "app_ui";
 LV_IMAGE_DECLARE(cat_planter_img);
 LV_IMAGE_DECLARE(home_static_bg_img);
 LV_IMAGE_DECLARE(schedule_static_bg_img);
+LV_IMAGE_DECLARE(emoji_heart_img);
+LV_IMAGE_DECLARE(emoji_smile_img);
+LV_IMAGE_DECLARE(emoji_happy_img);
+LV_IMAGE_DECLARE(emoji_thirsty_img);
+LV_IMAGE_DECLARE(emoji_dark_img);
+LV_IMAGE_DECLARE(emoji_weak_img);
+LV_IMAGE_DECLARE(emoji_wave_img);
+LV_IMAGE_DECLARE(emoji_star_img);
+LV_IMAGE_DECLARE(emoji_flower_img);
+LV_IMAGE_DECLARE(emoji_water_img);
+LV_IMAGE_DECLARE(emoji_sun_img);
+LV_IMAGE_DECLARE(emoji_sleep_img);
 
 static void cat_face_to_front(void);
 static void update_cat_art(app_mood_t mood);
@@ -2767,113 +2779,20 @@ static void emoji_stage_scale_cb(void *obj, int32_t value)
     lv_obj_set_style_transform_scale((lv_obj_t *)obj, value, LV_PART_MAIN);
 }
 
-static lv_obj_t *emoji_shape(lv_obj_t *parent, int32_t width, int32_t height,
-                             int32_t x, int32_t y, int32_t radius, uint32_t color)
+static const lv_image_dsc_t *emoji_image_for_id(const char *id)
 {
-    lv_obj_t *obj = lv_obj_create(parent);
-    lv_obj_remove_style_all(obj);
-    lv_obj_set_size(obj, width, height);
-    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(color), LV_PART_MAIN);
-    lv_obj_set_style_radius(obj, radius, LV_PART_MAIN);
-    lv_obj_align(obj, LV_ALIGN_CENTER, x, y);
-    return obj;
-}
-
-static lv_obj_t *emoji_bar(lv_obj_t *parent, int32_t width, int32_t height,
-                           int32_t x, int32_t y, int32_t angle, uint32_t color)
-{
-    lv_obj_t *obj = emoji_shape(parent, width, height, x, y, LV_RADIUS_CIRCLE, color);
-    lv_obj_set_style_transform_rotation(obj, angle * 10, LV_PART_MAIN);
-    return obj;
-}
-
-static void emoji_face_base(uint32_t color)
-{
-    emoji_shape(s_emoji_art, 202, 202, 0, 0, LV_RADIUS_CIRCLE, color);
-}
-
-static void emoji_render_art(const char *id, uint32_t stage_color)
-{
-    const uint32_t ink = 0x4a351a;
-    const uint32_t yellow = 0xffd94f;
-    lv_obj_clean(s_emoji_art);
-
-    if (strcmp(id, "heart") == 0) {
-        emoji_shape(s_emoji_art, 108, 108, -38, -34, LV_RADIUS_CIRCLE, 0xf04f67);
-        emoji_shape(s_emoji_art, 108, 108, 38, -34, LV_RADIUS_CIRCLE, 0xf04f67);
-        lv_obj_t *tip = emoji_shape(s_emoji_art, 130, 130, 0, 18, 18, 0xf04f67);
-        lv_obj_set_style_transform_rotation(tip, 450, LV_PART_MAIN);
-    } else if (strcmp(id, "smile") == 0) {
-        emoji_face_base(yellow);
-        emoji_bar(s_emoji_art, 42, 10, -46, -28, -12, ink);
-        emoji_bar(s_emoji_art, 42, 10, 46, -28, 12, ink);
-        emoji_bar(s_emoji_art, 42, 10, -20, 43, 13, ink);
-        emoji_bar(s_emoji_art, 42, 10, 20, 43, -13, ink);
-    } else if (strcmp(id, "happy") == 0) {
-        emoji_face_base(yellow);
-        emoji_bar(s_emoji_art, 42, 10, -46, -30, -12, ink);
-        emoji_bar(s_emoji_art, 42, 10, 46, -30, 12, ink);
-        emoji_shape(s_emoji_art, 105, 58, 0, 42, 24, ink);
-        emoji_shape(s_emoji_art, 82, 14, 0, 24, 5, 0xffffff);
-    } else if (strcmp(id, "thirsty") == 0) {
-        emoji_shape(s_emoji_art, 142, 176, -8, 12, 16, 0xa9d9ea);
-        emoji_shape(s_emoji_art, 126, 104, -8, 45, 12, 0x66b8dc);
-        emoji_shape(s_emoji_art, 148, 14, -8, -72, 7, 0xd9eef5);
-        emoji_bar(s_emoji_art, 18, 126, 57, -70, 10, 0xee7192);
-    } else if (strcmp(id, "dark") == 0) {
-        emoji_shape(s_emoji_art, 188, 188, -22, 0, LV_RADIUS_CIRCLE, 0xffd452);
-        emoji_shape(s_emoji_art, 176, 176, 42, -34, LV_RADIUS_CIRCLE, stage_color);
-    } else if (strcmp(id, "weak") == 0) {
-        emoji_face_base(0xf5d764);
-        emoji_shape(s_emoji_art, 58, 68, -48, -25, LV_RADIUS_CIRCLE, 0x5b4633);
-        emoji_shape(s_emoji_art, 58, 68, 48, -25, LV_RADIUS_CIRCLE, 0x5b4633);
-        emoji_shape(s_emoji_art, 18, 22, -59, -40, LV_RADIUS_CIRCLE, 0xffffff);
-        emoji_shape(s_emoji_art, 18, 22, 37, -40, LV_RADIUS_CIRCLE, 0xffffff);
-        emoji_shape(s_emoji_art, 32, 12, 0, 48, LV_RADIUS_CIRCLE, ink);
-    } else if (strcmp(id, "wave") == 0) {
-        emoji_shape(s_emoji_art, 132, 132, 0, 38, 42, 0xf2c54e);
-        emoji_bar(s_emoji_art, 38, 142, -67, -29, -14, 0xf2c54e);
-        emoji_bar(s_emoji_art, 36, 154, -24, -48, -4, 0xf2c54e);
-        emoji_bar(s_emoji_art, 36, 148, 18, -48, 5, 0xf2c54e);
-        emoji_bar(s_emoji_art, 35, 128, 59, -29, 14, 0xf2c54e);
-    } else if (strcmp(id, "star") == 0) {
-        lv_obj_t *center = emoji_shape(s_emoji_art, 126, 126, 0, 0, 12, 0xffd94b);
-        lv_obj_set_style_transform_rotation(center, 450, LV_PART_MAIN);
-        emoji_bar(s_emoji_art, 44, 176, 0, 0, 0, 0xffd94b);
-        emoji_bar(s_emoji_art, 176, 44, 0, 0, 0, 0xffd94b);
-        emoji_bar(s_emoji_art, 34, 142, 0, 0, 45, 0xffd94b);
-        emoji_bar(s_emoji_art, 34, 142, 0, 0, -45, 0xffd94b);
-    } else if (strcmp(id, "flower") == 0) {
-        emoji_shape(s_emoji_art, 92, 92, 0, -58, LV_RADIUS_CIRCLE, 0xf2a5c8);
-        emoji_shape(s_emoji_art, 92, 92, -64, -16, LV_RADIUS_CIRCLE, 0xf6b0ce);
-        emoji_shape(s_emoji_art, 92, 92, 64, -16, LV_RADIUS_CIRCLE, 0xf6b0ce);
-        emoji_shape(s_emoji_art, 92, 92, -40, 58, LV_RADIUS_CIRCLE, 0xf7b9d4);
-        emoji_shape(s_emoji_art, 92, 92, 40, 58, LV_RADIUS_CIRCLE, 0xf7b9d4);
-        emoji_shape(s_emoji_art, 78, 78, 0, 6, LV_RADIUS_CIRCLE, 0xffd45b);
-    } else if (strcmp(id, "water") == 0) {
-        lv_obj_t *drop = emoji_shape(s_emoji_art, 132, 132, 0, 38, 42, 0x48b9e8);
-        lv_obj_set_style_transform_rotation(drop, 450, LV_PART_MAIN);
-        emoji_shape(s_emoji_art, 135, 135, 0, 38, LV_RADIUS_CIRCLE, 0x48b9e8);
-    } else if (strcmp(id, "sun") == 0) {
-        emoji_shape(s_emoji_art, 142, 142, 0, 0, LV_RADIUS_CIRCLE, 0xffcb36);
-        for (int32_t angle = 0; angle < 180; angle += 45) {
-            emoji_bar(s_emoji_art, 24, 230, 0, 0, angle, 0xffcb36);
-        }
-        emoji_shape(s_emoji_art, 154, 154, 0, 0, LV_RADIUS_CIRCLE, 0xffcb36);
-    } else if (strcmp(id, "sleep") == 0) {
-        emoji_face_base(0x8eb8ef);
-        emoji_bar(s_emoji_art, 45, 9, -45, -28, 8, 0x3c5a87);
-        emoji_bar(s_emoji_art, 45, 9, 45, -28, -8, 0x3c5a87);
-        emoji_shape(s_emoji_art, 32, 10, 0, 38, LV_RADIUS_CIRCLE, 0x3c5a87);
-        lv_obj_t *label = lv_label_create(s_emoji_art);
-        lv_label_set_text(label, "Zzz");
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_48, LV_PART_MAIN);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x456fb3), LV_PART_MAIN);
-        lv_obj_align(label, LV_ALIGN_TOP_RIGHT, 4, -2);
-    } else {
-        emoji_render_art("smile", stage_color);
-    }
+    if (strcmp(id, "heart") == 0) return &emoji_heart_img;
+    if (strcmp(id, "happy") == 0) return &emoji_happy_img;
+    if (strcmp(id, "thirsty") == 0) return &emoji_thirsty_img;
+    if (strcmp(id, "dark") == 0) return &emoji_dark_img;
+    if (strcmp(id, "weak") == 0) return &emoji_weak_img;
+    if (strcmp(id, "wave") == 0) return &emoji_wave_img;
+    if (strcmp(id, "star") == 0) return &emoji_star_img;
+    if (strcmp(id, "flower") == 0) return &emoji_flower_img;
+    if (strcmp(id, "water") == 0) return &emoji_water_img;
+    if (strcmp(id, "sun") == 0) return &emoji_sun_img;
+    if (strcmp(id, "sleep") == 0) return &emoji_sleep_img;
+    return &emoji_smile_img;
 }
 
 static void emoji_overlay_finish_cb(lv_timer_t *timer)
@@ -2925,18 +2844,17 @@ static void ensure_emoji_overlay(void)
     lv_obj_set_style_border_color(s_emoji_stage, lv_color_hex(0xd8ffe3), LV_PART_MAIN);
     lv_obj_align(s_emoji_stage, LV_ALIGN_CENTER, 0, 0);
 
-    s_emoji_art = lv_obj_create(s_emoji_stage);
-    lv_obj_remove_style_all(s_emoji_art);
-    lv_obj_set_size(s_emoji_art, 300, 230);
-    lv_obj_clear_flag(s_emoji_art, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(s_emoji_art, LV_ALIGN_TOP_MID, 0, 22);
+    s_emoji_art = lv_image_create(s_emoji_stage);
+    lv_image_set_src(s_emoji_art, &emoji_smile_img);
+    lv_image_set_scale(s_emoji_art, 320);
+    lv_obj_align(s_emoji_art, LV_ALIGN_TOP_MID, 0, 20);
 
     s_emoji_caption_label = lv_label_create(s_emoji_stage);
     lv_label_set_text(s_emoji_caption_label, "用户向你投递了一个表情。");
     lv_label_set_long_mode(s_emoji_caption_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_emoji_caption_label, 370);
     lv_obj_set_style_text_align(s_emoji_caption_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_emoji_caption_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_emoji_caption_label, schedule_time_font(), LV_PART_MAIN);
     lv_obj_set_style_text_color(s_emoji_caption_label, lv_color_hex(0xeefbf2), LV_PART_MAIN);
     lv_obj_align(s_emoji_caption_label, LV_ALIGN_BOTTOM_MID, 0, -34);
 }
@@ -2970,7 +2888,7 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
     }
 
     lv_obj_set_style_bg_color(s_emoji_stage, lv_color_hex(stage_hex), LV_PART_MAIN);
-    emoji_render_art(id, stage_hex);
+    lv_image_set_src(s_emoji_art, emoji_image_for_id(id));
     lv_label_set_text(s_emoji_caption_label, "用户向你投递了一个表情。");
     lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_emoji_overlay);
@@ -3055,7 +2973,8 @@ static void ensure_remote_popup(void)
     lv_label_set_long_mode(s_remote_popup_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_remote_popup_label, UI_SCREEN_W - 112);
     lv_obj_set_style_text_align(s_remote_popup_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_remote_popup_label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_remote_popup_label, schedule_font(), LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_remote_popup_label, 5, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_remote_popup_label, lv_color_hex(0xf7fff8), LV_PART_MAIN);
     lv_obj_align(s_remote_popup_label, LV_ALIGN_CENTER, 0, 0);
 }

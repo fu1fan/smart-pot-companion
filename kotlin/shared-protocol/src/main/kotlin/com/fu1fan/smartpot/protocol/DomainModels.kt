@@ -155,6 +155,9 @@ data class AffinityState(
 )
 
 @Serializable
+enum class DiaryAuthor { WHEAT, USER }
+
+@Serializable
 data class PlantDiary(
     val id: String,
     val potId: String,
@@ -164,6 +167,7 @@ data class PlantDiary(
     val createdAt: String,
     val imageDataUrls: List<String> = emptyList(),
     val moodEmoji: String? = null,
+    val author: DiaryAuthor = DiaryAuthor.WHEAT,
 )
 
 @Serializable

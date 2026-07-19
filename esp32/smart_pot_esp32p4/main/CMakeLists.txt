@@ -4,6 +4,7 @@ set(SMART_POT_SRCS
         cat_planter_img.c
         home_static_bg_img.c
         schedule_static_bg_img.c
+        emoji_stickers_img.c
         app_sensors.c
         app_wifi.c
         app_time.c

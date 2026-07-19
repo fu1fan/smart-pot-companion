@@ -130,7 +130,7 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun saveDiary(diary: PlantDiary): Boolean {
         val list = diaries.computeIfAbsent(diary.potId) { mutableListOf() }
         synchronized(list) {
-            if (list.any { it.diaryDate == diary.diaryDate }) return false
+            if (list.any { it.diaryDate == diary.diaryDate && it.author == diary.author }) return false
             list += diary
         }
         return true
@@ -138,7 +138,7 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun upsertDiary(diary: PlantDiary) {
         val list = diaries.computeIfAbsent(diary.potId) { mutableListOf() }
         synchronized(list) {
-            list.removeAll { it.diaryDate == diary.diaryDate }
+            list.removeAll { it.diaryDate == diary.diaryDate && it.author == diary.author }
             list += diary
         }
     }
