@@ -23,6 +23,7 @@ import kotlin.math.round
 
 data class SmartPotUiState(
     val loading: Boolean = true,
+    val potsLoaded: Boolean = false,
     val species: List<PlantSpecies> = emptyList(),
     val pots: List<PotProfile> = emptyList(),
     val selectedPotId: String? = null,
@@ -54,11 +55,27 @@ class SmartPotViewModel : ViewModel() {
 
     init { bootstrap() }
 
-    fun bootstrap() = launchAction {
-        val species = api.species()
-        val pots = api.pots()
-        mutableState.update { it.copy(species = species, pots = pots, selectedPotId = it.selectedPotId ?: pots.firstOrNull()?.id, loading = false) }
-        mutableState.value.selectedPotId?.let { selectPot(it) }
+    fun bootstrap() {
+        viewModelScope.launch {
+            mutableState.update { it.copy(loading = true, error = null) }
+            val pots = runCatching { api.pots() }.getOrElse { error ->
+                fail(error)
+                return@launch
+            }
+            val speciesResult = runCatching { api.species() }
+            mutableState.update { current ->
+                current.copy(
+                    species = speciesResult.getOrDefault(current.species),
+                    pots = pots,
+                    potsLoaded = true,
+                    selectedPotId = current.selectedPotId?.takeIf { selected -> pots.any { it.id == selected } }
+                        ?: pots.firstOrNull()?.id,
+                    loading = false,
+                    error = speciesResult.exceptionOrNull()?.message,
+                )
+            }
+            mutableState.value.selectedPotId?.let(::selectPot)
+        }
     }
 
     fun createPot(deviceId: String, name: String, speciesId: String) = launchAction {
@@ -185,13 +202,18 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(diaries = (listOf(diary) + it.diaries).distinctBy(PlantDiary::id)) }
     }
 
-    fun saveDiary(title: String, content: String, moodEmoji: String?) = withPot { id ->
-        val diary = api.addDiary(id, CreateDiaryRequest(title, content, emptyList(), moodEmoji))
+    fun saveDiary(title: String, content: String, imageDataUrls: List<String>, moodEmoji: String?) = withPot { id ->
+        val diary = api.addDiary(id, CreateDiaryRequest(title, content, imageDataUrls, moodEmoji))
         mutableState.update { state -> state.copy(diaries = (listOf(diary) + state.diaries).distinctBy(PlantDiary::id)) }
     }
 
     fun recordPomodoro() = withPot { id ->
         api.addFocusSession(id)
+        mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
+    }
+
+    fun removePomodoro() = withPot { id ->
+        api.deleteLatestFocusSession(id)
         mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
@@ -236,7 +258,7 @@ class SmartPotViewModel : ViewModel() {
         mutableState.value = SmartPotUiState(loading = true, selectedPotId = session.potId)
         val species = api.species()
         val pots = api.pots()
-        mutableState.update { it.copy(species = species, pots = pots, loading = false) }
+        mutableState.update { it.copy(species = species, pots = pots, potsLoaded = true, loading = false) }
         selectPot(session.potId)
     }
 

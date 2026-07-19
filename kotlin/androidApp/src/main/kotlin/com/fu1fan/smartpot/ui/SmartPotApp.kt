@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.LocationManager
+import android.net.Uri
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -59,6 +61,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -133,7 +136,8 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when {
-                    state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    state.loading && !state.potsLoaded -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    !state.potsLoaded -> ConnectionRetryScreen(state.error, viewModel::bootstrap)
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
                     tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::speakDiary, viewModel::refreshWeather)
@@ -146,11 +150,27 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::addSchedule,
                         viewModel::toggleSchedule,
                         viewModel::recordPomodoro,
+                        viewModel::removePomodoro,
                     )
                     else -> ControlScreen(state, viewModel::control, viewModel::createShare, viewModel::redeemShare)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectionRetryScreen(error: String?, retry: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("暂时无法连接盆栽", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(error ?: "请检查网络后重试", color = Muted, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(18.dp))
+        Button(onClick = retry) { Text("重新连接") }
     }
 }
 
@@ -354,13 +374,6 @@ private fun DashboardHero(
                     fontSize = 12.sp,
                 )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row {
-                    DashboardAvatar("主", Color(0xFFFFD3A5))
-                    DashboardAvatar("伴", Color(0xFFD8E8C7), Modifier.offset(x = (-5).dp))
-                }
-                Text("共同陪伴", color = Muted, fontSize = 11.sp)
-            }
         }
         Row(Modifier.fillMaxWidth().height(168.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Card(
@@ -511,7 +524,8 @@ private fun PlantHealthCard(
                     )
                 }
                 affinity?.let {
-                    Text("好感度 ${it.score}/100 · ${affinityLabel(it.level)}", fontSize = 11.sp, color = Muted)
+                    val normalized = PlantRules.normalizeAffinity(it)
+                    Text("好感度 ${normalized.score}/${PlantRules.maxAffinityPoints} · ${affinityLabel(normalized.level)}", fontSize = 11.sp, color = Muted)
                 }
             }
         }
@@ -726,7 +740,7 @@ private fun AdviceCard(title: String, lines: List<String>, color: Color = SoftLe
 private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String) -> Unit,
-    saveDiary: (String, String, String?) -> Unit,
+    saveDiary: (String, String, List<String>, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
     refreshWeather: (Double, Double) -> Unit,
 ) {
@@ -800,7 +814,7 @@ private fun CareScreen(
 
 @Composable
 private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics) {
-    val affinity = state.snapshot?.affinity ?: AffinityState()
+    val affinity = PlantRules.normalizeAffinity(state.snapshot?.affinity ?: AffinityState())
     val level = affinityLevelNumber(affinity.score)
     val levelProgress = affinityLevelProgress(affinity.score)
     Card(
@@ -841,16 +855,32 @@ private fun AffinityImpactCard(
     onToggle: () -> Unit,
 ) {
     val snapshot = state.snapshot
+    val today = LocalDate.now(zoneIdOf(snapshot?.pot?.timezone))
     val positive = buildList {
-        if (metrics.dailyWaterCount > 0) add("浇水 +2")
-        if (metrics.dailyInteractions > 0) add("互动 +1")
-        if (metrics.lightSuitability >= 1.0) add("合适光照 +1")
+        metrics.healthPercent?.let { health ->
+            val points = when (health) { in 85..100 -> 4; in 70..84 -> 2; else -> 0 }
+            if (points > 0) add("植物健康值 $health：+$points")
+        }
+        if (metrics.dailyDialogCount > 0) add("有效对话 +${metrics.dailyDialogCount.coerceAtMost(5)}")
+        if (metrics.dailyTouchCount > 0) add("有效触摸 +${metrics.dailyTouchCount.coerceAtMost(3)}")
+        if (metrics.dailyWaterCount > 0) add("成功浇水 +3")
+        if (state.careLogs.any { it.type == CareType.REPOT && isSameLocalDate(it.occurredAt, today, zoneIdOf(snapshot?.pot?.timezone)) }) add("换盆记录 +3")
+        if (state.careLogs.any { it.type == CareType.NEW_LEAF && isSameLocalDate(it.occurredAt, today, zoneIdOf(snapshot?.pot?.timezone)) }) add("长出新叶 +2")
+        val completedSchedules = state.schedule?.items.orEmpty().count { it.completed && it.completedAt?.let { at -> isSameLocalDate(at, today, zoneIdOf(snapshot?.pot?.timezone)) } == true }
+        if (completedSchedules > 0) add("完成日程 +${completedSchedules.coerceAtMost(3)}")
+        val pomodoros = state.careOverview?.focus?.pomodoroCount ?: 0
+        if (pomodoros > 0) add("完成番茄钟 +${pomodoros.coerceAtMost(4)}")
+        if (state.diaries.any { it.author == DiaryAuthor.USER && it.diaryDate == today.toString() }) add("写养护日记 +1")
     }
     val negative = buildList {
         when (snapshot?.evaluated?.soilStatus) {
             SoilStatus.TOO_DRY -> add("缺水 -2")
             SoilStatus.TOO_WET -> add("土壤过湿 -2")
             else -> Unit
+        }
+        metrics.healthPercent?.let { health ->
+            val points = when (health) { in 30..49 -> -2; in 0..29 -> -5; else -> 0 }
+            if (points < 0) add("植物健康值 $health：$points")
         }
         when (snapshot?.evaluated?.lightStatus) {
             LightStatus.DARK -> add("缺光 -2")
@@ -1004,7 +1034,7 @@ private fun CareDiarySection(
     state: SmartPotUiState,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
-    saveDiary: (String, String, String?) -> Unit,
+    saveDiary: (String, String, List<String>, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
@@ -1017,11 +1047,19 @@ private fun CareDiarySection(
     var title by rememberSaveable { mutableStateOf("") }
     var content by rememberSaveable { mutableStateOf("") }
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
+    var imageDataUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && imageDataUrls.size < 3) {
+            encodeDiaryPhoto(context, uri)?.let { encoded -> imageDataUrls = imageDataUrls + encoded }
+        }
+    }
 
     fun openEditor() {
         title = todayDiary?.title ?: "今天的小麦"
         content = todayDiary?.content ?: ""
         mood = todayDiary?.moodEmoji
+        imageDataUrls = todayDiary?.imageDataUrls.orEmpty()
         editorVisible = true
     }
 
@@ -1066,9 +1104,31 @@ private fun CareDiarySection(
                                 )
                             }
                         }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("成长照片 ${imageDataUrls.size}/3", color = Muted, fontSize = 11.sp)
+                            OutlinedButton(
+                                onClick = { imagePicker.launch("image/*") },
+                                enabled = imageDataUrls.size < 3,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            ) { Text("上传照片", fontSize = 11.sp) }
+                        }
+                        if (imageDataUrls.isNotEmpty()) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(imageDataUrls) { imageDataUrl ->
+                                    Box {
+                                        DiaryPhoto(imageDataUrl, Modifier.size(76.dp))
+                                        FilledIconButton(
+                                            onClick = { imageDataUrls = imageDataUrls - imageDataUrl },
+                                            modifier = Modifier.align(Alignment.TopEnd).size(24.dp),
+                                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Black.copy(alpha = 0.55f)),
+                                        ) { Text("×", color = Color.White, fontSize = 14.sp) }
+                                    }
+                                }
+                            }
+                        }
                         Button(
                             onClick = {
-                                saveDiary(title.trim(), content.trim(), mood)
+                                saveDiary(title.trim(), content.trim(), imageDataUrls, mood)
                                 editorVisible = false
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -1127,6 +1187,11 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
         if (canExpand) {
             TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
                 Text(if (expanded) "收起" else "展开全文", fontSize = 11.sp)
+            }
+        }
+        if (diary.author == DiaryAuthor.USER && diary.imageDataUrls.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(diary.imageDataUrls) { imageDataUrl -> DiaryPhoto(imageDataUrl, Modifier.size(88.dp)) }
             }
         }
     }
@@ -1599,6 +1664,7 @@ private fun CompanionScreen(
     addSchedule: (String, String) -> Unit,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
     recordPomodoro: () -> Unit,
+    removePomodoro: () -> Unit,
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var memory by rememberSaveable { mutableStateOf("") }
@@ -1679,7 +1745,7 @@ private fun CompanionScreen(
                 toggleSchedule = toggleSchedule,
             )
         }
-        item { CompanionFocusCard(state, recordPomodoro) }
+        item { CompanionFocusCard(state, recordPomodoro, removePomodoro) }
     }
 }
 
@@ -1858,12 +1924,24 @@ private fun CompanionScheduleCard(
 }
 
 @Composable
-private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Unit) {
+private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Unit, removePomodoro: () -> Unit) {
     val today = state.careOverview?.focus ?: state.focusDaily.lastOrNull()
     val count = today?.pomodoroCount ?: 0
     val minutes = today?.focusMinutes ?: 0
     val target = (today?.targetPomodoroCount ?: 4).coerceAtLeast(1)
     val completion = today?.scheduleCompletionPercent ?: 0
+    var confirmDecrease by rememberSaveable { mutableStateOf(false) }
+    if (confirmDecrease) {
+        AlertDialog(
+            onDismissRequest = { confirmDecrease = false },
+            title = { Text("减少一个番茄钟？") },
+            text = { Text("将删除今天最近一次记录的 25 分钟专注。") },
+            confirmButton = {
+                TextButton(onClick = { removePomodoro(); confirmDecrease = false }) { Text("确认减少", color = Color(0xFFD14343)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmDecrease = false }) { Text("取消") } },
+        )
+    }
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -1873,7 +1951,12 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("今日番茄钟", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                TextButton(onClick = recordPomodoro, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("＋ 记录", fontSize = 12.sp) }
+                Row {
+                    TextButton(onClick = { confirmDecrease = true }, enabled = count > 0, contentPadding = PaddingValues(horizontal = 7.dp)) {
+                        Text("－ 减少", fontSize = 12.sp)
+                    }
+                    TextButton(onClick = recordPomodoro, contentPadding = PaddingValues(horizontal = 7.dp)) { Text("＋ 记录", fontSize = 12.sp) }
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                 Text("$count 个", color = BrightLeaf, fontSize = 23.sp, fontWeight = FontWeight.Bold)
@@ -1951,27 +2034,18 @@ private fun parseMinuteOfDay(value: String): Int? {
 }
 private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.NEW_LEAF -> "新叶"; CareType.OTHER -> "其他" }
 private fun careEmoji(value: CareType) = when (value) { CareType.WATER -> "💧"; CareType.FERTILIZE -> "🌿"; CareType.PRUNE -> "✂"; CareType.REPOT -> "🪴"; CareType.NEW_LEAF -> "🌱"; CareType.OTHER -> "✓" }
-private fun affinityLabel(value: AffinityLevel) = when (value) { AffinityLevel.STRANGER -> "初次见面"; AffinityLevel.FAMILIAR -> "渐渐熟悉"; AffinityLevel.CLOSE -> "亲密伙伴"; AffinityLevel.TRUSTED -> "彼此信赖"; AffinityLevel.BEST_FRIEND -> "最佳朋友" }
-private const val MaxAffinityLevel = 30
-private fun affinityLevelNumber(score: Int): Int =
-    (score.coerceIn(0, 100) * (MaxAffinityLevel - 1) / 100 + 1).coerceAtMost(MaxAffinityLevel)
-
-private fun affinityLevelProgress(score: Int): Float {
-    val safeScore = score.coerceIn(0, 100)
-    if (safeScore >= 100) return 1f
-    val level = affinityLevelNumber(safeScore)
-    val start = ((level - 1) * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
-    val end = (level * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
-    return ((safeScore - start).toFloat() / (end - start).coerceAtLeast(1)).coerceIn(0f, 1f)
+private fun affinityLabel(value: AffinityLevel) = when (value) {
+    AffinityLevel.STRANGER -> "初次相识"
+    AffinityLevel.FAMILIAR -> "渐渐熟悉"
+    AffinityLevel.CLOSE -> "亲密伙伴"
+    AffinityLevel.TRUSTED -> "默契朋友"
+    AffinityLevel.BEST_FRIEND -> "最佳朋友"
+    AffinityLevel.LONG_TERM_COMPANION -> "长久相伴"
+    AffinityLevel.SOULMATE -> "心灵伙伴"
 }
-
-private fun affinityPointsToNextLevel(score: Int): Int {
-    val safeScore = score.coerceIn(0, 100)
-    if (safeScore >= 100) return 0
-    val level = affinityLevelNumber(safeScore)
-    val nextThreshold = (level * 100 + MaxAffinityLevel - 2) / (MaxAffinityLevel - 1)
-    return (nextThreshold - safeScore).coerceAtLeast(1)
-}
+private fun affinityLevelNumber(score: Int): Int = PlantRules.affinityLevelNumber(score)
+private fun affinityLevelProgress(score: Int): Float = PlantRules.affinityLevelProgress(score)
+private fun affinityPointsToNextLevel(score: Int): Int = PlantRules.affinityPointsToNextLevel(score)
 
 private fun emojiStickerResource(id: String): Int = when (id) {
     "heart" -> R.drawable.emoji_sticker_heart
@@ -1987,6 +2061,49 @@ private fun emojiStickerResource(id: String): Int = when (id) {
     "sleep" -> R.drawable.emoji_sticker_sleep
     else -> R.drawable.emoji_sticker_smile
 }
+
+@Composable
+private fun DiaryPhoto(dataUrl: String, modifier: Modifier = Modifier) {
+    val bitmap = remember(dataUrl) { decodeDiaryPhoto(dataUrl) }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "日记照片",
+            modifier = modifier.background(Color(0xFFF2F4EF), RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+private fun encodeDiaryPhoto(context: Context, uri: Uri): String? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > 1_280 || bounds.outHeight / sampleSize > 1_280) sampleSize *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: return@runCatching null
+    val scale = minOf(1f, 1_280f / maxOf(decoded.width, decoded.height))
+    val outputBitmap = if (scale < 1f) {
+        Bitmap.createScaledBitmap(decoded, (decoded.width * scale).roundToInt(), (decoded.height * scale).roundToInt(), true)
+    } else decoded
+    val bytes = ByteArrayOutputStream().use { output ->
+        outputBitmap.compress(Bitmap.CompressFormat.JPEG, 80, output)
+        output.toByteArray()
+    }
+    if (outputBitmap !== decoded) outputBitmap.recycle()
+    decoded.recycle()
+    "data:image/jpeg;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
+}.getOrNull()
+
+private fun decodeDiaryPhoto(dataUrl: String): Bitmap? = runCatching {
+    val encoded = dataUrl.substringAfter(',', missingDelimiterValue = "")
+    if (encoded.isBlank()) return@runCatching null
+    val bytes = Base64.decode(encoded, Base64.DEFAULT)
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+}.getOrNull()
+
 private fun weatherEmoji(condition: String?): String = when {
     condition == null -> "◌"
     condition.contains("雨") -> "🌧"
@@ -2123,8 +2240,8 @@ private fun compactMetricValue(value: Long): String = when {
 }
 
 private fun interactionStatus(value: Int): String = when {
-    value >= 10 -> "常伴"
-    value >= 6 -> "不错"
+    value >= 15 -> "常伴"
+    value >= 9 -> "不错"
     value > 0 -> "继续互动"
     else -> "等待互动"
 }

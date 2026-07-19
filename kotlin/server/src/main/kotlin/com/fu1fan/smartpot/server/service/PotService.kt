@@ -69,7 +69,7 @@ class PotService(
             lastSeenAt = state.lastSeenAt,
             evaluated = telemetry?.let { PlantRules.evaluate(it, pot.species.thresholds) },
             activeAlerts = store.listAlerts(id, activeOnly = true),
-            affinity = store.affinity(id),
+            affinity = PlantRules.normalizeAffinity(store.affinity(id)),
             dailyTouchCount = store.countAffinityEvents(id, "device-event:", todayStart),
         )
     }

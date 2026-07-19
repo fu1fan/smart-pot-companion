@@ -3,7 +3,14 @@ package com.fu1fan.smartpot.protocol
 import kotlin.math.roundToInt
 
 object PlantRules {
-    private const val DAILY_FULL_INTERACTIONS = 10
+    private const val DAILY_HEALTH_FULL_INTERACTIONS = 10
+    private const val DAILY_COMPANION_FULL_INTERACTIONS = 15
+    val affinityPointsPerLevel = listOf(
+        20, 25, 30, 35, 40, 45, 50, 55, 60, 65,
+        70, 75, 80, 85, 90, 95, 100, 105, 110, 115,
+        120, 125, 130, 135, 140, 150, 160, 170, 180,
+    )
+    val maxAffinityPoints: Int = affinityPointsPerLevel.sum()
 
     fun evaluate(telemetry: DeviceTelemetry, thresholds: PlantThresholds): EvaluatedPlantState {
         val soil = when {
@@ -49,7 +56,7 @@ object PlantRules {
         )
 
     fun interactionSuitability(dailyInteractions: Int): Double =
-        (dailyInteractions.coerceAtLeast(0) / DAILY_FULL_INTERACTIONS.toDouble()).coerceIn(0.0, 1.0)
+        (dailyInteractions.coerceAtLeast(0) / DAILY_HEALTH_FULL_INTERACTIONS.toDouble()).coerceIn(0.0, 1.0)
 
     fun healthPercent(
         telemetry: DeviceTelemetry,
@@ -63,14 +70,59 @@ object PlantRules {
     }
 
     fun companionStars(dailyInteractions: Int): Float =
-        (interactionSuitability(dailyInteractions) * 5.0).toFloat()
+        (dailyInteractions.coerceAtLeast(0) / DAILY_COMPANION_FULL_INTERACTIONS.toFloat() * 5f).coerceIn(0f, 5f)
 
-    fun affinityLevel(score: Int): AffinityLevel = when (score.coerceIn(0, 100)) {
-        in 0..19 -> AffinityLevel.STRANGER
-        in 20..39 -> AffinityLevel.FAMILIAR
-        in 40..59 -> AffinityLevel.CLOSE
-        in 60..79 -> AffinityLevel.TRUSTED
-        else -> AffinityLevel.BEST_FRIEND
+    fun affinityLevelNumber(score: Int): Int {
+        val safeScore = score.coerceIn(0, maxAffinityPoints)
+        var cumulative = 0
+        affinityPointsPerLevel.forEachIndexed { index, required ->
+            cumulative += required
+            if (safeScore < cumulative) return index + 1
+        }
+        return 30
+    }
+
+    fun affinityLevel(score: Int): AffinityLevel = when (affinityLevelNumber(score)) {
+        in 1..5 -> AffinityLevel.STRANGER
+        in 6..10 -> AffinityLevel.FAMILIAR
+        in 11..15 -> AffinityLevel.CLOSE
+        in 16..20 -> AffinityLevel.TRUSTED
+        in 21..25 -> AffinityLevel.BEST_FRIEND
+        in 26..29 -> AffinityLevel.LONG_TERM_COMPANION
+        else -> AffinityLevel.SOULMATE
+    }
+
+    fun affinityLevelStart(score: Int): Int = affinityPointsPerLevel
+        .take((affinityLevelNumber(score) - 1).coerceAtLeast(0))
+        .sum()
+
+    fun affinityPointsToNextLevel(score: Int): Int {
+        val safeScore = score.coerceIn(0, maxAffinityPoints)
+        if (safeScore >= maxAffinityPoints) return 0
+        val level = affinityLevelNumber(safeScore)
+        return affinityPointsPerLevel.take(level).sum() - safeScore
+    }
+
+    fun affinityLevelProgress(score: Int): Float {
+        val safeScore = score.coerceIn(0, maxAffinityPoints)
+        if (safeScore >= maxAffinityPoints) return 1f
+        val level = affinityLevelNumber(safeScore)
+        val start = affinityPointsPerLevel.take(level - 1).sum()
+        return ((safeScore - start).toFloat() / affinityPointsPerLevel[level - 1]).coerceIn(0f, 1f)
+    }
+
+    fun normalizeAffinity(state: AffinityState): AffinityState {
+        if (state.schemaVersion >= 2) return state.copy(
+            score = state.score.coerceIn(0, maxAffinityPoints),
+            level = affinityLevel(state.score),
+        )
+        val migratedScore = (state.score.coerceIn(0, 100) * maxAffinityPoints / 100.0).roundToInt()
+        return AffinityState(
+            score = migratedScore,
+            level = affinityLevel(migratedScore),
+            updatedAt = state.updatedAt,
+            schemaVersion = 2,
+        )
     }
 
     private fun rangeSuitability(value: Double, min: Double, max: Double): Double {

@@ -48,7 +48,9 @@ interface SmartPotStore : AutoCloseable {
     suspend fun affinity(potId: String): AffinityState
     suspend fun saveAffinity(potId: String, affinity: AffinityState)
     suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean
+    suspend fun removeAffinityEvent(potId: String, eventKey: String): Int?
     suspend fun countAffinityEvents(potId: String, eventKeyPrefix: String, since: String): Int
+    suspend fun sumAffinityEventPoints(potId: String, eventKeyPrefix: String?, since: String, positiveOnly: Boolean? = null): Int
 
     suspend fun listDiaries(potId: String): List<PlantDiary>
     suspend fun saveDiary(diary: PlantDiary): Boolean
@@ -56,6 +58,7 @@ interface SmartPotStore : AutoCloseable {
 
     suspend fun listFocusSessions(potId: String, since: String? = null): List<FocusSession>
     suspend fun saveFocusSession(session: FocusSession)
+    suspend fun deleteFocusSession(potId: String, sessionId: String): Boolean
 
     suspend fun listScheduleItems(potId: String): List<ScheduleItem>
     suspend fun saveScheduleItem(item: ScheduleItem)

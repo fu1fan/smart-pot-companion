@@ -30,6 +30,7 @@ import kotlinx.serialization.json.longOrNull
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 class MqttGateway(
@@ -99,6 +100,21 @@ class MqttGateway(
                 store.saveTelemetry(pot.id, telemetry)
                 store.setOnline(deviceId, true, telemetry.recordedAt)
                 alertService.evaluate(pot, telemetry)
+                val recordedAt = runCatching { Instant.parse(telemetry.recordedAt) }.getOrDefault(Instant.now())
+                val zone = runCatching { ZoneId.of(pot.timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+                val localDate = recordedAt.atZone(zone).toLocalDate()
+                val dayStart = localDate.atStartOfDay(zone).toInstant().toString()
+                val interactions = store.countAffinityEvents(pot.id, "device-event:", dayStart) +
+                    store.countAffinityEvents(pot.id, "chat:", dayStart)
+                val health = PlantRules.healthPercent(telemetry, pot.species.thresholds, interactions)
+                val healthPoints = when (health) {
+                    in 85..100 -> 4
+                    in 70..84 -> 2
+                    in 50..69 -> 0
+                    in 30..49 -> -2
+                    else -> -5
+                }
+                affinityService.award(pot.id, "health:$localDate", healthPoints, recordedAt)
                 realtime.publish(RealtimeEvent(RealtimeEventType.TELEMETRY, pot.id, appJson.encodeToJsonElement(telemetry)))
             }
             "reported" -> {
@@ -133,6 +149,7 @@ class MqttGateway(
                         ),
                     )
                     store.saveFocusSession(session)
+                    affinityService.award(pot.id, "focus:${session.id}", 1, Instant.parse(session.completedAt))
                     realtime.publish(RealtimeEvent(RealtimeEventType.FOCUS, pot.id, appJson.encodeToJsonElement(session)))
                 }
                 handleScheduleEvent(pot, event)
@@ -214,6 +231,8 @@ class MqttGateway(
                         updatedAt = event.occurredAt,
                     ),
                 )
+                if (completed) affinityService.award(pot.id, "schedule:${current.id}", 1, Instant.parse(event.occurredAt))
+                else affinityService.revoke(pot.id, "schedule:${current.id}", Instant.parse(event.occurredAt))
                 publishScheduleUpdate(pot)
             }
             else -> Unit
@@ -231,6 +250,7 @@ class MqttGateway(
         val response = conversationMessagesFromEvent(pot, event) ?: return
         store.saveMessage(response.userMessage)
         store.saveMessage(response.assistantMessage)
+        affinityService.award(pot.id, "chat:${response.userMessage.id}", 1, Instant.parse(response.userMessage.createdAt))
         realtime.publish(RealtimeEvent(RealtimeEventType.CHAT, pot.id, appJson.encodeToJsonElement(response)))
     }
 

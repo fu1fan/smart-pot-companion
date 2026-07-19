@@ -33,6 +33,7 @@ import java.util.UUID
 class CloudAiService(
     private val config: AppConfig,
     private val store: SmartPotStore,
+    private val affinity: AffinityService,
 ) : AutoCloseable {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) { json(com.fu1fan.smartpot.server.appJson) }
@@ -43,6 +44,7 @@ class CloudAiService(
         val now = Instant.now().toString()
         val user = ChatMessage(UUID.randomUUID().toString(), pot.id, ChatRole.USER, text.trim(), now, source)
         store.saveMessage(user)
+        affinity.award(pot.id, "chat:${user.id}", 1, Instant.parse(now))
         val recent = store.listMessages(pot.id, 20)
         val memories = store.listMemories(pot.id).takeLast(12)
         val telemetry = store.latestTelemetry(pot.id)

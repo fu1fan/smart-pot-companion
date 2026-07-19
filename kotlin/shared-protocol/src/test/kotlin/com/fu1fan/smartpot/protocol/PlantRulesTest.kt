@@ -28,9 +28,12 @@ class PlantRulesTest {
 
     @Test
     fun `maps affinity boundaries`() {
-        assertEquals(AffinityLevel.STRANGER, PlantRules.affinityLevel(19))
-        assertEquals(AffinityLevel.FAMILIAR, PlantRules.affinityLevel(20))
-        assertEquals(AffinityLevel.BEST_FRIEND, PlantRules.affinityLevel(100))
+        assertEquals(2_660, PlantRules.maxAffinityPoints)
+        assertEquals(1, PlantRules.affinityLevelNumber(19))
+        assertEquals(2, PlantRules.affinityLevelNumber(20))
+        assertEquals(30, PlantRules.affinityLevelNumber(2_660))
+        assertEquals(AffinityLevel.STRANGER, PlantRules.affinityLevel(100))
+        assertEquals(AffinityLevel.SOULMATE, PlantRules.affinityLevel(2_660))
     }
 
     @Test
@@ -48,7 +51,8 @@ class PlantRulesTest {
         )
 
         assertEquals(90, PlantRules.healthPercent(telemetry, thresholds, dailyInteractions = 5))
-        assertEquals(2.5f, PlantRules.companionStars(dailyInteractions = 5), 0.001f)
+        assertEquals(5f / 3f, PlantRules.companionStars(dailyInteractions = 5), 0.001f)
+        assertEquals(5f, PlantRules.companionStars(dailyInteractions = 15), 0.001f)
         assertEquals(1.0, PlantRules.interactionSuitability(dailyInteractions = 12), 0.001)
     }
 }

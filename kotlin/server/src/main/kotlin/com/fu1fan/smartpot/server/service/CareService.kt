@@ -34,7 +34,12 @@ class CareService(
                 ),
             )
         }
-        affinity.award(pot.id, "care:${log.id}", if (request.type == CareType.WATER) 3 else 2, occurred)
+        val points = when (request.type) {
+            CareType.WATER, CareType.REPOT -> 3
+            CareType.NEW_LEAF -> 2
+            else -> 0
+        }
+        if (points > 0) affinity.award(pot.id, "care:${log.id}", points, occurred)
         return log
     }
 

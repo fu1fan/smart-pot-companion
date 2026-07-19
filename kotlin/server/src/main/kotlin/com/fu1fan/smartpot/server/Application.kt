@@ -71,9 +71,9 @@ fun Application.module(
     val affinity = AffinityService(store, realtime)
     val alerts = AlertService(store, realtime, affinity)
     val care = CareService(store, affinity)
-    val ai = CloudAiService(config, store)
+    val ai = CloudAiService(config, store, affinity)
     val weather = WeatherService()
-    val diary = DiaryService(store, ai, realtime)
+    val diary = DiaryService(store, ai, realtime, affinity)
     val maintenance = MaintenanceService(store)
     val mqtt = MqttGateway(config, scope, store, pots, alerts, affinity, realtime)
     val commands = CommandService(store, mqtt, realtime)
@@ -83,7 +83,7 @@ fun Application.module(
     diary.start(scope)
     maintenance.start(scope)
     scheduleMaintenance.start(scope)
-    configureRoutes(ServerServices(config, store, pots, care, ai, weather, diary, commands, realtime, shares))
+    configureRoutes(ServerServices(config, store, pots, care, ai, weather, diary, commands, realtime, shares, affinity))
 
     monitor.subscribe(ApplicationStopped) {
         mqtt.close()

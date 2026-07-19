@@ -146,13 +146,14 @@ data class ChatDaySummary(
 )
 
 @Serializable
-enum class AffinityLevel { STRANGER, FAMILIAR, CLOSE, TRUSTED, BEST_FRIEND }
+enum class AffinityLevel { STRANGER, FAMILIAR, CLOSE, TRUSTED, BEST_FRIEND, LONG_TERM_COMPANION, SOULMATE }
 
 @Serializable
 data class AffinityState(
     val score: Int = 20,
     val level: AffinityLevel = AffinityLevel.FAMILIAR,
     val updatedAt: String? = null,
+    val schemaVersion: Int = 1,
 )
 
 @Serializable

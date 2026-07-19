@@ -208,12 +208,20 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         "INSERT INTO chat_messages(id,pot_id,created_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO NOTHING",
         message.id, message.potId, message.createdAt, encode(message),
     )
-    override suspend fun affinity(potId: String): AffinityState = db { c -> c.prepareStatement("SELECT data FROM affinity WHERE pot_id=?::uuid").use { s -> s.setString(1, potId); s.executeQuery().use { if (it.next()) it.decodeColumn() else AffinityState() } } }
+    override suspend fun affinity(potId: String): AffinityState = db { c -> c.prepareStatement("SELECT data FROM affinity WHERE pot_id=?::uuid").use { s -> s.setString(1, potId); s.executeQuery().use { if (it.next()) it.decodeColumn() else AffinityState(score = 0, level = AffinityLevel.STRANGER, schemaVersion = 2) } } }
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) = saveJsonRecord("INSERT INTO affinity(pot_id,data) VALUES (?::uuid,?::jsonb) ON CONFLICT(pot_id) DO UPDATE SET data=EXCLUDED.data", potId, encode(affinity))
 
     override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean = db { c ->
         c.prepareStatement("INSERT INTO affinity_events(id,pot_id,event_key,points,occurred_at) VALUES (gen_random_uuid(),?::uuid,?,?,?::timestamptz) ON CONFLICT(pot_id,event_key) DO NOTHING").use { s ->
             s.setString(1, potId); s.setString(2, eventKey); s.setInt(3, points); s.setString(4, occurredAt); s.executeUpdate() == 1
+        }
+    }
+
+    override suspend fun removeAffinityEvent(potId: String, eventKey: String): Int? = db { c ->
+        c.prepareStatement("DELETE FROM affinity_events WHERE pot_id=?::uuid AND event_key=? RETURNING points").use { s ->
+            s.setString(1, potId)
+            s.setString(2, eventKey)
+            s.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else null }
         }
     }
 
@@ -224,6 +232,19 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
             s.setString(1, potId)
             s.setString(2, "$eventKeyPrefix%")
             s.setString(3, since)
+            s.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+        }
+    }
+
+    override suspend fun sumAffinityEventPoints(potId: String, eventKeyPrefix: String?, since: String, positiveOnly: Boolean?): Int = db { c ->
+        val prefixClause = if (eventKeyPrefix == null) "" else " AND event_key LIKE ?"
+        val signClause = when (positiveOnly) { true -> " AND points>0"; false -> " AND points<0"; null -> "" }
+        c.prepareStatement(
+            "SELECT COALESCE(SUM(points),0) FROM affinity_events WHERE pot_id=?::uuid AND occurred_at>=?::timestamptz$prefixClause$signClause",
+        ).use { s ->
+            s.setString(1, potId)
+            s.setString(2, since)
+            if (eventKeyPrefix != null) s.setString(3, "$eventKeyPrefix%")
             s.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
         }
     }
@@ -261,6 +282,14 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         "INSERT INTO focus_sessions(id,pot_id,completed_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO UPDATE SET completed_at=EXCLUDED.completed_at,data=EXCLUDED.data",
         session.id, session.potId, session.completedAt, encode(session),
     )
+
+    override suspend fun deleteFocusSession(potId: String, sessionId: String): Boolean = db { c ->
+        c.prepareStatement("DELETE FROM focus_sessions WHERE pot_id=?::uuid AND id=?::uuid").use { s ->
+            s.setString(1, potId)
+            s.setString(2, sessionId)
+            s.executeUpdate() == 1
+        }
+    }
 
     override suspend fun listScheduleItems(potId: String): List<ScheduleItem> =
         listPotJson("schedule_items", potId, "completed, COALESCE(due_at, updated_at), updated_at")

@@ -33,6 +33,7 @@ data class ServerServices(
     val commands: CommandService,
     val realtime: RealtimeHub,
     val shares: ShareTokenService,
+    val affinity: AffinityService,
 )
 
 fun Application.configureRoutes(services: ServerServices) {
@@ -173,7 +174,21 @@ fun Application.configureRoutes(services: ServerServices) {
                         val request = call.receive<CreateFocusSessionRequest>()
                         val session = focusSessionFrom(pot, request)
                         services.store.saveFocusSession(session)
+                        services.affinity.award(pot.id, "focus:${session.id}", 1, Instant.parse(session.completedAt))
                         call.respond(HttpStatusCode.Created, session)
+                    }
+                    delete("/focus/sessions/latest") {
+                        val pot = call.requirePot(services)
+                        val zone = zoneIdOf(pot.timezone)
+                        val dayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant().toString()
+                        val latest = requireNotNull(
+                            services.store.listFocusSessions(pot.id, dayStart)
+                                .maxByOrNull(FocusSession::completedAt),
+                        ) { "今天还没有可减少的番茄钟" }
+                        services.store.deleteFocusSession(pot.id, latest.id)
+                        services.affinity.revoke(pot.id, "focus:${latest.id}")
+                        services.realtime.publish(RealtimeEvent(RealtimeEventType.FOCUS, pot.id, appJson.encodeToJsonElement(latest)))
+                        call.respond(HttpStatusCode.NoContent)
                     }
                     get("/schedule") {
                         val pot = call.requirePot(services)
@@ -196,6 +211,11 @@ fun Application.configureRoutes(services: ServerServices) {
                         val current = requireNotNull(services.store.listScheduleItems(pot.id).firstOrNull { it.id == scheduleId }) { "日程不存在" }
                         val item = updatedScheduleItem(current, call.receive<UpdateScheduleItemRequest>())
                         services.store.saveScheduleItem(item)
+                        if (!current.completed && item.completed) {
+                            services.affinity.award(pot.id, "schedule:${item.id}", 1, item.completedAt?.let(Instant::parse) ?: Instant.now())
+                        } else if (current.completed && !item.completed) {
+                            services.affinity.revoke(pot.id, "schedule:${item.id}")
+                        }
                         syncScheduleToDevice(services.store, services.commands, pot)
                         services.realtime.publish(RealtimeEvent(RealtimeEventType.SCHEDULE, pot.id, appJson.encodeToJsonElement(scheduleState(services.store.listScheduleItems(pot.id)))))
                         call.respond(item)

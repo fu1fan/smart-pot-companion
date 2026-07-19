@@ -42,7 +42,13 @@ class AlertService(
                     val alert = PlantAlert(UUID.randomUUID().toString(), pot.id, type, AlertStatus.ACTIVE, message(type), since.toString())
                     store.saveAlert(alert)
                     realtime.publish(RealtimeEvent(RealtimeEventType.ALERT, pot.id, appJson.encodeToJsonElement(alert)))
-                    affinity.award(pot.id, "alert:${type.name}:${now.toString().take(13)}", if (type == AlertType.TILT_SEVERE) -2 else -4, now)
+                    val points = when (type) {
+                        AlertType.SOIL_DRY, AlertType.LIGHT_LOW -> -2
+                        AlertType.SOIL_WET, AlertType.LIGHT_HIGH -> -1
+                        AlertType.TILT_SEVERE -> -2
+                        AlertType.DEVICE_OFFLINE -> 0
+                    }
+                    if (points != 0) affinity.award(pot.id, "penalty:${type.name}:${now.toString().take(13)}", points, now)
                 }
             } else {
                 pendingSince.remove(key)
@@ -50,7 +56,12 @@ class AlertService(
                     val recovered = active.copy(status = AlertStatus.RECOVERED, recoveredAt = now.toString())
                     store.saveAlert(recovered)
                     realtime.publish(RealtimeEvent(RealtimeEventType.ALERT, pot.id, appJson.encodeToJsonElement(recovered)))
-                    if (type != AlertType.TILT_SEVERE) affinity.award(pot.id, "recovered:${active.id}", 3, now)
+                    val points = when (type) {
+                        AlertType.LIGHT_LOW, AlertType.LIGHT_HIGH -> 2
+                        AlertType.TILT_SEVERE -> 1
+                        else -> 0
+                    }
+                    if (points > 0) affinity.award(pot.id, "recovered:${active.id}", points, now)
                 }
             }
         }

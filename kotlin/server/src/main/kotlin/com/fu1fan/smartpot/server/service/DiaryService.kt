@@ -22,6 +22,7 @@ class DiaryService(
     private val store: SmartPotStore,
     private val ai: CloudAiService,
     private val realtime: RealtimeHub,
+    private val affinity: AffinityService,
 ) {
     suspend fun saveManual(potId: String, request: CreateDiaryRequest, date: LocalDate): PlantDiary {
         val title = request.title.trim()
@@ -29,6 +30,11 @@ class DiaryService(
         require(title.isNotBlank() && title.length <= 60) { "日记标题应为 1-60 个字符" }
         require(content.isNotBlank() && content.length <= 1_000) { "日记内容应为 1-1000 个字符" }
         require(request.moodEmoji == null || request.moodEmoji in setOf("😊", "🌱", "💧", "☀️", "🥰", "😴")) { "不支持的日记表情" }
+        require(request.imageDataUrls.size <= 3) { "每篇日记最多上传 3 张照片" }
+        request.imageDataUrls.forEach { image ->
+            require(image.startsWith("data:image/jpeg;base64,") || image.startsWith("data:image/png;base64,")) { "照片格式应为 JPEG 或 PNG" }
+            require(image.length <= 1_500_000) { "单张照片不能超过约 1MB" }
+        }
 
         val existing = store.listDiaries(potId).firstOrNull {
             it.diaryDate == date.toString() && it.author == DiaryAuthor.USER
@@ -40,11 +46,12 @@ class DiaryService(
             title = title,
             content = content,
             createdAt = existing?.createdAt ?: Instant.now().toString(),
-            imageDataUrls = emptyList(),
+            imageDataUrls = request.imageDataUrls,
             moodEmoji = request.moodEmoji,
             author = DiaryAuthor.USER,
         )
         store.upsertDiary(diary)
+        affinity.award(potId, "diary:${date}:USER", 1)
         realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, potId, appJson.encodeToJsonElement(diary)))
         return diary
     }

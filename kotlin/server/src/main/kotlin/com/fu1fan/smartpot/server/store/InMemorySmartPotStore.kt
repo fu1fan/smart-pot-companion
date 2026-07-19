@@ -20,7 +20,7 @@ class InMemorySmartPotStore : SmartPotStore {
     private val memories = ConcurrentHashMap<String, MutableList<UserMemory>>()
     private val messages = ConcurrentHashMap<String, MutableList<ChatMessage>>()
     private val affinities = ConcurrentHashMap<String, AffinityState>()
-    private val affinityEvents = ConcurrentHashMap<String, String>()
+    private val affinityEvents = ConcurrentHashMap<String, Pair<Int, String>>()
     private val diaries = ConcurrentHashMap<String, MutableList<PlantDiary>>()
     private val focusSessions = ConcurrentHashMap<String, MutableList<FocusSession>>()
     private val scheduleItems = ConcurrentHashMap<String, MutableList<ScheduleItem>>()
@@ -121,16 +121,28 @@ class InMemorySmartPotStore : SmartPotStore {
         }
     }
 
-    override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState()
+    override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState(score = 0, level = AffinityLevel.STRANGER, schemaVersion = 2)
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) { affinities[potId] = affinity }
     override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean =
-        affinityEvents.putIfAbsent("$potId:$eventKey", occurredAt) == null
+        affinityEvents.putIfAbsent("$potId:$eventKey", points to occurredAt) == null
+
+    override suspend fun removeAffinityEvent(potId: String, eventKey: String): Int? =
+        affinityEvents.remove("$potId:$eventKey")?.first
 
     override suspend fun countAffinityEvents(potId: String, eventKeyPrefix: String, since: String): Int {
         val prefix = "$potId:$eventKeyPrefix"
         val cutoff = Instant.parse(since)
-        return affinityEvents.count { (key, occurredAt) ->
-            key.startsWith(prefix) && !Instant.parse(occurredAt).isBefore(cutoff)
+        return affinityEvents.count { (key, event) ->
+            key.startsWith(prefix) && !Instant.parse(event.second).isBefore(cutoff)
+        }
+    }
+
+    override suspend fun sumAffinityEventPoints(potId: String, eventKeyPrefix: String?, since: String, positiveOnly: Boolean?): Int {
+        val prefix = eventKeyPrefix?.let { "$potId:$it" } ?: "$potId:"
+        val cutoff = Instant.parse(since)
+        return affinityEvents.entries.sumOf { (key, event) ->
+            val signMatches = positiveOnly == null || if (positiveOnly) event.first > 0 else event.first < 0
+            if (key.startsWith(prefix) && signMatches && !Instant.parse(event.second).isBefore(cutoff)) event.first else 0
         }
     }
 
@@ -161,6 +173,11 @@ class InMemorySmartPotStore : SmartPotStore {
     override suspend fun saveFocusSession(session: FocusSession) {
         val list = focusSessions.computeIfAbsent(session.potId) { mutableListOf() }
         synchronized(list) { list.removeAll { it.id == session.id }; list += session }
+    }
+
+    override suspend fun deleteFocusSession(potId: String, sessionId: String): Boolean {
+        val list = focusSessions[potId] ?: return false
+        return synchronized(list) { list.removeAll { it.id == sessionId } }
     }
 
     override suspend fun listScheduleItems(potId: String): List<ScheduleItem> =

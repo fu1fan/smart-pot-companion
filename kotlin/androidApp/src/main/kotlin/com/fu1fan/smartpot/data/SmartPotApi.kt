@@ -52,6 +52,7 @@ class SmartPotApi(
     }
     suspend fun focusDaily(id: String): List<DailyFocusSummary> = getApi("/api/v1/pots/$id/focus/daily?days=5")
     suspend fun addFocusSession(id: String): FocusSession = postApi("/api/v1/pots/$id/focus/sessions", CreateFocusSessionRequest(minutes = 25, source = "APP"))
+    suspend fun deleteLatestFocusSession(id: String) = deleteApi("/api/v1/pots/$id/focus/sessions/latest")
     suspend fun schedule(id: String): ScheduleSyncState = getApi("/api/v1/pots/$id/schedule")
     suspend fun addSchedule(id: String, request: CreateScheduleItemRequest): ScheduleItem = postApi("/api/v1/pots/$id/schedule", request)
     suspend fun updateSchedule(id: String, scheduleId: String, request: UpdateScheduleItemRequest): ScheduleItem =

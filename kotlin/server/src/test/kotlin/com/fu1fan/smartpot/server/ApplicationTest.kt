@@ -31,6 +31,8 @@ import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.UserMemory
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
+import com.fu1fan.smartpot.server.service.AffinityService
+import com.fu1fan.smartpot.server.service.RealtimeHub
 import com.fu1fan.smartpot.server.service.injectServerChatHistory
 import com.fu1fan.smartpot.server.service.reportedProfileMatches
 import com.fu1fan.smartpot.server.service.weatherCodeLabel
@@ -184,9 +186,13 @@ class ApplicationTest {
         assertEquals(50, overview.focus.focusMinutes)
         assertEquals(50, overview.focus.scheduleCompletionPercent)
 
+        val decrease = api.delete("/api/v1/pots/${pot.id}/focus/sessions/latest") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.NoContent, decrease.status)
+
         val summaries = api.get("/api/v1/pots/${pot.id}/focus/daily?days=5") { bearerAuth(config.demoToken) }.body<List<DailyFocusSummary>>()
         assertEquals(5, summaries.size)
-        assertEquals(2, summaries.last().pomodoroCount)
+        assertEquals(1, summaries.last().pomodoroCount)
+        assertEquals(25, summaries.last().focusMinutes)
     }
 
     @Test
@@ -211,7 +217,7 @@ class ApplicationTest {
     }
 
     @Test
-    fun `user diary is separate from wheat diary and has no images`() = testApplication {
+    fun `user diary is separate from wheat diary and preserves uploaded images`() = testApplication {
         val store = InMemorySmartPotStore()
         application { module(config, store, startMqtt = false) }
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
@@ -231,23 +237,23 @@ class ApplicationTest {
                 author = DiaryAuthor.WHEAT,
             ),
         )
-        val ignoredImage = "data:image/jpeg;base64,AQID"
+        val uploadedImage = "data:image/jpeg;base64,AQID"
 
         val created = api.post("/api/v1/pots/${pot.id}/diaries") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateDiaryRequest("今天的新叶", "小麦长出了一片新叶。", listOf(ignoredImage), "🌱"))
+            setBody(CreateDiaryRequest("今天的新叶", "小麦长出了一片新叶。", listOf(uploadedImage), "🌱"))
         }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
         val updated = api.post("/api/v1/pots/${pot.id}/diaries") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(ignoredImage), "😊"))
+            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(uploadedImage), "😊"))
         }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
 
         assertEquals(created.id, updated.id)
         assertEquals("叶片已经完全展开。", updated.content)
         assertEquals(DiaryAuthor.USER, updated.author)
-        assertTrue(updated.imageDataUrls.isEmpty())
+        assertEquals(listOf(uploadedImage), updated.imageDataUrls)
         val diaries = api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<PlantDiary>>()
         assertEquals(2, diaries.size)
         assertEquals(setOf(DiaryAuthor.WHEAT, DiaryAuthor.USER), diaries.map(PlantDiary::author).toSet())
@@ -475,5 +481,34 @@ class ApplicationTest {
 
         assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
         assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
+    }
+
+    @Test
+    fun `affinity applies category and daily point caps`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.seedSpecies(SpeciesCatalog.all)
+        val species = requireNotNull(store.findSpecies("pothos"))
+        val pot = store.savePot(
+            PotProfile(
+                id = java.util.UUID.randomUUID().toString(),
+                deviceId = "affinity-cap-device",
+                displayName = "小麦",
+                species = species,
+                createdAt = "2026-07-19T00:00:00Z",
+            ),
+        )
+        val affinity = AffinityService(store, RealtimeHub())
+        val at = Instant.parse("2026-07-19T08:00:00Z")
+
+        repeat(10) { affinity.award(pot.id, "chat:$it", 1, at.plusSeconds(it.toLong())) }
+        repeat(10) { affinity.award(pot.id, "device-event:$it", 1, at.plusSeconds(20 + it.toLong())) }
+        repeat(10) { affinity.award(pot.id, "focus:$it", 1, at.plusSeconds(40 + it.toLong())) }
+        repeat(10) { affinity.award(pot.id, "schedule:$it", 1, at.plusSeconds(60 + it.toLong())) }
+        repeat(10) { affinity.award(pot.id, "diary:$it", 1, at.plusSeconds(80 + it.toLong())) }
+        repeat(10) { affinity.award(pot.id, "care:$it", 3, at.plusSeconds(100 + it.toLong())) }
+        assertEquals(25, store.affinity(pot.id).score)
+
+        repeat(10) { affinity.award(pot.id, "penalty:$it", -2, at.plusSeconds(120 + it.toLong())) }
+        assertEquals(13, store.affinity(pot.id).score)
     }
 }
