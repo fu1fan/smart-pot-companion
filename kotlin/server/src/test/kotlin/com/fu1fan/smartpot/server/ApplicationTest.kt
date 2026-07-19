@@ -19,6 +19,7 @@ import com.fu1fan.smartpot.protocol.DeviceEventType
 import com.fu1fan.smartpot.protocol.DeviceReportedState
 import com.fu1fan.smartpot.protocol.DiaryAuthor
 import com.fu1fan.smartpot.protocol.PlantDiary
+import com.fu1fan.smartpot.protocol.PlantRules
 import com.fu1fan.smartpot.protocol.PlantSpecies
 import com.fu1fan.smartpot.protocol.PotProfile
 import com.fu1fan.smartpot.protocol.RedeemShareRequest
@@ -506,9 +507,9 @@ class ApplicationTest {
         repeat(10) { affinity.award(pot.id, "schedule:$it", 1, at.plusSeconds(60 + it.toLong())) }
         repeat(10) { affinity.award(pot.id, "diary:$it", 1, at.plusSeconds(80 + it.toLong())) }
         repeat(10) { affinity.award(pot.id, "care:$it", 3, at.plusSeconds(100 + it.toLong())) }
-        assertEquals(25, store.affinity(pot.id).score)
+        assertEquals(PlantRules.initialAffinityScore + 25, store.affinity(pot.id).score)
 
         repeat(10) { affinity.award(pot.id, "penalty:$it", -2, at.plusSeconds(120 + it.toLong())) }
-        assertEquals(13, store.affinity(pot.id).score)
+        assertEquals(PlantRules.initialAffinityScore + 13, store.affinity(pot.id).score)
     }
 }

@@ -10,7 +10,15 @@ object PlantRules {
         70, 75, 80, 85, 90, 95, 100, 105, 110, 115,
         120, 125, 130, 135, 140, 150, 160, 170, 180,
     )
+    const val initialAffinityLevelNumber = 3
+    val initialAffinityScore: Int = affinityPointsPerLevel.take(initialAffinityLevelNumber - 1).sum()
     val maxAffinityPoints: Int = affinityPointsPerLevel.sum()
+
+    fun initialAffinityState(): AffinityState = AffinityState(
+        score = initialAffinityScore,
+        level = affinityLevel(initialAffinityScore),
+        schemaVersion = 2,
+    )
 
     fun evaluate(telemetry: DeviceTelemetry, thresholds: PlantThresholds): EvaluatedPlantState {
         val soil = when {

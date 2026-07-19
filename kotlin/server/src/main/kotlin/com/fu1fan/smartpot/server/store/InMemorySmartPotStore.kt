@@ -121,7 +121,7 @@ class InMemorySmartPotStore : SmartPotStore {
         }
     }
 
-    override suspend fun affinity(potId: String) = affinities[potId] ?: AffinityState(score = 0, level = AffinityLevel.STRANGER, schemaVersion = 2)
+    override suspend fun affinity(potId: String) = affinities[potId] ?: PlantRules.initialAffinityState()
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) { affinities[potId] = affinity }
     override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean =
         affinityEvents.putIfAbsent("$potId:$eventKey", points to occurredAt) == null

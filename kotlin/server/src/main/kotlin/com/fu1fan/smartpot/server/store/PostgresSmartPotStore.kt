@@ -208,7 +208,7 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         "INSERT INTO chat_messages(id,pot_id,created_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO NOTHING",
         message.id, message.potId, message.createdAt, encode(message),
     )
-    override suspend fun affinity(potId: String): AffinityState = db { c -> c.prepareStatement("SELECT data FROM affinity WHERE pot_id=?::uuid").use { s -> s.setString(1, potId); s.executeQuery().use { if (it.next()) it.decodeColumn() else AffinityState(score = 0, level = AffinityLevel.STRANGER, schemaVersion = 2) } } }
+    override suspend fun affinity(potId: String): AffinityState = db { c -> c.prepareStatement("SELECT data FROM affinity WHERE pot_id=?::uuid").use { s -> s.setString(1, potId); s.executeQuery().use { if (it.next()) it.decodeColumn() else PlantRules.initialAffinityState() } } }
     override suspend fun saveAffinity(potId: String, affinity: AffinityState) = saveJsonRecord("INSERT INTO affinity(pot_id,data) VALUES (?::uuid,?::jsonb) ON CONFLICT(pot_id) DO UPDATE SET data=EXCLUDED.data", potId, encode(affinity))
 
     override suspend fun addAffinityEvent(potId: String, eventKey: String, points: Int, occurredAt: String): Boolean = db { c ->

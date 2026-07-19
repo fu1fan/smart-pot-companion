@@ -29,6 +29,9 @@ class PlantRulesTest {
     @Test
     fun `maps affinity boundaries`() {
         assertEquals(2_660, PlantRules.maxAffinityPoints)
+        assertEquals(45, PlantRules.initialAffinityScore)
+        assertEquals(3, PlantRules.affinityLevelNumber(PlantRules.initialAffinityScore))
+        assertEquals(2, PlantRules.initialAffinityState().schemaVersion)
         assertEquals(1, PlantRules.affinityLevelNumber(19))
         assertEquals(2, PlantRules.affinityLevelNumber(20))
         assertEquals(30, PlantRules.affinityLevelNumber(2_660))

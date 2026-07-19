@@ -1672,6 +1672,7 @@ private fun CompanionScreen(
     var scheduleTime by rememberSaveable { mutableStateOf("") }
     var scheduleFormVisible by rememberSaveable { mutableStateOf(false) }
     var chatExpanded by rememberSaveable { mutableStateOf(true) }
+    var memoryExpanded by rememberSaveable { mutableStateOf(true) }
     var pendingMemoryDelete by remember { mutableStateOf<UserMemory?>(null) }
     val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
         .getOrDefault(ZoneId.of("Asia/Shanghai"))
@@ -1725,6 +1726,8 @@ private fun CompanionScreen(
                     }
                 },
                 onDelete = { pendingMemoryDelete = it },
+                expanded = memoryExpanded,
+                onToggleExpanded = { memoryExpanded = !memoryExpanded },
             )
         }
         item {
@@ -1844,6 +1847,8 @@ private fun CompanionMemoryCard(
     onInputChange: (String) -> Unit,
     onRemember: () -> Unit,
     onDelete: (UserMemory) -> Unit,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
 ) {
     Card(
         Modifier.fillMaxWidth(),
@@ -1852,24 +1857,35 @@ private fun CompanionMemoryCard(
         border = BorderStroke(1.dp, CardBorder),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("专属记忆库", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text("让小麦记住重要的事情", color = Muted, fontSize = 11.sp)
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                placeholder = { Text("例如：生日、考试时间、加班安排...", fontSize = 11.sp) },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-            )
-            Button(onClick = onRemember, enabled = input.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("让小麦记住") }
-            if (memories.isNotEmpty()) {
-                Text("已记住", color = Muted, fontSize = 11.sp)
-                memories.asReversed().forEach { item ->
-                    Surface(color = Color(0xFFF3F6ED), shape = RoundedCornerShape(6.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(item.content, modifier = Modifier.weight(1f), fontSize = 11.sp, color = Color(0xFF4D534E), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            TextButton(onClick = { onDelete(item) }, contentPadding = PaddingValues(horizontal = 7.dp)) {
-                                Text("删除", color = Color(0xFFD14343), fontSize = 10.sp)
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onToggleExpanded),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("专属记忆库", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("让小麦记住重要的事情", color = Muted, fontSize = 11.sp)
+                }
+                Text(if (expanded) "⌃" else "⌄", color = Leaf, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            if (expanded) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    placeholder = { Text("例如：生日、考试时间、加班安排...", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                )
+                Button(onClick = onRemember, enabled = input.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("让小麦记住") }
+                if (memories.isNotEmpty()) {
+                    Text("已记住", color = Muted, fontSize = 11.sp)
+                    memories.asReversed().forEach { item ->
+                        Surface(color = Color(0xFFF3F6ED), shape = RoundedCornerShape(6.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(item.content, modifier = Modifier.weight(1f), fontSize = 11.sp, color = Color(0xFF4D534E), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                TextButton(onClick = { onDelete(item) }, contentPadding = PaddingValues(horizontal = 7.dp)) {
+                                    Text("删除", color = Color(0xFFD14343), fontSize = 10.sp)
+                                }
                             }
                         }
                     }
