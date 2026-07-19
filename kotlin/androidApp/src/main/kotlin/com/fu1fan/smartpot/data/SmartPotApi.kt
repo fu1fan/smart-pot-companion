@@ -35,6 +35,7 @@ class SmartPotApi(
     private suspend inline fun <reified Request, reified Response> patchApi(path: String, request: Request): Response =
         client.patch("$base$path") { authorize(); contentType(ContentType.Application.Json); setBody(request) }.body()
     private suspend inline fun <reified Response> postEmpty(path: String): Response = client.post("$base$path") { authorize() }.body()
+    private suspend fun deleteApi(path: String) { client.delete("$base$path") { authorize() } }
 
     suspend fun species(): List<PlantSpecies> = getApi("/api/v1/species")
     suspend fun pots(): List<PotProfile> = getApi("/api/v1/pots")
@@ -54,6 +55,7 @@ class SmartPotApi(
         patchApi("/api/v1/pots/$id/schedule/$scheduleId", request)
     suspend fun memories(id: String): List<UserMemory> = getApi("/api/v1/pots/$id/memories")
     suspend fun addMemory(id: String, text: String): UserMemory = postApi("/api/v1/pots/$id/memories", CreateMemoryRequest(text))
+    suspend fun deleteMemory(id: String, memoryId: String) = deleteApi("/api/v1/pots/$id/memories/$memoryId")
     suspend fun chatDays(id: String): List<ChatDaySummary> = getApi("/api/v1/pots/$id/chat/days")
     suspend fun messages(id: String, date: String? = null): List<ChatMessage> =
         getApi("/api/v1/pots/$id/chat${date?.let { "?date=$it" }.orEmpty()}")

@@ -86,6 +86,9 @@ class InMemorySmartPotStore : SmartPotStore {
 
     override suspend fun listMemories(potId: String) = memories[potId]?.let { synchronized(it) { it.toList() } } ?: emptyList()
     override suspend fun saveMemory(memory: UserMemory) { memories.computeIfAbsent(memory.potId) { mutableListOf() }.add(memory) }
+    override suspend fun deleteMemory(potId: String, memoryId: String): Boolean = memories[potId]?.let { list ->
+        synchronized(list) { list.removeAll { it.id == memoryId } }
+    } ?: false
     override suspend fun listMessages(potId: String, limit: Int) = messages[potId]?.let { synchronized(it) { it.takeLast(limit) } } ?: emptyList()
     override suspend fun listMessagesForDay(potId: String, date: String, timezone: String, limit: Int): List<ChatMessage> {
         val day = LocalDate.parse(date)

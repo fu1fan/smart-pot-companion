@@ -8,6 +8,7 @@ import com.fu1fan.smartpot.protocol.ChatMessage
 import com.fu1fan.smartpot.protocol.ChatRole
 import com.fu1fan.smartpot.protocol.CreateCareLogRequest
 import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
+import com.fu1fan.smartpot.protocol.CreateMemoryRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
 import com.fu1fan.smartpot.protocol.CreateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.DailyFocusSummary
@@ -30,6 +31,7 @@ import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.client.request.patch
@@ -178,6 +180,27 @@ class ApplicationTest {
         val summaries = api.get("/api/v1/pots/${pot.id}/focus/daily?days=5") { bearerAuth(config.demoToken) }.body<List<DailyFocusSummary>>()
         assertEquals(5, summaries.size)
         assertEquals(2, summaries.last().pomodoroCount)
+    }
+
+    @Test
+    fun `owner can delete a saved memory`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+        val pot = api.post("/api/v1/pots") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-memory-001", "小麦", "pothos"))
+        }.body<PotProfile>()
+        val memory = api.post("/api/v1/pots/${pot.id}/memories") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreateMemoryRequest("记住我的生日"))
+        }.body<com.fu1fan.smartpot.protocol.UserMemory>()
+
+        val deleted = api.delete("/api/v1/pots/${pot.id}/memories/${memory.id}") { bearerAuth(config.demoToken) }
+
+        assertEquals(HttpStatusCode.NoContent, deleted.status)
+        assertTrue(api.get("/api/v1/pots/${pot.id}/memories") { bearerAuth(config.demoToken) }.body<List<com.fu1fan.smartpot.protocol.UserMemory>>().isEmpty())
     }
 
     @Test

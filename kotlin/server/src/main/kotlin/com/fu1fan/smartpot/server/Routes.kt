@@ -107,6 +107,15 @@ fun Application.configureRoutes(services: ServerServices) {
                         services.store.saveMemory(memory)
                         call.respond(HttpStatusCode.Created, memory)
                     }
+                    delete("/memories/{memoryId}") {
+                        val pot = call.requirePot(services)
+                        val memoryId = requireNotNull(call.parameters["memoryId"]) { "缺少记忆 ID" }
+                        if (services.store.deleteMemory(pot.id, memoryId)) {
+                            call.respond(HttpStatusCode.NoContent)
+                        } else {
+                            call.respond(HttpStatusCode.NotFound)
+                        }
+                    }
                     get("/chat/days") {
                         val pot = call.requirePot(services)
                         call.respond(services.store.listMessageDays(pot.id, pot.timezone, 365))

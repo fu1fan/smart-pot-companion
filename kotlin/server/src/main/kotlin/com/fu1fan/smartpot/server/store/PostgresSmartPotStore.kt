@@ -163,6 +163,13 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
     override suspend fun saveReminder(reminder: CareReminder) = saveJsonRecord("INSERT INTO reminders(id,pot_id,due_at,status,data) VALUES (?::uuid,?::uuid,?::timestamptz,?,?::jsonb) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data", reminder.id, reminder.potId, reminder.dueAt, reminder.status.name, encode(reminder))
     override suspend fun listMemories(potId: String): List<UserMemory> = listPotJson("memories", potId, "created_at")
     override suspend fun saveMemory(memory: UserMemory) = saveJsonRecord("INSERT INTO memories(id,pot_id,created_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb)", memory.id, memory.potId, memory.createdAt, encode(memory))
+    override suspend fun deleteMemory(potId: String, memoryId: String): Boolean = db { connection ->
+        connection.prepareStatement("DELETE FROM memories WHERE id=?::uuid AND pot_id=?::uuid").use { statement ->
+            statement.setString(1, memoryId)
+            statement.setString(2, potId)
+            statement.executeUpdate() > 0
+        }
+    }
 
     override suspend fun listMessages(potId: String, limit: Int): List<ChatMessage> = db { c ->
         c.prepareStatement("SELECT data FROM chat_messages WHERE pot_id=?::uuid ORDER BY created_at DESC LIMIT ?").use { s ->

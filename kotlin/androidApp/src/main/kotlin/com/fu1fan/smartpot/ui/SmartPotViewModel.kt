@@ -36,6 +36,7 @@ data class SmartPotUiState(
     val chatDays: List<ChatDaySummary> = emptyList(),
     val selectedChatDate: String? = null,
     val messages: List<ChatMessage> = emptyList(),
+    val todayMessages: List<ChatMessage> = emptyList(),
     val diaries: List<PlantDiary> = emptyList(),
     val lastCommand: CommandSubmission? = null,
     val shareCode: ShareCode? = null,
@@ -95,6 +96,7 @@ class SmartPotViewModel : ViewModel() {
             ?.takeIf { selected -> availableChatDays.any { it.date == selected } }
             ?: today
         val messages = api.messages(id, selectedChatDate)
+        val todayMessages = if (selectedChatDate == today) messages else api.messages(id, today)
         val diaries = api.diaries(id)
         mutableState.update {
             it.copy(
@@ -109,6 +111,7 @@ class SmartPotViewModel : ViewModel() {
                 chatDays = availableChatDays,
                 selectedChatDate = selectedChatDate,
                 messages = messages,
+                todayMessages = todayMessages,
                 diaries = diaries,
                 loading = false,
                 error = null,
@@ -144,6 +147,11 @@ class SmartPotViewModel : ViewModel() {
 
     fun addMemory(text: String) = withPot { id -> mutableState.update { it.copy(memories = it.memories + api.addMemory(id, text)) } }
 
+    fun deleteMemory(memory: UserMemory) = withPot { id ->
+        api.deleteMemory(id, memory.id)
+        mutableState.update { state -> state.copy(memories = state.memories.filterNot { it.id == memory.id }) }
+    }
+
     fun sendChat(text: String) = withPot { id ->
         api.chat(id, text)
         val today = LocalDate.now(zoneId(mutableState.value.snapshot?.pot?.timezone)).toString()
@@ -154,6 +162,7 @@ class SmartPotViewModel : ViewModel() {
                 chatDays = (listOf(ChatDaySummary(today, 0)) + days).distinctBy(ChatDaySummary::date),
                 selectedChatDate = today,
                 messages = messages,
+                todayMessages = messages,
             )
         }
     }
@@ -239,11 +248,13 @@ class SmartPotViewModel : ViewModel() {
         val available = (listOf(ChatDaySummary(today, 0)) + days).distinctBy(ChatDaySummary::date)
         val selected = mutableState.value.selectedChatDate ?: today
         val messages = api.messages(id, selected)
+        val todayMessages = if (selected == today) messages else api.messages(id, today)
         mutableState.update {
             it.copy(
                 chatDays = available,
                 selectedChatDate = selected,
                 messages = messages,
+                todayMessages = todayMessages,
                 error = null,
             )
         }
