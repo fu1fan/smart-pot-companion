@@ -5,7 +5,9 @@
 #include <string.h>
 #include "bsp/esp-bsp.h"
 #include "esp_codec_dev.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_wn_iface.h"
 #include "esp_wn_models.h"
 #include "freertos/FreeRTOS.h"
@@ -399,6 +401,33 @@ static float wakenet_threshold_value(void)
     return threshold;
 }
 
+static model_iface_data_t *create_wakenet_data(const esp_wn_iface_t *wn_handle,
+                                               const char *wn_name,
+                                               int expected_sample_count)
+{
+    model_iface_data_t *wn_data = wn_handle->create(wn_name, DET_MODE_95);
+    if (wn_data == NULL) {
+        ESP_LOGE(TAG, "Failed to create direct WakeNet data for %s", wn_name);
+        return NULL;
+    }
+
+    int sample_count = wn_handle->get_samp_chunksize(wn_data);
+    if (sample_count <= 0 || sample_count > 4096 ||
+        (expected_sample_count > 0 && sample_count != expected_sample_count)) {
+        ESP_LOGE(TAG, "Invalid direct WakeNet sample count: got=%d expected=%d",
+                 sample_count, expected_sample_count);
+        wn_handle->destroy(wn_data);
+        return NULL;
+    }
+
+    float threshold = wakenet_threshold_value();
+    int threshold_result = wn_handle->set_det_threshold != NULL ?
+                           wn_handle->set_det_threshold(wn_data, threshold, 1) : -1;
+    ESP_LOGI(TAG, "WakeNet instance ready: model=%s samples=%d threshold=%.2f result=%d",
+             wn_name, sample_count, threshold, threshold_result);
+    return wn_data;
+}
+
 static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
 {
     srmodel_list_t *models = esp_srmodel_init("model");
@@ -423,9 +452,8 @@ static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
         return;
     }
 
-    model_iface_data_t *wn_data = wn_handle->create(wn_name, DET_MODE_90);
+    model_iface_data_t *wn_data = create_wakenet_data(wn_handle, wn_name, 0);
     if (wn_data == NULL) {
-        ESP_LOGE(TAG, "Failed to create direct WakeNet data for %s", wn_name);
         app_ui_set_voice_status("Wake: model failed");
         return;
     }
@@ -440,28 +468,46 @@ static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
         return;
     }
 
-    int16_t *samples = calloc((size_t)sample_count, sizeof(int16_t));
+    int16_t *samples = heap_caps_aligned_calloc(16, (size_t)sample_count,
+                                                sizeof(int16_t),
+                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (samples == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate direct WakeNet buffer");
+        ESP_LOGE(TAG, "Failed to allocate aligned internal WakeNet buffer");
         app_ui_set_voice_status("Wake: no memory");
         wn_handle->destroy(wn_data);
         return;
     }
 
-    float threshold = wakenet_threshold_value();
-    int threshold_result = wn_handle->set_det_threshold != NULL ?
-                           wn_handle->set_det_threshold(wn_data, threshold, 1) : -1;
     TickType_t last_wake_tick = 0;
     s_voice_ready = true;
     s_wakenet_rearm_requested = false;
     app_ui_set_voice_status(VOICE_WAKE_HINT);
-    ESP_LOGI(TAG, "Direct WakeNet ready: model=%s chunks=%d rate=%d channels=%d threshold=%.2f result=%d",
-             wn_name, sample_count, sample_rate, channel_count, threshold, threshold_result);
+    ESP_LOGI(TAG, "Direct WakeNet active: model=%s chunks=%d rate=%d channels=%d buffer=%p internal=%d",
+             wn_name, sample_count, sample_rate, channel_count, samples,
+             esp_ptr_internal(samples));
 
     while (true) {
+        if (s_pause_requested && wn_data != NULL) {
+            wn_handle->destroy(wn_data);
+            wn_data = NULL;
+            ESP_LOGI(TAG, "WakeNet destroyed before speaker playback");
+        }
+
         if (service_microphone_pause(mic, samples, (size_t)sample_count * sizeof(int16_t),
                                      VOICE_WAKE_HINT)) {
             continue;
+        }
+
+        if (wn_data == NULL) {
+            wn_data = create_wakenet_data(wn_handle, wn_name, sample_count);
+            if (wn_data == NULL) {
+                app_ui_set_voice_status("Wake: model restart failed");
+                vTaskDelay(pdMS_TO_TICKS(250));
+                continue;
+            }
+            s_wakenet_rearm_requested = false;
+            app_ui_set_voice_status(VOICE_WAKE_HINT);
+            ESP_LOGI(TAG, "WakeNet recreated after speaker playback");
         }
 
         if (s_wakenet_rearm_requested) {
@@ -479,6 +525,10 @@ static void run_direct_wakenet_loop(esp_codec_dev_handle_t mic)
         }
 
         if (service_pending_voice_request(mic)) {
+            continue;
+        }
+
+        if (s_conversation_busy) {
             continue;
         }
 
