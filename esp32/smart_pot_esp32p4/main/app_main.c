@@ -31,6 +31,7 @@ static const char *TAG = "smart_pot";
 #ifndef CONFIG_SMART_POT_MPU6050_FALL_DEG
 #define CONFIG_SMART_POT_MPU6050_FALL_DEG 50
 #endif
+#define APP_ENABLE_MOTION_DEBUG_UI 0
 
 static volatile uint32_t s_motion_event_count;
 
@@ -82,6 +83,7 @@ static const char *motion_voice_text(app_motion_event_t event)
     }
 }
 
+#if APP_ENABLE_MOTION_DEBUG_UI
 static void motion_debug_task(void *arg)
 {
     (void)arg;
@@ -114,6 +116,7 @@ static void motion_debug_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
+#endif
 
 static void motion_event_cb(app_motion_event_t event,
                             const app_motion_state_t *state,
@@ -303,9 +306,11 @@ void app_main(void)
     app_sensors_start(sensor_update_cb, NULL);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
     app_motion_start(motion_event_cb, NULL);
+#if APP_ENABLE_MOTION_DEBUG_UI
     if (xTaskCreate(motion_debug_task, "smart_pot_motion_ui", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGW(TAG, "Failed to create MPU-6050 debug UI task");
     }
+#endif
 #endif
 #endif
 

@@ -19,6 +19,7 @@
 #define SCHEDULE_ID_LEN 48
 #define SCHEDULE_ITEM_LEN 96
 #define SCHEDULE_DEADLINE_LEN 64
+#define APP_UI_SHOW_MOTION_DEBUG_PAGE 0
 
 static const char *TAG = "app_ui";
 
@@ -62,6 +63,7 @@ static lv_obj_t *s_light_bar;
 static lv_obj_t *s_mood_bar;
 static lv_obj_t *s_soil_label;
 static lv_obj_t *s_light_label;
+static lv_obj_t *s_light_unit_label;
 static lv_obj_t *s_mood_label;
 static lv_obj_t *s_network_icon;
 static lv_obj_t *s_network_label;
@@ -982,6 +984,7 @@ static lv_obj_t *make_metric_card(lv_obj_t *parent, int32_t x, int32_t y, const 
     return card;
 }
 
+#if APP_UI_SHOW_MOTION_DEBUG_PAGE
 static lv_obj_t *make_motion_debug_panel(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
                                          const char *title, lv_color_t accent, lv_obj_t **value_out)
 {
@@ -1076,6 +1079,7 @@ static void make_motion_debug_page(lv_obj_t *screen)
     lv_label_set_text(s_motion_event_label, "none");
     lv_label_set_text(s_motion_reaction_label, "none");
 }
+#endif
 
 static lv_obj_t *make_line(lv_obj_t *parent, lv_point_precise_t *points, uint32_t point_count,
                            lv_color_t color, int32_t width)
@@ -1906,8 +1910,6 @@ static void switch_page(void)
     }
 
     if (s_current_page == UI_PAGE_FACE) {
-        s_current_page = UI_PAGE_MOTION;
-    } else if (s_current_page == UI_PAGE_MOTION) {
         s_current_page = UI_PAGE_SCHEDULE;
     } else {
         s_current_page = UI_PAGE_FACE;
@@ -2292,6 +2294,15 @@ void app_ui_init(void)
 
     lv_obj_t *light_card = make_metric_card(s_face_page, 340, 196, "Light",
                                             lv_color_hex(0xffe46e), 1, &s_light_label);
+    lv_obj_set_width(s_light_label, 76);
+    lv_label_set_long_mode(s_light_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(s_light_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    lv_obj_align(s_light_label, LV_ALIGN_TOP_LEFT, 104, 38);
+    s_light_unit_label = lv_label_create(light_card);
+    lv_label_set_text(s_light_unit_label, "lux");
+    lv_obj_set_style_text_font(s_light_unit_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_light_unit_label, lv_color_hex(0xffe46e), LV_PART_MAIN);
+    lv_obj_align(s_light_unit_label, LV_ALIGN_TOP_LEFT, 184, 44);
     s_light_bar = make_bar(light_card, 46, lv_color_hex(0xffe46e));
     lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 218, 46);
 
@@ -2335,7 +2346,9 @@ void app_ui_init(void)
     lv_label_set_text(s_dialog_label, "");
     lv_obj_add_flag(s_dialog_label, LV_OBJ_FLAG_HIDDEN);
 
+#if APP_UI_SHOW_MOTION_DEBUG_PAGE
     make_motion_debug_page(screen);
+#endif
 
     s_schedule_page = lv_obj_create(screen);
     s_schedule_font = lv_tiny_ttf_create_data_ex(
@@ -2724,7 +2737,7 @@ void app_ui_update(const app_plant_state_t *state)
     snprintf(text, sizeof(text), "%u%%", state->soil_percent);
     lv_label_set_text(s_soil_label, text);
     lv_bar_set_value(s_soil_bar, state->soil_percent, LV_ANIM_ON);
-    snprintf(text, sizeof(text), "%lu lux", (unsigned long)state->light_lux);
+    snprintf(text, sizeof(text), "%lu", (unsigned long)state->light_lux);
     lv_label_set_text(s_light_label, text);
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
     lv_label_set_text(s_mood_label, mood_to_word(state->mood));
