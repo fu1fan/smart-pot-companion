@@ -40,7 +40,7 @@
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
-#define VOICE_WAKE_ENERGY_PACKETS 1
+#define VOICE_WAKE_ENERGY_PACKETS 2
 #define VOICE_WAKE_PREROLL_PACKETS 12
 #define VOICE_WAKE_THRESHOLD_MAX 50
 #define VOICE_WAKE_WORD "你好小麦"
@@ -147,6 +147,8 @@ static bool remove_wake_phrase(char *text)
     static const char *const wake_variants[] = {
         VOICE_WAKE_WORD, "你好，小麦", "你好 小麦", "你好小卖", "你好小脉",
         "你好小迈", "你好晓麦", "你好小妹", "你 好 小 麦", "你好 小 麦",
+        "你好 小卖", "你好 小脉", "你好 小迈", "你好 晓麦", "你好 小妹",
+        "你好啊小麦", "你好呀小麦",
         "小麦", "小 麦", "小卖", "小脉", "小迈", "晓麦", "小妹",
     };
     trim_voice_text(text);
