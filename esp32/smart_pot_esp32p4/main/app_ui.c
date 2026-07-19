@@ -2294,15 +2294,11 @@ void app_ui_init(void)
 
     lv_obj_t *light_card = make_metric_card(s_face_page, 340, 196, "Light",
                                             lv_color_hex(0xffe46e), 1, &s_light_label);
-    lv_obj_set_width(s_light_label, 76);
-    lv_label_set_long_mode(s_light_label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(s_light_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
-    lv_obj_align(s_light_label, LV_ALIGN_TOP_LEFT, 104, 38);
     s_light_unit_label = lv_label_create(light_card);
     lv_label_set_text(s_light_unit_label, "lux");
-    lv_obj_set_style_text_font(s_light_unit_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_light_unit_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_light_unit_label, lv_color_hex(0xffe46e), LV_PART_MAIN);
-    lv_obj_align(s_light_unit_label, LV_ALIGN_TOP_LEFT, 184, 44);
+    lv_obj_align(s_light_unit_label, LV_ALIGN_TOP_LEFT, 170, 38);
     s_light_bar = make_bar(light_card, 46, lv_color_hex(0xffe46e));
     lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 218, 46);
 
