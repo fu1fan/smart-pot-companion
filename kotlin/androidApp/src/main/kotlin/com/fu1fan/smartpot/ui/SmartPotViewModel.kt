@@ -177,6 +177,11 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(diaries = (listOf(diary) + it.diaries).distinctBy(PlantDiary::id)) }
     }
 
+    fun saveDiary(title: String, content: String, imageDataUrls: List<String>, moodEmoji: String?) = withPot { id ->
+        val diary = api.addDiary(id, CreateDiaryRequest(title, content, imageDataUrls, moodEmoji))
+        mutableState.update { state -> state.copy(diaries = (listOf(diary) + state.diaries).distinctBy(PlantDiary::id)) }
+    }
+
     fun recordPomodoro() = withPot { id ->
         api.addFocusSession(id)
         mutableState.update { it.copy(careOverview = api.careOverview(id), focusDaily = api.focusDaily(id)) }

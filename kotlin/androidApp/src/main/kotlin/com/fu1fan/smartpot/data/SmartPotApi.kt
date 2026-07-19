@@ -61,6 +61,7 @@ class SmartPotApi(
         getApi("/api/v1/pots/$id/chat${date?.let { "?date=$it" }.orEmpty()}")
     suspend fun chat(id: String, text: String): ChatResponse = postApi("/api/v1/pots/$id/chat", ChatRequest(text))
     suspend fun diaries(id: String): List<PlantDiary> = getApi("/api/v1/pots/$id/diaries")
+    suspend fun addDiary(id: String, request: CreateDiaryRequest): PlantDiary = postApi("/api/v1/pots/$id/diaries", request)
     suspend fun generateDiary(id: String): PlantDiary = postEmpty("/api/v1/pots/$id/diaries/generate")
     suspend fun control(id: String, request: DeviceControlRequest): CommandSubmission = postApi("/api/v1/pots/$id/control", request)
     suspend fun share(id: String): ShareCode = postApi("/api/v1/pots/$id/share", CreateShareRequest())

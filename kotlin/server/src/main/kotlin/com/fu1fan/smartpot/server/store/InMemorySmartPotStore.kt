@@ -135,6 +135,13 @@ class InMemorySmartPotStore : SmartPotStore {
         }
         return true
     }
+    override suspend fun upsertDiary(diary: PlantDiary) {
+        val list = diaries.computeIfAbsent(diary.potId) { mutableListOf() }
+        synchronized(list) {
+            list.removeAll { it.diaryDate == diary.diaryDate }
+            list += diary
+        }
+    }
 
     override suspend fun listFocusSessions(potId: String, since: String?) =
         focusSessions[potId]?.let { list ->

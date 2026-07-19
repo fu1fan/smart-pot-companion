@@ -7,6 +7,7 @@ import com.fu1fan.smartpot.protocol.ChatDaySummary
 import com.fu1fan.smartpot.protocol.ChatMessage
 import com.fu1fan.smartpot.protocol.ChatRole
 import com.fu1fan.smartpot.protocol.CreateCareLogRequest
+import com.fu1fan.smartpot.protocol.CreateDiaryRequest
 import com.fu1fan.smartpot.protocol.CreateFocusSessionRequest
 import com.fu1fan.smartpot.protocol.CreateMemoryRequest
 import com.fu1fan.smartpot.protocol.CreateShareRequest
@@ -201,6 +202,34 @@ class ApplicationTest {
 
         assertEquals(HttpStatusCode.NoContent, deleted.status)
         assertTrue(api.get("/api/v1/pots/${pot.id}/memories") { bearerAuth(config.demoToken) }.body<List<com.fu1fan.smartpot.protocol.UserMemory>>().isEmpty())
+    }
+
+    @Test
+    fun `owner can write and update a photo diary`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+        val pot = api.post("/api/v1/pots") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-diary-001", "小麦", "pothos"))
+        }.body<PotProfile>()
+        val image = "data:image/jpeg;base64,AQID"
+
+        val created = api.post("/api/v1/pots/${pot.id}/diaries") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreateDiaryRequest("今天的新叶", "小麦长出了一片新叶。", listOf(image), "🌱"))
+        }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
+        val updated = api.post("/api/v1/pots/${pot.id}/diaries") {
+            bearerAuth(config.demoToken)
+            contentType(ContentType.Application.Json)
+            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(image), "😊"))
+        }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
+
+        assertEquals(created.id, updated.id)
+        assertEquals("叶片已经完全展开。", updated.content)
+        assertEquals(listOf(image), updated.imageDataUrls)
+        assertEquals(1, api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<com.fu1fan.smartpot.protocol.PlantDiary>>().size)
     }
 
     @Test

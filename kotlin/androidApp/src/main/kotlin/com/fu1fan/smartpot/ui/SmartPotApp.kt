@@ -1,5 +1,14 @@
 package com.fu1fan.smartpot.ui
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -25,6 +34,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -33,7 +46,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fu1fan.smartpot.R
 import com.fu1fan.smartpot.protocol.*
+import java.io.ByteArrayOutputStream
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -116,7 +131,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && state.species.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::generateDiary, viewModel::speakDiary)
+                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::generateDiary, viewModel::speakDiary)
                     tab == 2 -> CompanionScreen(
                         state,
                         viewModel::sendChat,
@@ -366,76 +381,63 @@ private fun DashboardAvatar(text: String, color: Color, modifier: Modifier = Mod
 }
 
 @Composable
-private fun PlantMascot(healthPercent: Int?, modifier: Modifier = Modifier) {
-    val happy = (healthPercent ?: 75) >= 60
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val leafDark = Color(0xFF3E884F)
-        val leafLight = Color(0xFF78AF3E)
-        drawOval(Color(0x203F7F48), Offset(w * 0.10f, h * 0.83f), Size(w * 0.82f, h * 0.13f))
+private fun PlantMascot(@Suppress("UNUSED_PARAMETER") healthPercent: Int?, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val mascot = remember { loadPlantMascot(context) }
+    Image(
+        bitmap = mascot,
+        contentDescription = "小麦植物形象",
+        modifier = modifier,
+        contentScale = ContentScale.Fit,
+    )
+}
 
-        fun leaf(cx: Float, cy: Float, width: Float, height: Float, angle: Float, color: Color) {
-            rotate(angle, Offset(cx, cy)) {
-                drawOval(color, Offset(cx - width / 2f, cy - height / 2f), Size(width, height))
-            }
-        }
+private fun loadPlantMascot(context: Context) =
+    BitmapFactory.decodeResource(context.resources, R.drawable.plant_cat_reference)
+        .copy(Bitmap.Config.ARGB_8888, true)
+        .also(::clearConnectedDarkBackground)
+        .asImageBitmap()
 
-        leaf(w * 0.22f, h * 0.67f, w * 0.23f, h * 0.11f, -36f, leafDark)
-        leaf(w * 0.79f, h * 0.66f, w * 0.23f, h * 0.11f, 34f, leafDark)
-        leaf(w * 0.27f, h * 0.78f, w * 0.24f, h * 0.10f, -12f, leafLight)
-        leaf(w * 0.74f, h * 0.79f, w * 0.25f, h * 0.10f, 14f, leafLight)
+private fun clearConnectedDarkBackground(bitmap: Bitmap) {
+    val width = bitmap.width
+    val height = bitmap.height
+    val pixels = IntArray(width * height)
+    val queue = IntArray(width * height)
+    var head = 0
+    var tail = 0
+    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        val potTop = h * 0.73f
-        drawRoundRect(
-            color = Color(0xFFD98A3D),
-            topLeft = Offset(w * 0.30f, potTop),
-            size = Size(w * 0.42f, h * 0.10f),
-            cornerRadius = CornerRadius(h * 0.035f),
-        )
-        val potPath = Path().apply {
-            moveTo(w * 0.33f, h * 0.80f)
-            lineTo(w * 0.69f, h * 0.80f)
-            lineTo(w * 0.64f, h * 0.98f)
-            lineTo(w * 0.38f, h * 0.98f)
-            close()
-        }
-        drawPath(potPath, Color(0xFFC87331))
-        drawRoundRect(Color(0xFFE9A35B), Offset(w * 0.35f, h * 0.80f), Size(w * 0.32f, h * 0.035f), CornerRadius(10f))
-
-        drawCircle(Color(0xFFFCFBF2), radius = w * 0.235f, center = Offset(w * 0.51f, h * 0.52f))
-        drawCircle(Color(0xFFFFA2A0), radius = w * 0.035f, center = Offset(w * 0.39f, h * 0.58f), alpha = 0.52f)
-        drawCircle(Color(0xFFFFA2A0), radius = w * 0.035f, center = Offset(w * 0.63f, h * 0.58f), alpha = 0.52f)
-        listOf(w * 0.43f, w * 0.59f).forEach { eyeX ->
-            drawCircle(Color(0xFF392A21), radius = w * 0.027f, center = Offset(eyeX, h * 0.50f))
-            drawCircle(Color.White, radius = w * 0.009f, center = Offset(eyeX - w * 0.008f, h * 0.49f))
-        }
-        if (happy) {
-            drawArc(
-                color = Color(0xFF4A3025),
-                startAngle = 20f,
-                sweepAngle = 140f,
-                useCenter = false,
-                topLeft = Offset(w * 0.475f, h * 0.52f),
-                size = Size(w * 0.075f, h * 0.08f),
-                style = Stroke(width = 3.5f, cap = StrokeCap.Round),
-            )
-        } else {
-            drawArc(
-                color = Color(0xFF4A3025),
-                startAngle = 205f,
-                sweepAngle = 130f,
-                useCenter = false,
-                topLeft = Offset(w * 0.475f, h * 0.58f),
-                size = Size(w * 0.075f, h * 0.06f),
-                style = Stroke(width = 3.5f, cap = StrokeCap.Round),
-            )
-        }
-
-        drawLine(leafDark, Offset(w * 0.51f, h * 0.30f), Offset(w * 0.51f, h * 0.16f), strokeWidth = 6f, cap = StrokeCap.Round)
-        leaf(w * 0.44f, h * 0.17f, w * 0.17f, h * 0.10f, 24f, leafLight)
-        leaf(w * 0.58f, h * 0.15f, w * 0.18f, h * 0.10f, -24f, leafDark)
+    fun isBackground(index: Int): Boolean {
+        val color = pixels[index]
+        return (color ushr 24) != 0 &&
+            ((color ushr 16) and 0xff) <= 58 &&
+            ((color ushr 8) and 0xff) <= 58 &&
+            (color and 0xff) <= 58
     }
+
+    fun enqueue(index: Int) {
+        if (index !in pixels.indices || !isBackground(index)) return
+        pixels[index] = 0
+        queue[tail++] = index
+    }
+
+    for (x in 0 until width) {
+        enqueue(x)
+        enqueue((height - 1) * width + x)
+    }
+    for (y in 0 until height) {
+        enqueue(y * width)
+        enqueue(y * width + width - 1)
+    }
+    while (head < tail) {
+        val index = queue[head++]
+        val x = index % width
+        if (x > 0) enqueue(index - 1)
+        if (x + 1 < width) enqueue(index + 1)
+        if (index >= width) enqueue(index - width)
+        if (index + width < pixels.size) enqueue(index + width)
+    }
+    bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 }
 
 @Composable
@@ -696,6 +698,7 @@ private fun AdviceCard(title: String, lines: List<String>, color: Color = SoftLe
 private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String) -> Unit,
+    saveDiary: (String, String, List<String>, String?) -> Unit,
     generateDiary: () -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
@@ -748,6 +751,7 @@ private fun CareScreen(
                 state = state,
                 expanded = diariesExpanded,
                 onToggleExpanded = { diariesExpanded = !diariesExpanded },
+                saveDiary = saveDiary,
                 generateDiary = generateDiary,
                 speakDiary = speakDiary,
             )
@@ -963,11 +967,34 @@ private fun CareDiarySection(
     state: SmartPotUiState,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
+    saveDiary: (String, String, List<String>, String?) -> Unit,
     generateDiary: () -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
     val visibleDiaries = if (expanded) diaries else diaries.take(2)
+    val context = LocalContext.current
+    val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
+        .getOrDefault(ZoneId.of("Asia/Shanghai"))
+    val today = LocalDate.now(zone).toString()
+    val todayDiary = diaries.firstOrNull { it.diaryDate == today }
+    var editorVisible by rememberSaveable { mutableStateOf(false) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var content by rememberSaveable { mutableStateOf("") }
+    var mood by rememberSaveable { mutableStateOf<String?>(null) }
+    var images by remember { mutableStateOf<List<String>>(emptyList()) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(3)) { uris ->
+        images = uris.take(3).mapNotNull { uri -> encodeDiaryImage(context, uri) }
+    }
+
+    fun openEditor() {
+        title = todayDiary?.title ?: "今天的小麦"
+        content = todayDiary?.content ?: ""
+        mood = todayDiary?.moodEmoji
+        images = todayDiary?.imageDataUrls ?: emptyList()
+        editorVisible = true
+    }
+
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -977,7 +1004,72 @@ private fun CareDiarySection(
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("养护日记", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                TextButton(onClick = generateDiary, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("＋ 写日记", fontSize = 12.sp) }
+                TextButton(
+                    onClick = { if (editorVisible) editorVisible = false else openEditor() },
+                    contentPadding = PaddingValues(horizontal = 5.dp),
+                ) { Text(if (editorVisible) "取消" else "＋ 写日记", fontSize = 12.sp) }
+            }
+            if (editorVisible) {
+                Surface(color = Color(0xFFF7F9F5), shape = RoundedCornerShape(7.dp), border = BorderStroke(1.dp, CardBorder)) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it.take(60) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("日记标题") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = content,
+                            onValueChange = { content = it.take(1000) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("记录今天和小麦的故事") },
+                            minLines = 3,
+                            maxLines = 6,
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(listOf("😊", "🌱", "💧", "☀️", "🥰", "😴")) { emoji ->
+                                FilterChip(
+                                    selected = mood == emoji,
+                                    onClick = { mood = emoji.takeUnless { mood == emoji } },
+                                    label = { Text(emoji, fontSize = 17.sp) },
+                                )
+                            }
+                        }
+                        if (images.isNotEmpty()) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                images.forEachIndexed { index, dataUrl ->
+                                    Box(Modifier.weight(1f).height(76.dp)) {
+                                        DiaryPhoto(dataUrl, Modifier.fillMaxSize())
+                                        Surface(
+                                            modifier = Modifier.align(Alignment.TopEnd).clickable { images = images.filterIndexed { i, _ -> i != index } },
+                                            shape = CircleShape,
+                                            color = Color(0xCCFFFFFF),
+                                        ) { Text("×", modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), color = Ink) }
+                                    }
+                                }
+                                repeat(3 - images.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                modifier = Modifier.weight(1f),
+                                enabled = images.size < 3,
+                            ) { Text("添加图片 ${images.size}/3", fontSize = 11.sp) }
+                            TextButton(onClick = generateDiary, modifier = Modifier.weight(1f)) { Text("AI 生成", fontSize = 11.sp) }
+                        }
+                        Button(
+                            onClick = {
+                                saveDiary(title.trim(), content.trim(), images, mood)
+                                editorVisible = false
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = title.isNotBlank() && content.isNotBlank(),
+                            shape = RoundedCornerShape(6.dp),
+                        ) { Text(if (todayDiary == null) "保存日记" else "更新今日日记") }
+                    }
+                }
             }
             if (visibleDiaries.isEmpty()) {
                 Text("今天还没有日记，写一篇记录小麦的变化吧。", color = Muted, fontSize = 12.sp)
@@ -1015,10 +1107,53 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
         }
         Text(diaryDisplayContent(diary), fontSize = 12.sp, color = Color(0xFF4D534E), maxLines = 3, overflow = TextOverflow.Ellipsis)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            repeat(3) { index -> DiaryVisualThumbnail(diary, index, Modifier.weight(1f).height(66.dp)) }
+            if (diary.imageDataUrls.isNotEmpty()) {
+                diary.imageDataUrls.take(3).forEach { dataUrl -> DiaryPhoto(dataUrl, Modifier.weight(1f).height(66.dp)) }
+                repeat(3 - diary.imageDataUrls.take(3).size) { Spacer(Modifier.weight(1f)) }
+            } else {
+                repeat(3) { index -> DiaryVisualThumbnail(diary, index, Modifier.weight(1f).height(66.dp)) }
+            }
         }
     }
 }
+
+@Composable
+private fun DiaryPhoto(dataUrl: String, modifier: Modifier = Modifier) {
+    val image = remember(dataUrl) {
+        runCatching {
+            val bytes = Base64.decode(dataUrl.substringAfter(','), Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }.getOrNull()
+    }
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = "日记图片",
+            modifier = modifier.background(Color(0xFFF0F2EE), RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    } else {
+        Box(modifier.background(Color(0xFFF0F2EE), RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+            Text("图片不可用", color = Muted, fontSize = 10.sp)
+        }
+    }
+}
+
+private fun encodeDiaryImage(context: Context, uri: Uri): String? = runCatching {
+    val source = context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream) ?: return null
+    val maxDimension = maxOf(source.width, source.height)
+    val scale = (640f / maxDimension).coerceAtMost(1f)
+    val output = if (scale < 1f) {
+        Bitmap.createScaledBitmap(source, (source.width * scale).roundToInt(), (source.height * scale).roundToInt(), true)
+    } else {
+        source
+    }
+    val bytes = ByteArrayOutputStream()
+    output.compress(Bitmap.CompressFormat.JPEG, 68, bytes)
+    if (output !== source) output.recycle()
+    source.recycle()
+    "data:image/jpeg;base64,${Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)}"
+}.getOrNull()
 
 @Composable
 private fun DiaryVisualThumbnail(diary: PlantDiary, index: Int, modifier: Modifier = Modifier) {
@@ -1148,12 +1283,13 @@ private fun ControlScreen(
                     if (lightExpanded) {
                         Button(
                             onClick = {
-                                manualMode = !manualMode
+                                val enableManualMode = !manualMode
+                                manualMode = enableManualMode
                                 control(
                                     DeviceControlRequest(
                                         DeviceCommandType.SET_LIGHT_STRIP_CONTROL,
-                                        lightStripManualMode = manualMode,
-                                        lightStripOn = manualOn.takeIf { manualMode },
+                                        lightStripManualMode = enableManualMode,
+                                        lightStripOn = manualOn.takeIf { enableManualMode },
                                     ),
                                 )
                             },
@@ -1178,7 +1314,7 @@ private fun ControlScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                                 Text("一直灭灯时间段", fontWeight = FontWeight.SemiBold, color = Ink)
-                                Text("该时段内 ESP 和 APP 的开灯都会被禁止", color = Muted, fontSize = 10.sp)
+                                Text("仅命中该时段时禁止开灯，时段外仍可手动开灯", color = Muted, fontSize = 10.sp)
                         }
                         Switch(checked = offPeriodEnabled, onCheckedChange = { offPeriodEnabled = it })
                     }
@@ -1877,6 +2013,7 @@ private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
 }
 
 private fun diaryMoodEmoji(diary: PlantDiary): String {
+    diary.moodEmoji?.takeIf { it.isNotBlank() }?.let { return it }
     val content = diary.content
     return when {
         content.contains("水") || content.contains("湿") -> "💧"

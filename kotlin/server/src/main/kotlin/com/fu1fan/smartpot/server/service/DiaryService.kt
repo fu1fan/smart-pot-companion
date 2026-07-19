@@ -1,5 +1,6 @@
 package com.fu1fan.smartpot.server.service
 
+import com.fu1fan.smartpot.protocol.CreateDiaryRequest
 import com.fu1fan.smartpot.protocol.PlantDiary
 import com.fu1fan.smartpot.protocol.RealtimeEvent
 import com.fu1fan.smartpot.protocol.RealtimeEventType
@@ -21,6 +22,31 @@ class DiaryService(
     private val ai: CloudAiService,
     private val realtime: RealtimeHub,
 ) {
+    suspend fun saveManual(potId: String, request: CreateDiaryRequest, date: LocalDate): PlantDiary {
+        val title = request.title.trim()
+        val content = request.content.trim()
+        require(title.isNotBlank() && title.length <= 60) { "日记标题应为 1-60 个字符" }
+        require(content.isNotBlank() && content.length <= 1_000) { "日记内容应为 1-1000 个字符" }
+        require(request.imageDataUrls.size <= 3) { "每篇日记最多添加 3 张图片" }
+        require(request.imageDataUrls.all(::validDiaryImage)) { "日记图片格式或大小不正确" }
+        require(request.moodEmoji == null || request.moodEmoji in setOf("😊", "🌱", "💧", "☀️", "🥰", "😴")) { "不支持的日记表情" }
+
+        val existing = store.listDiaries(potId).firstOrNull { it.diaryDate == date.toString() }
+        val diary = PlantDiary(
+            id = existing?.id ?: UUID.randomUUID().toString(),
+            potId = potId,
+            diaryDate = date.toString(),
+            title = title,
+            content = content,
+            createdAt = existing?.createdAt ?: Instant.now().toString(),
+            imageDataUrls = request.imageDataUrls,
+            moodEmoji = request.moodEmoji,
+        )
+        store.upsertDiary(diary)
+        realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, potId, appJson.encodeToJsonElement(diary)))
+        return diary
+    }
+
     suspend fun generate(potId: String, date: LocalDate = LocalDate.now()): PlantDiary {
         store.listDiaries(potId).firstOrNull { it.diaryDate == date.toString() }?.let { return it }
         val pot = requireNotNull(store.findPot(potId))
@@ -38,5 +64,12 @@ class DiaryService(
             }
             delay(1.minutes)
         }
+    }
+
+    private fun validDiaryImage(value: String): Boolean {
+        if (value.length > 500_000) return false
+        return value.startsWith("data:image/jpeg;base64,") ||
+            value.startsWith("data:image/png;base64,") ||
+            value.startsWith("data:image/webp;base64,")
     }
 }

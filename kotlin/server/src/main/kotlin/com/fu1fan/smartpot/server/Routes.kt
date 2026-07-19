@@ -136,6 +136,11 @@ fun Application.configureRoutes(services: ServerServices) {
                         call.respond(services.ai.chat(pot, request.text, request.source))
                     }
                     get("/diaries") { call.respond(services.store.listDiaries(call.requirePot(services).id)) }
+                    post("/diaries") {
+                        val pot = call.requirePot(services)
+                        val date = LocalDate.now(zoneIdOf(pot.timezone))
+                        call.respond(HttpStatusCode.Created, services.diary.saveManual(pot.id, call.receive(), date))
+                    }
                     post("/diaries/generate") {
                         val pot = call.requirePot(services)
                         call.respond(services.diary.generate(pot.id))

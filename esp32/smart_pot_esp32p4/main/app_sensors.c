@@ -598,10 +598,11 @@ static bool light_strip_in_off_period(const light_strip_control_t *ctrl)
 
 static void light_ctrl_project_output_locked(void)
 {
-    if (light_strip_in_off_period(&s_light_ctrl)) {
+    bool quiet_now = light_strip_in_off_period(&s_light_ctrl);
+    if (s_light_ctrl.manual_mode) {
+        s_light_ctrl.on = quiet_now ? false : s_light_ctrl.manual_on;
+    } else if (quiet_now) {
         s_light_ctrl.on = false;
-    } else if (s_light_ctrl.manual_mode) {
-        s_light_ctrl.on = s_light_ctrl.manual_on;
     }
 }
 
@@ -636,15 +637,16 @@ static void update_light_strip(sensor_hw_t *hw, uint32_t light_lux, bool light_o
     bool off_period = light_strip_in_off_period(&ctrl);
 
     int64_t now_us = esp_timer_get_time();
-    if (off_period) {
-        set_light_strip(hw, false, light_lux, "quiet off period");
+    if (ctrl.manual_mode) {
+        set_light_strip(hw, off_period ? false : ctrl.manual_on, light_lux,
+                        off_period ? "manual blocked inside quiet period" : "app manual mode outside quiet period");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
         return;
     }
 
-    if (ctrl.manual_mode) {
-        set_light_strip(hw, ctrl.manual_on, light_lux, "app manual mode");
+    if (off_period) {
+        set_light_strip(hw, false, light_lux, "quiet off period");
         hw->light_strip_low_since_us = 0;
         hw->light_strip_high_since_us = 0;
         return;

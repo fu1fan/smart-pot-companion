@@ -162,6 +162,16 @@ data class PlantDiary(
     val title: String,
     val content: String,
     val createdAt: String,
+    val imageDataUrls: List<String> = emptyList(),
+    val moodEmoji: String? = null,
+)
+
+@Serializable
+data class CreateDiaryRequest(
+    val title: String,
+    val content: String,
+    val imageDataUrls: List<String> = emptyList(),
+    val moodEmoji: String? = null,
 )
 
 @Serializable

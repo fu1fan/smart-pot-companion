@@ -426,7 +426,6 @@ static void handle_command(const char *json)
         cJSON *duration = cJSON_GetObjectItem(payload, "durationSeconds");
         if (cJSON_IsString(emoji) && emoji->valuestring[0] != '\0') {
             app_ui_show_emoji(emoji->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 2) * 1000U);
-            if (strcmp(emoji->valuestring, "heart") == 0) app_ui_play_touch_reaction();
         } else if (cJSON_IsString(text) && text->valuestring[0] != '\0') {
             app_ui_show_remote_content(text->valuestring, (uint32_t)(cJSON_IsNumber(duration) ? duration->valueint : 2) * 1000U);
         } else {

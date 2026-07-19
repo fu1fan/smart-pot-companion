@@ -223,6 +223,15 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
             s.setString(1, diary.id); s.setString(2, diary.potId); s.setString(3, diary.diaryDate); s.setString(4, encode(diary)); s.executeUpdate() == 1
         }
     }
+    override suspend fun upsertDiary(diary: PlantDiary) = db { c ->
+        c.prepareStatement(
+            "INSERT INTO diaries(id,pot_id,diary_date,data) VALUES (?::uuid,?::uuid,?::date,?::jsonb) " +
+                "ON CONFLICT(pot_id,diary_date) DO UPDATE SET data=EXCLUDED.data",
+        ).use { s ->
+            s.setString(1, diary.id); s.setString(2, diary.potId); s.setString(3, diary.diaryDate); s.setString(4, encode(diary)); s.executeUpdate()
+        }
+        Unit
+    }
 
     override suspend fun listFocusSessions(potId: String, since: String?): List<FocusSession> = db { c ->
         val sql = buildString {
