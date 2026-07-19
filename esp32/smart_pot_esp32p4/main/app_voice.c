@@ -40,8 +40,9 @@
 #define VOICE_SAMPLE_RATE 16000
 #define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
-#define VOICE_WAKE_ENERGY_PACKETS 2
-#define VOICE_WAKE_PREROLL_PACKETS 6
+#define VOICE_WAKE_ENERGY_PACKETS 1
+#define VOICE_WAKE_PREROLL_PACKETS 12
+#define VOICE_WAKE_THRESHOLD_MAX 50
 #define VOICE_WAKE_WORD "你好小麦"
 #define VOICE_WAKE_MODEL_NAME "ni3hao3xiao3mai4_tts2"
 #define VOICE_WAKE_HINT "Wake: XiaoMai"
@@ -145,7 +146,8 @@ static bool remove_wake_phrase(char *text)
 
     static const char *const wake_variants[] = {
         VOICE_WAKE_WORD, "你好，小麦", "你好 小麦", "你好小卖", "你好小脉",
-        "你好小迈", "你好晓麦", "小麦", "小卖", "小脉", "小迈", "晓麦",
+        "你好小迈", "你好晓麦", "你好小妹", "你 好 小 麦", "你好 小 麦",
+        "小麦", "小 麦", "小卖", "小脉", "小迈", "晓麦", "小妹",
     };
     trim_voice_text(text);
 
@@ -295,12 +297,17 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 
     TickType_t last_wake_tick = 0;
     int wake_energy_packets = 0;
+    int wake_threshold = CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD;
+    if (wake_threshold <= 0 || wake_threshold > VOICE_WAKE_THRESHOLD_MAX) {
+        wake_threshold = VOICE_WAKE_THRESHOLD_MAX;
+    }
     size_t preroll_head = 0;
     size_t preroll_count = 0;
     s_voice_ready = true;
     s_wakenet_rearm_requested = false;
     app_ui_set_voice_status(VOICE_WAKE_HINT);
-    ESP_LOGW(TAG, "WakeNet inference disabled by board config; using ASR wake phrase confirmation");
+    ESP_LOGW(TAG, "WakeNet inference disabled by board config; using ASR wake phrase confirmation threshold=%d",
+             wake_threshold);
 
     while (true) {
         if (service_microphone_pause(mic, samples, sample_count * sizeof(int16_t), VOICE_WAKE_HINT)) {
@@ -332,7 +339,7 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
 
         TickType_t wake_now = xTaskGetTickCount();
         int level = average_sample_level(samples, sample_count);
-        if (!s_conversation_busy && level >= CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD) {
+        if (!s_conversation_busy && level >= wake_threshold) {
             wake_energy_packets++;
         } else {
             wake_energy_packets = 0;
@@ -342,7 +349,7 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
             last_wake_tick = wake_now;
             wake_energy_packets = 0;
             ESP_LOGI(TAG, "Energy wake candidate level=%d threshold=%d",
-                     level, CONFIG_SMART_POT_VOICE_WAKE_THRESHOLD);
+                     level, wake_threshold);
             app_ui_set_voice_status("Wake: checking phrase");
             size_t oldest = (preroll_head + VOICE_WAKE_PREROLL_PACKETS - preroll_count) %
                             VOICE_WAKE_PREROLL_PACKETS;
@@ -358,6 +365,7 @@ static void run_energy_wake_loop(esp_codec_dev_handle_t mic)
     }
 }
 
+#if APP_BOARD_WAKENET_ENABLE
 static int apply_wakenet_threshold(const esp_afe_sr_iface_t *afe_handle,
                                    esp_afe_sr_data_t *afe_data)
 {
@@ -384,6 +392,7 @@ static void rearm_wakenet(const esp_afe_sr_iface_t *afe_handle, esp_afe_sr_data_
     ESP_LOGI(TAG, "WakeNet rearmed: buffer=%d disable=%d enable=%d reset_threshold=%d set_threshold=%d",
              reset_result, disable_result, enable_result, threshold_result, custom_threshold_result);
 }
+#endif
 
 static void transcribe_and_reply(esp_codec_dev_handle_t mic, bool require_wake_phrase)
 {
@@ -467,11 +476,11 @@ static void voice_task(void *arg)
         return;
     }
 
-    if (!APP_BOARD_WAKENET_ENABLE) {
-        run_energy_wake_loop(mic);
-        vTaskDelete(NULL);
-        return;
-    }
+#if !APP_BOARD_WAKENET_ENABLE
+    run_energy_wake_loop(mic);
+    vTaskDelete(NULL);
+    return;
+#else
 
     srmodel_list_t *models = esp_srmodel_init("model");
     if (models == NULL) {
@@ -595,6 +604,7 @@ static void voice_task(void *arg)
             app_ui_set_voice_status(VOICE_WAKE_HINT);
         }
     }
+#endif
 }
 
 void app_voice_start(void)
