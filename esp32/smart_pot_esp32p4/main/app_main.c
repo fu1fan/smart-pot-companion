@@ -149,75 +149,13 @@ static void motion_event_cb(app_motion_event_t event,
         break;
     }
 
-    if (!app_tts_speak_text_no_followup(motion_voice_text(event))) {
+    if (!app_tts_speak_once(motion_voice_text(event))) {
         ESP_LOGW(TAG, "Motion voice feedback queue failed for event=%d", event);
     }
     app_ui_set_motion_debug_event(motion_event_name(event), motion_reaction_name(event));
     app_cloud_update_motion(event, state);
 }
 #endif
-
-typedef struct {
-    const char *text;
-    app_tts_tone_t tone;
-} touch_feedback_t;
-
-static const touch_feedback_t *select_touch_feedback(app_mood_t mood)
-{
-    static const touch_feedback_t happy[] = {
-        { "哎哟，痒痒。", APP_TTS_TONE_CHEERFUL },
-        { "哎哟，嘿嘿。", APP_TTS_TONE_CHEERFUL },
-        { "哎哟，来啦。", APP_TTS_TONE_CHEERFUL },
-        { "嗨，摸到啦。", APP_TTS_TONE_CHEERFUL },
-        { "嗨，轻轻的。", APP_TTS_TONE_CHEERFUL },
-        { "嗨，在呢。", APP_TTS_TONE_CHEERFUL },
-    };
-    static const touch_feedback_t thirsty[] = {
-        { "哎哟，轻点嘛。", APP_TTS_TONE_WORRIED },
-        { "哎哟，慢一点。", APP_TTS_TONE_WORRIED },
-        { "哎哟，小心点。", APP_TTS_TONE_WORRIED },
-        { "哎哟，别急嘛。", APP_TTS_TONE_WORRIED },
-        { "哎哟，嗯嗯。", APP_TTS_TONE_WORRIED },
-        { "哎哟，在呢。", APP_TTS_TONE_WORRIED },
-    };
-    static const touch_feedback_t dark[] = {
-        { "哎哟，轻轻的。", APP_TTS_TONE_SLEEPY },
-        { "哎哟，慢慢来。", APP_TTS_TONE_SLEEPY },
-        { "哎哟，嗯哼。", APP_TTS_TONE_SLEEPY },
-        { "哎哟，小声点。", APP_TTS_TONE_SLEEPY },
-        { "哎哟，别闹嘛。", APP_TTS_TONE_SLEEPY },
-        { "哎哟，在听。", APP_TTS_TONE_SLEEPY },
-    };
-    static const touch_feedback_t weak[] = {
-        { "哎哟，轻一点。", APP_TTS_TONE_WORRIED },
-        { "哎哟，别晃嘛。", APP_TTS_TONE_FLUSTERED },
-        { "哎哟，小心。", APP_TTS_TONE_FLUSTERED },
-        { "哎哟，慢一点。", APP_TTS_TONE_FLUSTERED },
-        { "哎哟，稳一点。", APP_TTS_TONE_WORRIED },
-        { "哎哟，别急。", APP_TTS_TONE_WORRIED },
-    };
-
-    const touch_feedback_t *options = happy;
-    size_t count = sizeof(happy) / sizeof(happy[0]);
-    switch (mood) {
-    case APP_MOOD_THIRSTY:
-        options = thirsty;
-        count = sizeof(thirsty) / sizeof(thirsty[0]);
-        break;
-    case APP_MOOD_DARK:
-        options = dark;
-        count = sizeof(dark) / sizeof(dark[0]);
-        break;
-    case APP_MOOD_WEAK:
-        options = weak;
-        count = sizeof(weak) / sizeof(weak[0]);
-        break;
-    case APP_MOOD_HAPPY:
-    default:
-        break;
-    }
-    return &options[esp_random() % count];
-}
 
 static void log_memory_stats(const char *stage)
 {
@@ -244,7 +182,7 @@ static void sensor_update_cb(const app_plant_state_t *state, void *user_ctx)
     if (state->touch_count != last_touch_count) {
         int64_t now_us = esp_timer_get_time();
         if (now_us - last_touch_reaction_us > 3000000) {
-            // Keep touch feedback visual so repeated touches do not churn WakeNet through TTS playback.
+            // Debounce visual and voice feedback so repeated touches do not flood the TTS queue.
             app_ui_play_touch_reaction();
             last_touch_reaction_us = now_us;
         }

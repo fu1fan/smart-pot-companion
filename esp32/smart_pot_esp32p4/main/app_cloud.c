@@ -441,7 +441,7 @@ static void handle_command(const char *json)
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");
         ok = cJSON_IsString(text);
-        if (ok) app_tts_speak_text_no_followup(text->valuestring);
+        if (ok) app_tts_speak_once(text->valuestring);
     } else if (strcmp(type->valuestring, "RESTART") == 0) {
         publish_ack(id->valuestring, "COMPLETED", "restarting");
         cJSON_Delete(root);

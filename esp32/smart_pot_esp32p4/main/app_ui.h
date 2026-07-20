@@ -51,7 +51,6 @@ void app_ui_update(const app_plant_state_t *state);
 void app_ui_set_network_status(const char *status);
 void app_ui_set_dialog_status(const char *status);
 void app_ui_set_voice_status(const char *status);
-void app_ui_refresh_long_mode(void);
 void app_ui_play_touch_reaction(void);
 void app_ui_play_motion_reaction(app_ui_motion_reaction_t reaction, uint32_t duration_ms);
 void app_ui_clear_motion_reaction(void);

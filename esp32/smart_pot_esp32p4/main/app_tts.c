@@ -100,7 +100,6 @@ typedef struct {
     tts_command_t command;
     char text[TTS_TEXT_MAX];
     char style[TTS_STYLE_MAX];
-    bool enable_followup;
     bool complete_conversation;
     uint8_t volume;
     int16_t speech_rate;
@@ -629,7 +628,6 @@ static void tts_task(void *arg)
     }
 
     bool streaming = false;
-    bool stream_followup = false;
     tts_msg_t msg;
     while (xQueueReceive(s_tts_queue, &msg, portMAX_DELAY) == pdTRUE) {
         if (msg.command == TTS_CMD_PRECONNECT) {
@@ -645,7 +643,7 @@ static void tts_task(void *arg)
                 app_ui_set_voice_status("TTS: failed");
             }
             if (msg.complete_conversation) {
-                app_voice_conversation_complete_with_followup(ok && msg.enable_followup);
+                app_voice_conversation_complete();
             }
             release_pcm_buffer(&rt);
             s_tts_busy = false;
@@ -656,7 +654,6 @@ static void tts_task(void *arg)
             }
             s_tts_busy = true;
             streaming = start_session(&rt, &msg);
-            stream_followup = msg.enable_followup;
             if (!streaming) {
                 ESP_LOGW(TAG, "Volc TTS stream start failed: %s", rt.error);
                 close_connection(&rt);
@@ -682,7 +679,7 @@ static void tts_task(void *arg)
                 close_connection(&rt);
             }
             release_pcm_buffer(&rt);
-            app_voice_conversation_complete_with_followup(ok && stream_followup);
+            app_voice_conversation_complete();
         } else if (msg.command == TTS_CMD_STREAM_ABORT) {
             if (streaming) cancel_session(&rt);
             release_pcm_buffer(&rt);
@@ -749,7 +746,7 @@ static bool queue_message(const tts_msg_t *msg, TickType_t wait)
     return ok;
 }
 
-static bool queue_one_shot(const char *text, bool followup, bool complete,
+static bool queue_one_shot(const char *text, bool complete,
                            uint8_t volume, int16_t rate, int8_t pitch,
                            const char *style, bool low_priority)
 {
@@ -760,7 +757,6 @@ static bool queue_one_shot(const char *text, bool followup, bool complete,
     }
     tts_msg_t msg = {
         .command = TTS_CMD_ONE_SHOT,
-        .enable_followup = followup,
         .complete_conversation = complete,
         .volume = apply_user_volume(volume),
         .speech_rate = rate,
@@ -768,8 +764,7 @@ static bool queue_one_shot(const char *text, bool followup, bool complete,
     };
     utf8_strlcpy(msg.text, text, sizeof(msg.text));
     utf8_strlcpy(msg.style, style, sizeof(msg.style));
-    TickType_t wait = followup ? pdMS_TO_TICKS(5000) :
-                      (low_priority ? 0 : pdMS_TO_TICKS(500));
+    TickType_t wait = low_priority ? 0 : pdMS_TO_TICKS(500);
     return queue_message(&msg, wait);
 }
 
@@ -787,7 +782,7 @@ void app_tts_start(void)
         return;
     }
     if (CONFIG_SMART_POT_TTS_STARTUP_TEST) {
-        (void)queue_one_shot("你好，我是小麦。", false, false,
+        (void)queue_one_shot("你好，我是小麦。", false,
                              TTS_VOLUME_COMMAND, 5, 1,
                              "请用自然、亲切、活泼的语气说话。", false);
     }
@@ -802,12 +797,11 @@ bool app_tts_prepare_connection(void)
     return s_preconnect_requested;
 }
 
-bool app_tts_stream_begin(const char *voice_instruction, bool enable_followup)
+bool app_tts_stream_begin(const char *voice_instruction)
 {
     if (s_stream_requested || s_tts_busy) return false;
     tts_msg_t msg = {
         .command = TTS_CMD_STREAM_BEGIN,
-        .enable_followup = enable_followup,
         .volume = apply_user_volume(TTS_VOLUME_CONVERSATION),
         .speech_rate = 5,
         .pitch = 1,
@@ -844,19 +838,19 @@ void app_tts_stream_abort(void)
 
 bool app_tts_speak_text(const char *text)
 {
-    return queue_one_shot(text, true, true, TTS_VOLUME_CONVERSATION, 5, 1,
+    return queue_one_shot(text, true, TTS_VOLUME_CONVERSATION, 5, 1,
                           "请用自然、亲切、像朋友一样的语气说话。", false);
 }
 
-bool app_tts_speak_text_no_followup(const char *text)
+bool app_tts_speak_once(const char *text)
 {
-    return queue_one_shot(text, false, true, TTS_VOLUME_COMMAND, 8, 2,
+    return queue_one_shot(text, true, TTS_VOLUME_COMMAND, 8, 2,
                           "请用清楚、轻快的语气说话。", false);
 }
 
 bool app_tts_speak_text_quietly(const char *text)
 {
-    return queue_one_shot(text, false, true, TTS_VOLUME_AUTOMATION, 5, 1,
+    return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION, 5, 1,
                           "请用温柔、俏皮的植物伙伴语气说话。", true);
 }
 
@@ -885,7 +879,7 @@ bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone)
     default:
         break;
     }
-    return queue_one_shot(text, false, true, TTS_VOLUME_AUTOMATION,
+    return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION,
                           rate, pitch, style, true);
 }
 

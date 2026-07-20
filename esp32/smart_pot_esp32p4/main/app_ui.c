@@ -81,13 +81,10 @@ static lv_obj_t *s_network_icon;
 static lv_obj_t *s_network_label;
 static lv_obj_t *s_voice_label;
 static lv_obj_t *s_dialog_label;
-static lv_obj_t *s_emoji_overlay;
-static lv_obj_t *s_emoji_stage;
-static lv_obj_t *s_emoji_art;
-static lv_obj_t *s_remote_popup;
-static lv_obj_t *s_remote_popup_label;
-static lv_obj_t *s_mode_label_face;
-static lv_obj_t *s_mode_label_schedule;
+static lv_obj_t *s_projection_overlay;
+static lv_obj_t *s_projection_stage;
+static lv_obj_t *s_projection_art;
+static lv_obj_t *s_projection_text;
 static lv_obj_t *s_motion_status_label;
 static lv_obj_t *s_motion_roll_label;
 static lv_obj_t *s_motion_pitch_label;
@@ -127,7 +124,7 @@ static lv_obj_t *s_cat_drop_left;
 static lv_obj_t *s_cat_zzz_label;
 static lv_obj_t *s_cat_heart;
 static lv_timer_t *s_touch_blink_timer;
-static lv_timer_t *s_remote_content_timer;
+static lv_timer_t *s_projection_hold_timer;
 static lv_timer_t *s_heart_hide_timer;
 static lv_timer_t *s_motion_reaction_timer;
 static lv_timer_t *s_idle_blink_timer;
@@ -135,9 +132,7 @@ static lv_timer_t *s_schedule_blink_timer;
 static lv_timer_t *s_schedule_blink_restore_timer;
 static lv_timer_t *s_pomodoro_timer;
 static lv_timer_t *s_schedule_cleanup_timer;
-static lv_timer_t *s_emoji_overlay_timer;
-static lv_timer_t *s_emoji_overlay_finish_timer;
-static lv_timer_t *s_remote_popup_finish_timer;
+static lv_timer_t *s_projection_finish_timer;
 static int32_t s_pomodoro_remaining_sec;
 static pomodoro_phase_t s_pomodoro_phase = POMODORO_IDLE;
 static char s_schedule_items[SCHEDULE_MAX_ITEMS][SCHEDULE_ITEM_LEN];
@@ -159,6 +154,7 @@ static bool s_touch_blink_active;
 static bool s_motion_reaction_active;
 static app_ui_motion_reaction_t s_motion_reaction;
 static ui_page_t s_current_page = UI_PAGE_FACE;
+static ui_page_t s_projection_saved_page = UI_PAGE_FACE;
 static app_ui_schedule_event_cb_t s_schedule_event_cb;
 
 static lv_point_precise_t s_cat_happy_eye_pts[] = { { 0, 9 }, { 16, 2 }, { 32, 9 } };
@@ -599,7 +595,7 @@ static void check_schedule_reminders(void)
         if (seconds_left <= 0) {
             char text[160];
             snprintf(text, sizeof(text), "日程提醒，%s。", s_schedule_items[i]);
-            if (app_tts_speak_text_no_followup(text)) {
+            if (app_tts_speak_once(text)) {
                 s_schedule_reminded[i] = true;
             }
         }
@@ -1726,8 +1722,72 @@ static void heart_hide_timer_cb(lv_timer_t *timer)
     lv_timer_delete(timer);
 }
 
+typedef struct {
+    const char *text;
+    app_tts_tone_t tone;
+} touch_voice_t;
+
+static const touch_voice_t *select_touch_voice(app_mood_t mood)
+{
+    static const touch_voice_t happy[] = {
+        { "哎哟！", APP_TTS_TONE_CHEERFUL },
+        { "呀，嘿嘿！", APP_TTS_TONE_CHEERFUL },
+        { "嗯哼，摸到啦！", APP_TTS_TONE_CHEERFUL },
+        { "嘿呀！", APP_TTS_TONE_CHEERFUL },
+        { "唔，好痒呀！", APP_TTS_TONE_CHEERFUL },
+        { "诶，我在呢！", APP_TTS_TONE_CHEERFUL },
+    };
+    static const touch_voice_t thirsty[] = {
+        { "哎哟，轻点嘛。", APP_TTS_TONE_WORRIED },
+        { "唔……有点渴。", APP_TTS_TONE_WORRIED },
+        { "呀，慢一点。", APP_TTS_TONE_WORRIED },
+        { "嗯……在呢。", APP_TTS_TONE_WORRIED },
+        { "诶，轻轻的。", APP_TTS_TONE_WORRIED },
+        { "唉呀，没力气啦。", APP_TTS_TONE_WORRIED },
+    };
+    static const touch_voice_t dark[] = {
+        { "唔……好困。", APP_TTS_TONE_SLEEPY },
+        { "嗯哼……", APP_TTS_TONE_SLEEPY },
+        { "哎哟，轻轻的。", APP_TTS_TONE_SLEEPY },
+        { "呀，小声点。", APP_TTS_TONE_SLEEPY },
+        { "呼……在呢。", APP_TTS_TONE_SLEEPY },
+        { "诶，别闹嘛。", APP_TTS_TONE_SLEEPY },
+    };
+    static const touch_voice_t weak[] = {
+        { "哎哟！", APP_TTS_TONE_FLUSTERED },
+        { "呀，轻一点。", APP_TTS_TONE_WORRIED },
+        { "唔……慢一点。", APP_TTS_TONE_WORRIED },
+        { "诶，小心呀。", APP_TTS_TONE_FLUSTERED },
+        { "嗯……稳一点。", APP_TTS_TONE_WORRIED },
+        { "唉呀，别急。", APP_TTS_TONE_FLUSTERED },
+    };
+
+    const touch_voice_t *options = happy;
+    size_t count = sizeof(happy) / sizeof(happy[0]);
+    static uint32_t sequence;
+    switch (mood) {
+    case APP_MOOD_THIRSTY:
+        options = thirsty;
+        count = sizeof(thirsty) / sizeof(thirsty[0]);
+        break;
+    case APP_MOOD_DARK:
+        options = dark;
+        count = sizeof(dark) / sizeof(dark[0]);
+        break;
+    case APP_MOOD_WEAK:
+        options = weak;
+        count = sizeof(weak) / sizeof(weak[0]);
+        break;
+    case APP_MOOD_HAPPY:
+    default:
+        break;
+    }
+    return &options[sequence++ % count];
+}
+
 void app_ui_play_touch_reaction(void)
 {
+    const touch_voice_t *voice = select_touch_voice(s_current_mood);
     if (bsp_display_lock(100) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to lock display for touch reaction");
         return;
@@ -1766,6 +1826,9 @@ void app_ui_play_touch_reaction(void)
     }
 
     bsp_display_unlock();
+    if (!app_tts_speak_text_with_tone(voice->text, voice->tone)) {
+        ESP_LOGW(TAG, "Touch voice feedback queue failed");
+    }
 }
 
 static void motion_reaction_timer_cb(lv_timer_t *timer)
@@ -1942,39 +2005,8 @@ static void talk_event_cb(lv_event_t *event)
     app_voice_request_conversation();
 }
 
-static void update_mode_labels(void)
+static void start_pomodoro_unlocked(void)
 {
-    const char *text = app_voice_long_conversation_enabled() ? "Long: ON" : "Long: OFF";
-    if (s_mode_label_face != NULL) {
-        lv_label_set_text(s_mode_label_face, text);
-    }
-    if (s_mode_label_schedule != NULL) {
-        lv_label_set_text(s_mode_label_schedule, text);
-    }
-}
-
-static void mode_event_cb(lv_event_t *event)
-{
-    lv_event_stop_bubbling(event);
-    app_voice_toggle_long_conversation();
-    update_mode_labels();
-}
-
-void app_ui_refresh_long_mode(void)
-{
-    if (bsp_display_lock(100) == ESP_OK) {
-        update_mode_labels();
-        bsp_display_unlock();
-    }
-}
-
-bool app_ui_start_pomodoro(void)
-{
-    if (bsp_display_lock(1000) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to lock display for pomodoro start");
-        return false;
-    }
-
     s_pomodoro_remaining_sec = 25 * 60;
     s_pomodoro_phase = POMODORO_FOCUS;
     s_current_page = UI_PAGE_POMODORO;
@@ -1986,6 +2018,22 @@ bool app_ui_start_pomodoro(void)
     if (s_pomodoro_timer != NULL) {
         lv_timer_reset(s_pomodoro_timer);
     }
+}
+
+static void pomodoro_button_event_cb(lv_event_t *event)
+{
+    lv_event_stop_bubbling(event);
+    start_pomodoro_unlocked();
+}
+
+bool app_ui_start_pomodoro(void)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for pomodoro start");
+        return false;
+    }
+
+    start_pomodoro_unlocked();
 
     bsp_display_unlock();
     return true;
@@ -2224,7 +2272,7 @@ static void make_talk_button(lv_obj_t *parent)
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 2);
 }
 
-static void make_mode_button(lv_obj_t *parent, lv_obj_t **label_out)
+static void make_pomodoro_button(lv_obj_t *parent)
 {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, 160, 43);
@@ -2235,18 +2283,17 @@ static void make_mode_button(lv_obj_t *parent, lv_obj_t **label_out)
     lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(button, 22, LV_PART_MAIN);
     lv_obj_remove_flag(button, LV_OBJ_FLAG_EVENT_BUBBLE);
-    lv_obj_add_event_cb(button, mode_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(button, pomodoro_button_event_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *label = lv_label_create(button);
-    lv_label_set_text(label, "Long: OFF");
+    lv_label_set_text(label, "番茄钟");
     lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_width(label, 120);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, lv_color_hex(0x050706), LV_PART_MAIN);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 2);
-
-    if (label_out != NULL) {
-        *label_out = label;
-    }
 }
 
 void app_ui_init(void)
@@ -2300,13 +2347,16 @@ void app_ui_init(void)
 
     lv_obj_t *light_card = make_metric_card(s_face_page, 340, 196, "Light",
                                             lv_color_hex(0xffe46e), 1, &s_light_label);
+    lv_label_set_text(s_light_label, "--");
     s_light_unit_label = lv_label_create(light_card);
     lv_label_set_text(s_light_unit_label, "lux");
     lv_obj_set_style_text_font(s_light_unit_label, &lv_font_montserrat_26, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_light_unit_label, lv_color_hex(0xffe46e), LV_PART_MAIN);
-    lv_obj_align(s_light_unit_label, LV_ALIGN_TOP_LEFT, 170, 38);
+    lv_obj_update_layout(s_light_label);
+    lv_obj_align_to(s_light_unit_label, s_light_label, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
     s_light_bar = make_bar(light_card, 46, lv_color_hex(0xffe46e));
-    lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 218, 46);
+    lv_obj_set_width(s_light_bar, 118);
+    lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 260, 46);
 
     lv_obj_t *mood_card = make_metric_card(s_face_page, 340, 288, "Mood",
                                            lv_color_hex(0xff9baa), 2, &s_mood_label);
@@ -2342,7 +2392,7 @@ void app_ui_init(void)
     lv_obj_align(s_network_label, LV_ALIGN_RIGHT_MID, 0, 0);
 
     make_talk_button(s_face_page);
-    make_mode_button(s_face_page, &s_mode_label_face);
+    make_pomodoro_button(s_face_page);
 
     s_dialog_label = lv_label_create(s_face_page);
     lv_label_set_text(s_dialog_label, "");
@@ -2717,7 +2767,6 @@ void app_ui_init(void)
     s_pomodoro_timer = lv_timer_create(pomodoro_timer_cb, 1000, NULL);
     s_idle_blink_timer = lv_timer_create(idle_blink_timer_cb, 4200, NULL);
     s_schedule_blink_timer = lv_timer_create(schedule_blink_timer_cb, 3600, NULL);
-    update_mode_labels();
 }
 
 void app_ui_update(const app_plant_state_t *state)
@@ -2741,6 +2790,10 @@ void app_ui_update(const app_plant_state_t *state)
     lv_bar_set_value(s_soil_bar, state->soil_percent, LV_ANIM_ON);
     snprintf(text, sizeof(text), "%lu", (unsigned long)state->light_lux);
     lv_label_set_text(s_light_label, text);
+    if (s_light_unit_label != NULL) {
+        lv_obj_update_layout(s_light_label);
+        lv_obj_align_to(s_light_unit_label, s_light_label, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
+    }
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
     lv_label_set_text(s_mood_label, mood_to_word(state->mood));
     if (s_mood_bar != NULL) {
@@ -2773,11 +2826,6 @@ void app_ui_set_dialog_status(const char *status)
     }
 }
 
-static void emoji_stage_scale_cb(void *obj, int32_t value)
-{
-    lv_obj_set_style_transform_scale((lv_obj_t *)obj, value, LV_PART_MAIN);
-}
-
 static const lv_image_dsc_t *emoji_image_for_id(const char *id)
 {
     if (strcmp(id, "heart") == 0) return &emoji_heart_img;
@@ -2794,180 +2842,129 @@ static const lv_image_dsc_t *emoji_image_for_id(const char *id)
     return &emoji_smile_img;
 }
 
-static void emoji_overlay_finish_cb(lv_timer_t *timer)
+#define PROJECTION_HOLD_MS 1000
+#define PROJECTION_FADE_MS 700
+
+static void delete_projection_overlay_unlocked(void)
 {
-    if (s_emoji_overlay != NULL) {
-        lv_obj_add_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_transform_scale(s_emoji_stage, 256, LV_PART_MAIN);
+    if (s_projection_overlay != NULL) {
+        lv_anim_delete(s_projection_overlay, NULL);
+        lv_obj_delete(s_projection_overlay);
     }
-    s_emoji_overlay_finish_timer = NULL;
-    lv_timer_delete(timer);
+    s_projection_overlay = NULL;
+    s_projection_stage = NULL;
+    s_projection_art = NULL;
+    s_projection_text = NULL;
 }
 
-static void emoji_overlay_hide_cb(lv_timer_t *timer)
+static void restore_projection_page_unlocked(void)
 {
-    if (s_emoji_overlay != NULL) {
-        lv_obj_fade_out(s_emoji_overlay, 360, 0);
-        if (s_emoji_overlay_finish_timer != NULL) {
-            lv_timer_delete(s_emoji_overlay_finish_timer);
-        }
-        s_emoji_overlay_finish_timer = lv_timer_create(emoji_overlay_finish_cb, 380, NULL);
-        lv_timer_set_repeat_count(s_emoji_overlay_finish_timer, 1);
-    }
-    s_emoji_overlay_timer = NULL;
-    lv_timer_delete(timer);
+    s_current_page = s_projection_saved_page;
+    set_page_visible(s_face_page, s_current_page == UI_PAGE_FACE);
+    set_page_visible(s_motion_page, s_current_page == UI_PAGE_MOTION);
+    set_page_visible(s_schedule_page, s_current_page == UI_PAGE_SCHEDULE);
+    set_page_visible(s_pomodoro_page, s_current_page == UI_PAGE_POMODORO);
 }
 
-static void ensure_emoji_overlay(void)
+static void projection_finish_cb(lv_timer_t *timer)
 {
-    if (s_emoji_overlay != NULL) {
+    s_projection_finish_timer = NULL;
+    lv_timer_delete(timer);
+    restore_projection_page_unlocked();
+    delete_projection_overlay_unlocked();
+    ESP_LOGI(TAG, "Projection layer removed; restored page=%d", s_current_page);
+}
+
+static void projection_fade_cb(lv_timer_t *timer)
+{
+    s_projection_hold_timer = NULL;
+    lv_timer_delete(timer);
+    if (s_projection_overlay == NULL) {
         return;
     }
+    lv_obj_fade_out(s_projection_overlay, PROJECTION_FADE_MS, 0);
+    s_projection_finish_timer = lv_timer_create(projection_finish_cb, PROJECTION_FADE_MS + 20, NULL);
+    lv_timer_set_repeat_count(s_projection_finish_timer, 1);
+}
 
-    s_emoji_overlay = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(s_emoji_overlay);
-    lv_obj_set_size(s_emoji_overlay, UI_SCREEN_W, UI_SCREEN_H);
-    lv_obj_set_style_bg_opa(s_emoji_overlay, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
+static void begin_projection_unlocked(void)
+{
+    ui_page_t page_before_projection = s_projection_overlay != NULL ?
+                                       s_projection_saved_page : s_current_page;
+    if (s_projection_hold_timer != NULL) {
+        lv_timer_delete(s_projection_hold_timer);
+        s_projection_hold_timer = NULL;
+    }
+    if (s_projection_finish_timer != NULL) {
+        lv_timer_delete(s_projection_finish_timer);
+        s_projection_finish_timer = NULL;
+    }
+    delete_projection_overlay_unlocked();
+    s_projection_saved_page = page_before_projection;
 
-    s_emoji_stage = lv_obj_create(s_emoji_overlay);
-    lv_obj_remove_style_all(s_emoji_stage);
-    lv_obj_set_size(s_emoji_stage, 430, 430);
-    lv_obj_set_style_bg_opa(s_emoji_stage, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_align(s_emoji_stage, LV_ALIGN_CENTER, 0, 0);
+    s_projection_overlay = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_projection_overlay);
+    lv_obj_set_size(s_projection_overlay, UI_SCREEN_W, UI_SCREEN_H);
+    lv_obj_set_style_bg_color(s_projection_overlay, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_projection_overlay, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_projection_overlay, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_clear_flag(s_projection_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_projection_overlay, LV_OBJ_FLAG_CLICKABLE);
 
-    s_emoji_art = lv_image_create(s_emoji_stage);
-    lv_image_set_src(s_emoji_art, &emoji_smile_img);
-    lv_image_set_scale(s_emoji_art, 420);
-    lv_obj_align(s_emoji_art, LV_ALIGN_CENTER, 0, 0);
+    s_projection_stage = lv_obj_create(s_projection_overlay);
+    lv_obj_remove_style_all(s_projection_stage);
+    lv_obj_set_size(s_projection_stage, 430, 430);
+    lv_obj_set_style_bg_opa(s_projection_stage, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_align(s_projection_stage, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(s_projection_stage, LV_OBJ_FLAG_HIDDEN);
+
+    s_projection_art = lv_image_create(s_projection_stage);
+    lv_image_set_src(s_projection_art, &emoji_smile_img);
+    lv_image_set_scale(s_projection_art, 420);
+    lv_obj_align(s_projection_art, LV_ALIGN_CENTER, 0, 0);
+
+    s_projection_text = lv_label_create(s_projection_overlay);
+    lv_label_set_text(s_projection_text, "");
+    lv_label_set_long_mode(s_projection_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_size(s_projection_text, UI_SCREEN_W - 120, 300);
+    lv_obj_set_style_text_align(s_projection_text, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_projection_text,
+                               s_schedule_title_font != NULL ? s_schedule_title_font : schedule_font(),
+                               LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_projection_text, 8, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_projection_text, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_align(s_projection_text, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(s_projection_text, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_move_foreground(s_projection_overlay);
+    s_projection_hold_timer = lv_timer_create(projection_fade_cb, PROJECTION_HOLD_MS, NULL);
+    lv_timer_set_repeat_count(s_projection_hold_timer, 1);
 }
 
 void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
 {
+    (void)duration_ms;
     if (bsp_display_lock(200) != ESP_OK) {
         return;
     }
-
-    ensure_emoji_overlay();
-    const char *id = emoji_id != NULL ? emoji_id : "";
-    lv_image_set_src(s_emoji_art, emoji_image_for_id(id));
-    lv_obj_clear_flag(s_emoji_overlay, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_emoji_overlay);
-    lv_obj_set_style_opa(s_emoji_overlay, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_transform_scale(s_emoji_stage, 224, LV_PART_MAIN);
-
-    lv_anim_t scale;
-    lv_anim_init(&scale);
-    lv_anim_set_var(&scale, s_emoji_stage);
-    lv_anim_set_exec_cb(&scale, emoji_stage_scale_cb);
-    lv_anim_set_values(&scale, 224, 268);
-    lv_anim_set_duration(&scale, 180);
-    lv_anim_set_playback_duration(&scale, 180);
-    lv_anim_set_path_cb(&scale, lv_anim_path_ease_out);
-    lv_anim_start(&scale);
-
-    if (s_emoji_overlay_timer != NULL) {
-        lv_timer_delete(s_emoji_overlay_timer);
-    }
-    if (s_emoji_overlay_finish_timer != NULL) {
-        lv_timer_delete(s_emoji_overlay_finish_timer);
-        s_emoji_overlay_finish_timer = NULL;
-    }
-    s_emoji_overlay_timer = lv_timer_create(emoji_overlay_hide_cb, duration_ms > 0 ? duration_ms : 2000, NULL);
-    lv_timer_set_repeat_count(s_emoji_overlay_timer, 1);
+    begin_projection_unlocked();
+    lv_image_set_src(s_projection_art, emoji_image_for_id(emoji_id != NULL ? emoji_id : ""));
+    lv_obj_clear_flag(s_projection_stage, LV_OBJ_FLAG_HIDDEN);
     bsp_display_unlock();
-}
-
-static void remote_popup_finish_cb(lv_timer_t *timer)
-{
-    if (s_remote_popup != NULL) {
-        lv_obj_add_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_y(s_remote_popup, -132);
-    }
-    s_remote_popup_finish_timer = NULL;
-    lv_timer_delete(timer);
-}
-
-static void remote_content_hide_cb(lv_timer_t *timer)
-{
-    if (s_remote_popup != NULL) {
-        lv_anim_t slide;
-        lv_anim_init(&slide);
-        lv_anim_set_var(&slide, s_remote_popup);
-        lv_anim_set_exec_cb(&slide, (lv_anim_exec_xcb_t)lv_obj_set_y);
-        lv_anim_set_values(&slide, lv_obj_get_y(s_remote_popup), -132);
-        lv_anim_set_duration(&slide, 220);
-        lv_anim_set_path_cb(&slide, lv_anim_path_ease_in);
-        lv_anim_start(&slide);
-        if (s_remote_popup_finish_timer != NULL) {
-            lv_timer_delete(s_remote_popup_finish_timer);
-        }
-        s_remote_popup_finish_timer = lv_timer_create(remote_popup_finish_cb, 240, NULL);
-        lv_timer_set_repeat_count(s_remote_popup_finish_timer, 1);
-    }
-    s_remote_content_timer = NULL;
-    lv_timer_delete(timer);
-}
-
-static void ensure_remote_popup(void)
-{
-    if (s_remote_popup != NULL) {
-        return;
-    }
-
-    s_remote_popup = lv_obj_create(lv_screen_active());
-    lv_obj_remove_style_all(s_remote_popup);
-    lv_obj_set_size(s_remote_popup, UI_SCREEN_W - 56, UI_SCREEN_H / 4);
-    lv_obj_set_style_radius(s_remote_popup, 28, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_remote_popup, 230, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_remote_popup, lv_color_hex(0x18221b), LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_remote_popup, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_remote_popup, lv_color_hex(0x9ee5b3), LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_remote_popup, 18, LV_PART_MAIN);
-    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(s_remote_popup, LV_ALIGN_TOP_MID, 0, -132);
-    lv_obj_add_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
-
-    s_remote_popup_label = lv_label_create(s_remote_popup);
-    lv_label_set_text(s_remote_popup_label, "");
-    lv_label_set_long_mode(s_remote_popup_label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_remote_popup_label, UI_SCREEN_W - 112);
-    lv_obj_set_style_text_align(s_remote_popup_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_remote_popup_label, schedule_font(), LV_PART_MAIN);
-    lv_obj_set_style_text_line_space(s_remote_popup_label, 5, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_remote_popup_label, lv_color_hex(0xf7fff8), LV_PART_MAIN);
-    lv_obj_align(s_remote_popup_label, LV_ALIGN_CENTER, 0, 0);
 }
 
 void app_ui_show_remote_content(const char *text, uint32_t duration_ms)
 {
-    if (text == NULL || text[0] == '\0') return;
-    if (bsp_display_lock(200) != ESP_OK) return;
-    ensure_remote_popup();
-    lv_label_set_text(s_remote_popup_label, text);
-    lv_obj_clear_flag(s_remote_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_remote_popup);
-    lv_obj_set_y(s_remote_popup, -132);
-
-    lv_anim_t slide;
-    lv_anim_init(&slide);
-    lv_anim_set_var(&slide, s_remote_popup);
-    lv_anim_set_exec_cb(&slide, (lv_anim_exec_xcb_t)lv_obj_set_y);
-    lv_anim_set_values(&slide, -132, 12);
-    lv_anim_set_duration(&slide, 220);
-    lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
-    lv_anim_start(&slide);
-
-    if (s_remote_content_timer != NULL) lv_timer_delete(s_remote_content_timer);
-    if (s_remote_popup_finish_timer != NULL) {
-        lv_timer_delete(s_remote_popup_finish_timer);
-        s_remote_popup_finish_timer = NULL;
+    (void)duration_ms;
+    if (text == NULL || text[0] == '\0') {
+        return;
     }
-    s_remote_content_timer = lv_timer_create(remote_content_hide_cb, duration_ms > 0 ? duration_ms : 2000, NULL);
-    lv_timer_set_repeat_count(s_remote_content_timer, 1);
+    if (bsp_display_lock(200) != ESP_OK) {
+        return;
+    }
+    begin_projection_unlocked();
+    lv_label_set_text(s_projection_text, text);
+    lv_obj_clear_flag(s_projection_text, LV_OBJ_FLAG_HIDDEN);
     bsp_display_unlock();
 }
 

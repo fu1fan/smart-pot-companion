@@ -177,7 +177,7 @@ static void start_voice_stream(http_resp_t *resp, const char *tone)
     const char *safe_tone = tone != NULL && tone[0] != '\0' ? tone : "自然、亲切";
     snprintf(instruction, sizeof(instruction),
              "请使用%s的语气自然表达，保持樱桃小丸子活泼、亲切的角色感。", safe_tone);
-    resp->tts_started = app_tts_stream_begin(instruction, true);
+    resp->tts_started = app_tts_stream_begin(instruction);
     if (!resp->tts_started) {
         ESP_LOGW(TAG, "Seed-TTS stream could not start; will use complete-response fallback");
     } else {
@@ -331,7 +331,6 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
 {
     char safe_trigger[256];
     char user_prompt[1024];
-    bool long_mode = app_voice_long_conversation_enabled();
     utf8_strlcpy(safe_trigger, trigger, sizeof(safe_trigger));
     int prompt_len = snprintf(user_prompt, sizeof(user_prompt),
              "The user's transcribed speech is: \"%s\". "
@@ -339,13 +338,12 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
              "If the user asks multiple questions, answer every question in the same order. "
              "Plant context, use only when the user asks about the plant or care: "
              "soil=%u%%, light=%u%%, mood=%s, light_lux=%u, soil_adc_raw=%u, soil_digital_dry=%s, touch_count=%u, touch_active=%s. "
-             "Reply as 小麦 in concise Simplified Chinese. Your name is 小麦, not 小薯. %s",
+             "Reply as 小麦 in concise Simplified Chinese. Your name is 小麦, not 小薯. "
+             "Answer naturally: a single answer may use up to 48 Chinese characters, or multiple answers together up to 72 Chinese characters.",
               safe_trigger, state->soil_percent, state->light_percent, mood_to_text(state->mood),
              (unsigned int)state->light_lux, (unsigned int)state->soil_adc_raw,
              state->soil_digital_dry ? "true" : "false",
-             (unsigned int)state->touch_count, state->touch_active ? "true" : "false",
-              long_mode ? "Long conversation is enabled: answer naturally within 120 Chinese characters."
-                        : "Answer naturally: a single answer may use up to 48 Chinese characters, or multiple answers together up to 72 Chinese characters.");
+             (unsigned int)state->touch_count, state->touch_active ? "true" : "false");
     if (prompt_len < 0 || prompt_len >= (int)sizeof(user_prompt)) {
         ESP_LOGW(TAG, "DeepSeek user prompt was truncated: required=%d capacity=%u",
                  prompt_len, (unsigned int)sizeof(user_prompt));
@@ -357,7 +355,7 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
     }
 
     cJSON_AddStringToObject(root, "model", CONFIG_SMART_POT_DEEPSEEK_MODEL);
-    cJSON_AddNumberToObject(root, "max_tokens", long_mode ? 160 : 112);
+    cJSON_AddNumberToObject(root, "max_tokens", 112);
     cJSON_AddNumberToObject(root, "temperature", 0.7);
     cJSON_AddBoolToObject(root, "stream", true);
     cJSON *thinking = cJSON_AddObjectToObject(root, "thinking");
@@ -400,7 +398,7 @@ static void finish_voice_with_fallback(const char *ui_status, const char *spoken
 
 static void finish_local_command_with_voice(const char *spoken_text)
 {
-    if (!app_tts_speak_text_no_followup(spoken_text)) {
+    if (!app_tts_speak_once(spoken_text)) {
         ESP_LOGW(TAG, "Local command feedback could not enter TTS queue");
         app_voice_conversation_complete();
     }
@@ -1570,14 +1568,6 @@ static bool handle_voice_mode_command(const char *user_text)
         "关闭番茄钟", "退出番茄钟", "结束番茄钟", "停止番茄钟",
         "关闭番茄中", "退出专注", "结束专注", "停止计时",
     };
-    static const char *const enable_markers[] = {
-        "开启长对话", "打开长对话", "开长对话", "启用长对话",
-        "进入长对话", "开启连续对话", "打开连续对话", "进入连续对话",
-    };
-    static const char *const disable_markers[] = {
-        "关闭长对话", "关掉长对话", "关长对话", "退出长对话",
-        "取消长对话", "结束长对话", "关闭连续对话", "退出连续对话",
-    };
     static const char *const show_schedule_markers[] = {
         "查看日程", "打开日程", "进入日程", "显示日程", "看看日程",
         "查看待办", "打开待办", "显示待办", "看看待办", "待办列表",
@@ -1656,22 +1646,6 @@ static bool handle_voice_mode_command(const char *user_text)
         finish_local_command_with_voice(started ?
                                         "番茄钟开始，努力专注。" :
                                         "番茄钟暂时没打开，请再试一次。");
-        return true;
-    }
-
-    if (text_contains_any(user_text, disable_markers, sizeof(disable_markers) / sizeof(disable_markers[0]))) {
-        app_voice_set_long_conversation(false);
-        app_ui_refresh_long_mode();
-        app_ui_set_dialog_status("Mode: short conversation");
-        (void)app_tts_speak_text("已关闭长对话。");
-        return true;
-    }
-
-    if (text_contains_any(user_text, enable_markers, sizeof(enable_markers) / sizeof(enable_markers[0]))) {
-        app_voice_set_long_conversation(true);
-        app_ui_refresh_long_mode();
-        app_ui_set_dialog_status("Mode: long conversation");
-        (void)app_tts_speak_text("已开启长对话。");
         return true;
     }
 

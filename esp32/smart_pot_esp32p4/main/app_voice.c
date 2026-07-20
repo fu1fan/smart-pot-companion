@@ -38,7 +38,6 @@
 #endif
 
 #define VOICE_SAMPLE_RATE 16000
-#define VOICE_FOLLOWUP_WINDOW_MS 12000
 #define VOICE_REARM_DRAIN_FRAMES 4
 #define VOICE_WAKE_PREROLL_PACKETS 12
 #define VOICE_WAKE_WORD "你好小麦"
@@ -65,10 +64,6 @@
 #define APP_BOARD_VOICE_WAKE_ENERGY_PACKETS 2
 #endif
 
-#ifndef APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
-#define APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE 0
-#endif
-
 #ifndef APP_BOARD_VOICE_TASK_STACK_BYTES
 #define APP_BOARD_VOICE_TASK_STACK_BYTES 12288
 #endif
@@ -80,9 +75,6 @@ static volatile bool s_voice_ready;
 static volatile bool s_manual_request;
 static volatile bool s_conversation_busy;
 static volatile bool s_wakenet_rearm_requested;
-static volatile bool s_followup_request;
-static volatile bool s_long_conversation_enabled;
-static volatile TickType_t s_followup_deadline;
 
 static bool transcript_has_text(const char *text)
 {
@@ -278,22 +270,6 @@ static bool service_pending_voice_request(esp_codec_dev_handle_t mic)
         transcribe_and_reply(mic, false);
         return true;
     }
-
-#if APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
-    if (s_followup_request) {
-        TickType_t now = xTaskGetTickCount();
-        if ((int32_t)(now - s_followup_deadline) >= 0) {
-            s_followup_request = false;
-            app_ui_set_voice_status(VOICE_WAKE_HINT);
-        } else {
-            s_followup_request = false;
-            ESP_LOGI(TAG, "Follow-up voice conversation requested");
-            app_ui_set_voice_status("ASR: follow-up");
-            transcribe_and_reply(mic, true);
-            return true;
-        }
-    }
-#endif
 
     return false;
 }
@@ -675,47 +651,11 @@ void app_voice_request_conversation(void)
     s_manual_request = true;
 }
 
-bool app_voice_toggle_long_conversation(void)
-{
-    s_long_conversation_enabled = !s_long_conversation_enabled;
-    ESP_LOGI(TAG, "Long conversation mode: %s", s_long_conversation_enabled ? "on" : "off");
-    return s_long_conversation_enabled;
-}
-
-bool app_voice_set_long_conversation(bool enabled)
-{
-    s_long_conversation_enabled = enabled;
-    ESP_LOGI(TAG, "Long conversation mode: %s", s_long_conversation_enabled ? "on" : "off");
-    return s_long_conversation_enabled;
-}
-
-bool app_voice_long_conversation_enabled(void)
-{
-    return s_long_conversation_enabled;
-}
-
 void app_voice_conversation_complete(void)
-{
-    app_voice_conversation_complete_with_followup(false);
-}
-
-void app_voice_conversation_complete_with_followup(bool enable_followup)
 {
     s_conversation_busy = false;
     s_wakenet_rearm_requested = true;
-#if APP_BOARD_VOICE_WAKELESS_FOLLOWUP_ENABLE
-    if (enable_followup && s_voice_ready && s_long_conversation_enabled) {
-        s_followup_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(VOICE_FOLLOWUP_WINDOW_MS);
-        s_followup_request = true;
-        app_ui_set_voice_status("ASR: keep talking");
-    } else {
-#else
-    (void)enable_followup;
-    {
-#endif
-        s_followup_request = false;
-        app_ui_set_voice_status(VOICE_WAKE_HINT);
-    }
+    app_ui_set_voice_status(VOICE_WAKE_HINT);
 }
 
 static bool wait_for_microphone_state(bool paused, uint32_t timeout_ms)
