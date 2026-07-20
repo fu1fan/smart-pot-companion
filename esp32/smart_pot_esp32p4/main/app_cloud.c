@@ -436,7 +436,7 @@ static void handle_command(const char *json)
             ok = false;
         }
     } else if (strcmp(type->valuestring, "REMOTE_TOUCH") == 0) {
-        app_ui_play_touch_reaction();
+        app_ui_play_remote_touch_reaction();
         publish_event("REMOTE_TOUCH");
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");

@@ -85,6 +85,7 @@ static lv_obj_t *s_projection_overlay;
 static lv_obj_t *s_projection_stage;
 static lv_obj_t *s_projection_art;
 static lv_obj_t *s_projection_text;
+static lv_obj_t *s_message_popup;
 static lv_obj_t *s_motion_status_label;
 static lv_obj_t *s_motion_roll_label;
 static lv_obj_t *s_motion_pitch_label;
@@ -125,6 +126,7 @@ static lv_obj_t *s_cat_zzz_label;
 static lv_obj_t *s_cat_heart;
 static lv_timer_t *s_touch_blink_timer;
 static lv_timer_t *s_projection_hold_timer;
+static lv_timer_t *s_message_hold_timer;
 static lv_timer_t *s_heart_hide_timer;
 static lv_timer_t *s_motion_reaction_timer;
 static lv_timer_t *s_idle_blink_timer;
@@ -133,6 +135,7 @@ static lv_timer_t *s_schedule_blink_restore_timer;
 static lv_timer_t *s_pomodoro_timer;
 static lv_timer_t *s_schedule_cleanup_timer;
 static lv_timer_t *s_projection_finish_timer;
+static lv_timer_t *s_message_finish_timer;
 static int32_t s_pomodoro_remaining_sec;
 static pomodoro_phase_t s_pomodoro_phase = POMODORO_IDLE;
 static char s_schedule_items[SCHEDULE_MAX_ITEMS][SCHEDULE_ITEM_LEN];
@@ -1785,9 +1788,8 @@ static const touch_voice_t *select_touch_voice(app_mood_t mood)
     return &options[sequence++ % count];
 }
 
-void app_ui_play_touch_reaction(void)
+static void play_touch_reaction(const touch_voice_t *voice)
 {
-    const touch_voice_t *voice = select_touch_voice(s_current_mood);
     if (bsp_display_lock(100) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to lock display for touch reaction");
         return;
@@ -1829,6 +1831,20 @@ void app_ui_play_touch_reaction(void)
     if (!app_tts_speak_text_with_tone(voice->text, voice->tone)) {
         ESP_LOGW(TAG, "Touch voice feedback queue failed");
     }
+}
+
+void app_ui_play_touch_reaction(void)
+{
+    play_touch_reaction(select_touch_voice(s_current_mood));
+}
+
+void app_ui_play_remote_touch_reaction(void)
+{
+    static const touch_voice_t remote_voice = {
+        .text = "收到你从远方传来的摸摸啦",
+        .tone = APP_TTS_TONE_CHEERFUL,
+    };
+    play_touch_reaction(&remote_voice);
 }
 
 static void motion_reaction_timer_cb(lv_timer_t *timer)
@@ -2286,12 +2302,9 @@ static void make_pomodoro_button(lv_obj_t *parent)
     lv_obj_add_event_cb(button, pomodoro_button_event_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *label = lv_label_create(button);
-    lv_label_set_text(label, "番茄钟");
+    lv_label_set_text(label, "Tomato");
     lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_width(label, 120);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(label, &lv_font_source_han_sans_sc_16_cjk, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, lv_color_hex(0x050706), LV_PART_MAIN);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 2);
 }
@@ -2355,8 +2368,7 @@ void app_ui_init(void)
     lv_obj_update_layout(s_light_label);
     lv_obj_align_to(s_light_unit_label, s_light_label, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
     s_light_bar = make_bar(light_card, 46, lv_color_hex(0xffe46e));
-    lv_obj_set_width(s_light_bar, 118);
-    lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 260, 46);
+    lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 218, 46);
 
     lv_obj_t *mood_card = make_metric_card(s_face_page, 340, 288, "Mood",
                                            lv_color_hex(0xff9baa), 2, &s_mood_label);
@@ -2791,8 +2803,17 @@ void app_ui_update(const app_plant_state_t *state)
     snprintf(text, sizeof(text), "%lu", (unsigned long)state->light_lux);
     lv_label_set_text(s_light_label, text);
     if (s_light_unit_label != NULL) {
+        lv_obj_align(s_light_label, LV_ALIGN_TOP_LEFT, 112, 38);
         lv_obj_update_layout(s_light_label);
         lv_obj_align_to(s_light_unit_label, s_light_label, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
+        lv_obj_update_layout(s_light_unit_label);
+        const int32_t bar_x = lv_obj_get_x(s_light_bar);
+        const int32_t unit_right = lv_obj_get_x(s_light_unit_label) + lv_obj_get_width(s_light_unit_label);
+        const int32_t overflow = unit_right - (bar_x - 8);
+        if (overflow > 0) {
+            lv_obj_set_x(s_light_label, lv_obj_get_x(s_light_label) - overflow);
+            lv_obj_align_to(s_light_unit_label, s_light_label, LV_ALIGN_OUT_RIGHT_MID, 5, 0);
+        }
     }
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
     lv_label_set_text(s_mood_label, mood_to_word(state->mood));
@@ -2953,18 +2974,108 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
     bsp_display_unlock();
 }
 
+#define MESSAGE_POPUP_H 120
+#define MESSAGE_POPUP_SLIDE_MS 300
+
+static void message_popup_y_anim_cb(void *obj, int32_t value)
+{
+    lv_obj_set_y((lv_obj_t *)obj, value);
+}
+
+static void delete_message_popup_unlocked(void)
+{
+    if (s_message_popup != NULL) {
+        lv_anim_delete(s_message_popup, message_popup_y_anim_cb);
+        lv_obj_delete(s_message_popup);
+        s_message_popup = NULL;
+    }
+}
+
+static void message_popup_finish_cb(lv_timer_t *timer)
+{
+    s_message_finish_timer = NULL;
+    lv_timer_delete(timer);
+    delete_message_popup_unlocked();
+}
+
+static void message_popup_hide_cb(lv_timer_t *timer)
+{
+    s_message_hold_timer = NULL;
+    lv_timer_delete(timer);
+    if (s_message_popup == NULL) {
+        return;
+    }
+
+    lv_anim_t slide;
+    lv_anim_init(&slide);
+    lv_anim_set_var(&slide, s_message_popup);
+    lv_anim_set_exec_cb(&slide, message_popup_y_anim_cb);
+    lv_anim_set_values(&slide, lv_obj_get_y(s_message_popup), -MESSAGE_POPUP_H);
+    lv_anim_set_duration(&slide, MESSAGE_POPUP_SLIDE_MS);
+    lv_anim_start(&slide);
+
+    s_message_finish_timer = lv_timer_create(message_popup_finish_cb,
+                                             MESSAGE_POPUP_SLIDE_MS + 20, NULL);
+    lv_timer_set_repeat_count(s_message_finish_timer, 1);
+}
+
+static void show_message_popup_unlocked(const char *text, uint32_t duration_ms)
+{
+    if (s_message_hold_timer != NULL) {
+        lv_timer_delete(s_message_hold_timer);
+        s_message_hold_timer = NULL;
+    }
+    if (s_message_finish_timer != NULL) {
+        lv_timer_delete(s_message_finish_timer);
+        s_message_finish_timer = NULL;
+    }
+    delete_message_popup_unlocked();
+
+    s_message_popup = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(s_message_popup, UI_SCREEN_W, MESSAGE_POPUP_H);
+    lv_obj_set_pos(s_message_popup, 0, -MESSAGE_POPUP_H);
+    lv_obj_set_style_radius(s_message_popup, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_message_popup, lv_color_hex(0x173f2d), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_message_popup, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_message_popup, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_message_popup, 18, LV_PART_MAIN);
+    lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_message_popup, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *label = lv_label_create(s_message_popup);
+    lv_label_set_text(label, text);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, UI_SCREEN_W - 72);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label,
+                               s_schedule_title_font != NULL ? s_schedule_title_font : schedule_font(),
+                               LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_center(label);
+    lv_obj_move_foreground(s_message_popup);
+
+    lv_anim_t slide;
+    lv_anim_init(&slide);
+    lv_anim_set_var(&slide, s_message_popup);
+    lv_anim_set_exec_cb(&slide, message_popup_y_anim_cb);
+    lv_anim_set_values(&slide, -MESSAGE_POPUP_H, 0);
+    lv_anim_set_duration(&slide, 240);
+    lv_anim_start(&slide);
+
+    s_message_hold_timer = lv_timer_create(message_popup_hide_cb,
+                                           duration_ms > 0 ? duration_ms : 2000, NULL);
+    lv_timer_set_repeat_count(s_message_hold_timer, 1);
+}
+
 void app_ui_show_remote_content(const char *text, uint32_t duration_ms)
 {
-    (void)duration_ms;
     if (text == NULL || text[0] == '\0') {
         return;
     }
     if (bsp_display_lock(200) != ESP_OK) {
         return;
     }
-    begin_projection_unlocked();
-    lv_label_set_text(s_projection_text, text);
-    lv_obj_clear_flag(s_projection_text, LV_OBJ_FLAG_HIDDEN);
+    show_message_popup_unlocked(text, duration_ms);
     bsp_display_unlock();
 }
 

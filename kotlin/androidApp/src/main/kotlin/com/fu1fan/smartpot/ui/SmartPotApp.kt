@@ -1252,7 +1252,7 @@ private fun ControlScreen(
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     var projectionMode by rememberSaveable { mutableStateOf<String?>(null) }
-    var lightExpanded by rememberSaveable { mutableStateOf(true) }
+    var lightExpanded by rememberSaveable { mutableStateOf(false) }
     var shareExpanded by rememberSaveable { mutableStateOf(false) }
     var settingsExpanded by rememberSaveable { mutableStateOf(false) }
     var share by rememberSaveable { mutableStateOf("") }
@@ -1676,8 +1676,8 @@ private fun CompanionScreen(
     var scheduleTitle by rememberSaveable { mutableStateOf("") }
     var scheduleDueAtText by rememberSaveable { mutableStateOf<String?>(null) }
     var scheduleFormVisible by rememberSaveable { mutableStateOf(false) }
-    var chatExpanded by rememberSaveable { mutableStateOf(true) }
-    var memoryExpanded by rememberSaveable { mutableStateOf(true) }
+    var chatExpanded by rememberSaveable { mutableStateOf(false) }
+    var memoryExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingMemoryDelete by remember { mutableStateOf<UserMemory?>(null) }
     val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
         .getOrDefault(ZoneId.of("Asia/Shanghai"))

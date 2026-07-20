@@ -52,6 +52,7 @@ void app_ui_set_network_status(const char *status);
 void app_ui_set_dialog_status(const char *status);
 void app_ui_set_voice_status(const char *status);
 void app_ui_play_touch_reaction(void);
+void app_ui_play_remote_touch_reaction(void);
 void app_ui_play_motion_reaction(app_ui_motion_reaction_t reaction, uint32_t duration_ms);
 void app_ui_clear_motion_reaction(void);
 void app_ui_update_motion_debug(const app_ui_motion_debug_state_t *state);
