@@ -98,12 +98,18 @@ class ApplicationTest {
         val response = api.get("/api/v1/species")
         assertEquals(HttpStatusCode.OK, response.status)
         val species = response.body<List<PlantSpecies>>()
-        assertEquals(50, species.size)
+        assertEquals(51, species.size)
         val cactus = species.first { it.id == "cactus" }
         val basil = species.first { it.id == "basil" }
+        val pinkAnthurium = species.first { it.id == "pink-anthurium" }
         assertEquals(1_000, cactus.thresholds.lightMinLux)
         assertEquals(10_000, cactus.thresholds.lightMaxLux)
         assertEquals(1_000, basil.thresholds.lightMinLux)
+        assertEquals("粉掌（花烛）", pinkAnthurium.chineseName)
+        assertEquals(40, pinkAnthurium.thresholds.soilMinPercent)
+        assertEquals(70, pinkAnthurium.thresholds.soilMaxPercent)
+        assertEquals(250, pinkAnthurium.thresholds.lightMinLux)
+        assertEquals(2_700, pinkAnthurium.thresholds.lightMaxLux)
     }
 
     @Test

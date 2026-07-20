@@ -60,6 +60,7 @@ object SpeciesCatalog {
         Seed("bonsai-ficus", "榕树盆景", "Ficus microcarpa", 35..65, 1800..15000, 7, 25, "喜温暖明亮环境，避免突然改变光照。"),
         Seed("bamboo-palm", "散尾葵", "Dypsis lutescens", 40..70, 800..10000, 6, 30, "喜温暖湿润和散射光，叶尖干枯时检查水分。"),
         Seed("anthurium", "红掌", "Anthurium andraeanum", 40..70, 700..8000, 6, 22, "偏好温暖高湿和明亮散射光。"),
+        Seed("pink-anthurium", "粉掌（花烛）", "Anthurium andraeanum", 40..70, 700..8000, 6, 22, "喜温暖湿润和明亮散射光，避免阳光直射；生长期保持盆土微湿且不积水。"),
         Seed("cyclamen", "仙客来", "Cyclamen persicum", 35..60, 1200..10000, 6, 20, "喜凉爽，休眠期减少浇水。"),
         Seed("clivia", "君子兰", "Clivia miniata", 30..55, 600..7000, 9, 30, "喜散射光，肉质根怕积水。"),
         Seed("peperomia", "豆瓣绿", "Peperomia obtusifolia", 25..55, 600..8000, 10, 35, "叶片储水，浇水不宜过勤。"),
