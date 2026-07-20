@@ -8,6 +8,8 @@ import android.graphics.BitmapFactory
 import android.location.LocationManager
 import android.net.Uri
 import android.util.Base64
+import android.view.ViewGroup
+import android.widget.NumberPicker
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -49,6 +51,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.os.CancellationSignal
@@ -57,6 +61,7 @@ import com.fu1fan.smartpot.R
 import com.fu1fan.smartpot.protocol.*
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -1661,7 +1666,7 @@ private fun CompanionScreen(
     addMemory: (String) -> Unit,
     deleteMemory: (UserMemory) -> Unit,
     selectDay: (String) -> Unit,
-    addSchedule: (String, String) -> Unit,
+    addSchedule: (String, Instant) -> Unit,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
     recordPomodoro: () -> Unit,
     removePomodoro: () -> Unit,
@@ -1669,7 +1674,7 @@ private fun CompanionScreen(
     var input by rememberSaveable { mutableStateOf("") }
     var memory by rememberSaveable { mutableStateOf("") }
     var scheduleTitle by rememberSaveable { mutableStateOf("") }
-    var scheduleTime by rememberSaveable { mutableStateOf("") }
+    var scheduleDueAtText by rememberSaveable { mutableStateOf<String?>(null) }
     var scheduleFormVisible by rememberSaveable { mutableStateOf(false) }
     var chatExpanded by rememberSaveable { mutableStateOf(true) }
     var memoryExpanded by rememberSaveable { mutableStateOf(true) }
@@ -1737,13 +1742,16 @@ private fun CompanionScreen(
                 onToggleForm = { scheduleFormVisible = !scheduleFormVisible },
                 title = scheduleTitle,
                 onTitleChange = { scheduleTitle = it.take(80) },
-                time = scheduleTime,
-                onTimeChange = { scheduleTime = it.take(40) },
+                dueAt = scheduleDueAtText?.let { value -> runCatching { Instant.parse(value) }.getOrNull() },
+                onDueAtChange = { scheduleDueAtText = it.toString() },
                 onAdd = {
-                    addSchedule(scheduleTitle, scheduleTime)
-                    scheduleTitle = ""
-                    scheduleTime = ""
-                    scheduleFormVisible = false
+                    val selectedDueAt = scheduleDueAtText?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
+                    if (selectedDueAt?.isAfter(Instant.now()) == true) {
+                        addSchedule(scheduleTitle, selectedDueAt)
+                        scheduleTitle = ""
+                        scheduleDueAtText = null
+                        scheduleFormVisible = false
+                    }
                 },
                 toggleSchedule = toggleSchedule,
             )
@@ -1902,14 +1910,25 @@ private fun CompanionScheduleCard(
     onToggleForm: () -> Unit,
     title: String,
     onTitleChange: (String) -> Unit,
-    time: String,
-    onTimeChange: (String) -> Unit,
+    dueAt: Instant?,
+    onDueAtChange: (Instant) -> Unit,
     onAdd: () -> Unit,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
 ) {
     val items = state.schedule?.items.orEmpty()
     val timezone = state.snapshot?.pot?.timezone ?: "Asia/Shanghai"
-    val timeValid = parseScheduleDueAtInput(time, timezone) != null
+    var pickerVisible by rememberSaveable { mutableStateOf(false) }
+    if (pickerVisible) {
+        ScheduleDateTimeWheelDialog(
+            timezone = timezone,
+            initialDueAt = dueAt,
+            onDismiss = { pickerVisible = false },
+            onConfirm = {
+                onDueAtChange(it)
+                pickerVisible = false
+            },
+        )
+    }
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -1923,20 +1942,160 @@ private fun CompanionScheduleCard(
             }
             if (formVisible) {
                 OutlinedTextField(title, onTitleChange, label = { Text("任务名称") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(
-                    time,
-                    onTimeChange,
-                    label = { Text("提醒时间 MM-dd/HH:mm") },
+                OutlinedButton(
+                    onClick = { pickerVisible = true },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    isError = time.isNotBlank() && !timeValid,
-                )
-                Button(onClick = onAdd, enabled = title.isNotBlank() && timeValid, modifier = Modifier.fillMaxWidth()) { Text("添加并同步到 ESP") }
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                ) {
+                    Column(Modifier.fillMaxWidth()) {
+                        Text("提醒时间", color = Muted, fontSize = 11.sp)
+                        Text(scheduleSelectionText(dueAt, timezone), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Button(
+                    onClick = onAdd,
+                    enabled = title.isNotBlank() && dueAt?.isAfter(Instant.now()) == true,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("添加并同步到 ESP") }
                 HorizontalDivider(color = CardBorder)
             }
             ScheduleTable(items, toggleSchedule)
         }
     }
+}
+
+@Composable
+private fun ScheduleDateTimeWheelDialog(
+    timezone: String,
+    initialDueAt: Instant?,
+    onDismiss: () -> Unit,
+    onConfirm: (Instant) -> Unit,
+) {
+    val zone = remember(timezone) {
+        runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+    }
+    val initial = remember(zone, initialDueAt) {
+        initialDueAt?.takeIf { it.isAfter(Instant.now()) }?.atZone(zone) ?: nextScheduleWheelTime(zone)
+    }
+    var month by rememberSaveable { mutableIntStateOf(initial.monthValue) }
+    var day by rememberSaveable { mutableIntStateOf(initial.dayOfMonth) }
+    var hour by rememberSaveable { mutableIntStateOf(initial.hour) }
+    var minute by rememberSaveable { mutableIntStateOf(initial.minute) }
+    val maxDay = remember(month, zone) { scheduleWheelMaxDay(month, zone) }
+    LaunchedEffect(maxDay) {
+        day = day.coerceAtMost(maxDay)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = Color.White,
+            tonalElevation = 6.dp,
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("选择提醒时间", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    ScheduleNumberWheel("月", month, 1..12) {
+                        month = it
+                        day = day.coerceAtMost(scheduleWheelMaxDay(month, zone))
+                    }
+                    ScheduleNumberWheel("日", day, 1..maxDay) { day = it }
+                    ScheduleNumberWheel("时", hour, 0..23) { hour = it }
+                    ScheduleNumberWheel("分", minute, 0..59) { minute = it }
+                }
+                Text(
+                    scheduleWheelPreview(zone, month, day, hour, minute),
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    color = Leaf,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                    TextButton(onClick = { onConfirm(resolveScheduleWheelInstant(zone, month, day, hour, minute)) }) {
+                        Text("确定")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScheduleNumberWheel(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    val displayedValues = remember(range.first, range.last) {
+        range.map { "%02d".format(it) }.toTypedArray()
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = Muted, fontSize = 12.sp)
+        AndroidView(
+            modifier = Modifier.width(62.dp).height(146.dp),
+            factory = { context ->
+                NumberPicker(context).apply {
+                    descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                }
+            },
+            update = { picker ->
+                picker.setOnValueChangedListener(null)
+                picker.displayedValues = null
+                picker.minValue = range.first
+                picker.maxValue = range.last
+                picker.displayedValues = displayedValues
+                picker.wrapSelectorWheel = range.count() > 3
+                picker.value = value.coerceIn(range)
+                picker.setOnValueChangedListener { _, _, newValue -> onValueChange(newValue) }
+            },
+        )
+    }
+}
+
+private fun nextScheduleWheelTime(zone: ZoneId): ZonedDateTime {
+    var next = ZonedDateTime.now(zone).withSecond(0).withNano(0).plusMinutes(1)
+    val remainder = next.minute % 5
+    if (remainder != 0) next = next.plusMinutes((5 - remainder).toLong())
+    return next
+}
+
+private fun scheduleWheelMaxDay(month: Int, zone: ZoneId): Int {
+    val year = ZonedDateTime.now(zone).year
+    return maxOf(YearMonth.of(year, month).lengthOfMonth(), YearMonth.of(year + 1, month).lengthOfMonth())
+}
+
+private fun resolveScheduleWheelInstant(
+    zone: ZoneId,
+    month: Int,
+    day: Int,
+    hour: Int,
+    minute: Int,
+    now: Instant = Instant.now(),
+): Instant {
+    val currentYear = now.atZone(zone).year
+    fun candidate(year: Int): ZonedDateTime? {
+        if (day > YearMonth.of(year, month).lengthOfMonth()) return null
+        return ZonedDateTime.of(year, month, day, hour, minute, 0, 0, zone)
+    }
+    for (year in currentYear..currentYear + 8) {
+        val value = candidate(year) ?: continue
+        if (value.toInstant().isAfter(now)) return value.toInstant()
+    }
+    error("Unable to resolve the selected schedule date")
+}
+
+private fun scheduleWheelPreview(zone: ZoneId, month: Int, day: Int, hour: Int, minute: Int): String {
+    val dueAt = resolveScheduleWheelInstant(zone, month, day, hour, minute)
+    return DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm").format(dueAt.atZone(zone))
+}
+
+private fun scheduleSelectionText(dueAt: Instant?, timezone: String): String {
+    if (dueAt == null) return "选择月、日、时、分"
+    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+    return DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm").format(dueAt.atZone(zone))
 }
 
 @Composable

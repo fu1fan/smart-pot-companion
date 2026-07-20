@@ -16,7 +16,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.round
@@ -217,11 +216,8 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
-    fun addSchedule(title: String, displayTime: String) = withPot { id ->
+    fun addSchedule(title: String, dueAt: Instant) = withPot { id ->
         val timezone = mutableState.value.snapshot?.pot?.timezone ?: "Asia/Shanghai"
-        val dueAt = requireNotNull(parseScheduleDueAtInput(displayTime, timezone)) {
-            "提醒时间请填写为 MM-dd/HH:mm，例如 07-18/23:20"
-        }
         api.addSchedule(
             id,
             CreateScheduleItemRequest(
@@ -311,28 +307,6 @@ class SmartPotViewModel : ViewModel() {
             override fun <T : ViewModel> create(modelClass: Class<T>): T = SmartPotViewModel() as T
         }
     }
-}
-
-internal fun parseScheduleDueAtInput(
-    value: String,
-    timezone: String,
-    now: Instant = Instant.now(),
-): Instant? {
-    val text = value.trim()
-    if (text.isBlank()) return null
-    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
-    val current = now.atZone(zone)
-    val fullFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd/HH:mm")
-    val local = runCatching { LocalDateTime.parse(text.replace(' ', '/'), fullFormatter) }
-        .recoverCatching { LocalDateTime.parse("${current.year}-$text", fullFormatter) }
-        .recoverCatching {
-            val time = java.time.LocalTime.parse(text, DateTimeFormatter.ofPattern("HH:mm"))
-            var dateTime = current.toLocalDate().atTime(time)
-            if (!dateTime.atZone(zone).toInstant().isAfter(now)) dateTime = dateTime.plusDays(1)
-            dateTime
-        }
-        .getOrNull() ?: return null
-    return local.atZone(zone).toInstant()
 }
 
 internal fun scheduleDisplayTime(dueAt: Instant, timezone: String): String {
