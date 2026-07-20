@@ -27,8 +27,10 @@ class DiaryService(
     suspend fun saveManual(potId: String, request: CreateDiaryRequest, date: LocalDate): PlantDiary {
         val title = request.title.trim()
         val content = request.content.trim()
+        val authorName = request.authorName?.trim()?.takeIf(String::isNotBlank)
         require(title.isNotBlank() && title.length <= 60) { "日记标题应为 1-60 个字符" }
         require(content.isNotBlank() && content.length <= 1_000) { "日记内容应为 1-1000 个字符" }
+        require(authorName == null || authorName.length <= 20) { "日记署名不能超过 20 个字符" }
         require(request.moodEmoji == null || request.moodEmoji in setOf("😊", "🌱", "💧", "☀️", "🥰", "😴")) { "不支持的日记表情" }
         require(request.imageDataUrls.size <= 3) { "每篇日记最多上传 3 张照片" }
         request.imageDataUrls.forEach { image ->
@@ -49,6 +51,7 @@ class DiaryService(
             imageDataUrls = request.imageDataUrls,
             moodEmoji = request.moodEmoji,
             author = DiaryAuthor.USER,
+            authorName = authorName,
         )
         store.upsertDiary(diary)
         affinity.award(potId, "diary:${date}:USER", 1)

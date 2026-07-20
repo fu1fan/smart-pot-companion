@@ -248,12 +248,13 @@ class ApplicationTest {
         val updated = api.post("/api/v1/pots/${pot.id}/diaries") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(uploadedImage), "😊"))
+            setBody(CreateDiaryRequest("今天的新叶", "叶片已经完全展开。", listOf(uploadedImage), "😊", "小雨"))
         }.body<com.fu1fan.smartpot.protocol.PlantDiary>()
 
         assertEquals(created.id, updated.id)
         assertEquals("叶片已经完全展开。", updated.content)
         assertEquals(DiaryAuthor.USER, updated.author)
+        assertEquals("小雨", updated.authorName)
         assertEquals(listOf(uploadedImage), updated.imageDataUrls)
         val diaries = api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<PlantDiary>>()
         assertEquals(2, diaries.size)

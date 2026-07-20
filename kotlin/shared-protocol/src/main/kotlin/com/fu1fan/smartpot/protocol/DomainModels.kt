@@ -170,6 +170,7 @@ data class PlantDiary(
     val imageDataUrls: List<String> = emptyList(),
     val moodEmoji: String? = null,
     val author: DiaryAuthor = DiaryAuthor.WHEAT,
+    val authorName: String? = null,
 )
 
 @Serializable
@@ -178,6 +179,7 @@ data class CreateDiaryRequest(
     val content: String,
     val imageDataUrls: List<String> = emptyList(),
     val moodEmoji: String? = null,
+    val authorName: String? = null,
 )
 
 @Serializable

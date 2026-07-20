@@ -747,7 +747,7 @@ private fun AdviceCard(title: String, lines: List<String>, color: Color = SoftLe
 private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String) -> Unit,
-    saveDiary: (String, String, List<String>, String?) -> Unit,
+    saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
     refreshWeather: (Double, Double) -> Unit,
 ) {
@@ -1041,7 +1041,7 @@ private fun CareDiarySection(
     state: SmartPotUiState,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
-    saveDiary: (String, String, List<String>, String?) -> Unit,
+    saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
@@ -1053,6 +1053,7 @@ private fun CareDiarySection(
     var editorVisible by rememberSaveable { mutableStateOf(false) }
     var title by rememberSaveable { mutableStateOf("") }
     var content by rememberSaveable { mutableStateOf("") }
+    var authorName by rememberSaveable { mutableStateOf("") }
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
     var imageDataUrls by remember { mutableStateOf<List<String>>(emptyList()) }
     val context = LocalContext.current
@@ -1065,6 +1066,7 @@ private fun CareDiarySection(
     fun openEditor() {
         title = todayDiary?.title ?: "今天的小麦"
         content = todayDiary?.content ?: ""
+        authorName = todayDiary?.authorName.orEmpty()
         mood = todayDiary?.moodEmoji
         imageDataUrls = todayDiary?.imageDataUrls.orEmpty()
         editorVisible = true
@@ -1092,6 +1094,15 @@ private fun CareDiarySection(
                             onValueChange = { title = it.take(60) },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("日记标题") },
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = authorName,
+                            onValueChange = { authorName = it.take(20) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("署名（可选）") },
+                            placeholder = { Text("例如：小雨、植物主人") },
+                            supportingText = { Text("留空时显示“用户”") },
                             singleLine = true,
                         )
                         OutlinedTextField(
@@ -1135,7 +1146,7 @@ private fun CareDiarySection(
                         }
                         Button(
                             onClick = {
-                                saveDiary(title.trim(), content.trim(), imageDataUrls, mood)
+                                saveDiary(title.trim(), content.trim(), imageDataUrls, mood, authorName.trim().ifBlank { null })
                                 editorVisible = false
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -1176,7 +1187,12 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(diary.diaryDate, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
             Spacer(Modifier.width(8.dp))
-            Text(if (diary.author == DiaryAuthor.WHEAT) "小麦" else "用户", color = Leaf, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (diary.author == DiaryAuthor.WHEAT) "小麦" else diary.authorName?.takeIf(String::isNotBlank) ?: "用户",
+                color = Leaf,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
             Spacer(Modifier.width(8.dp))
             Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(diaryMoodEmoji(diary), fontSize = 16.sp)

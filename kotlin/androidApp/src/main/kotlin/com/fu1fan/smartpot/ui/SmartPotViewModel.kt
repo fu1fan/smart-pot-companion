@@ -201,8 +201,8 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(diaries = (listOf(diary) + it.diaries).distinctBy(PlantDiary::id)) }
     }
 
-    fun saveDiary(title: String, content: String, imageDataUrls: List<String>, moodEmoji: String?) = withPot { id ->
-        val diary = api.addDiary(id, CreateDiaryRequest(title, content, imageDataUrls, moodEmoji))
+    fun saveDiary(title: String, content: String, imageDataUrls: List<String>, moodEmoji: String?, authorName: String?) = withPot { id ->
+        val diary = api.addDiary(id, CreateDiaryRequest(title, content, imageDataUrls, moodEmoji, authorName))
         mutableState.update { state -> state.copy(diaries = (listOf(diary) + state.diaries).distinctBy(PlantDiary::id)) }
     }
 
@@ -268,12 +268,19 @@ class SmartPotViewModel : ViewModel() {
         }
     }
 
-    fun speakDiary(diary: PlantDiary) = control(
-        DeviceControlRequest(
-            type = DeviceCommandType.SPEAK_TEXT,
-            text = "${diary.title}。${diary.content}".take(96),
-        ),
-    )
+    fun speakDiary(diary: PlantDiary) {
+        val id = mutableState.value.selectedPotId ?: return
+        val chunks = splitTextForTts("${diary.title}。${diary.content}")
+        launchAction {
+            chunks.forEachIndexed { index, chunk ->
+                val result = api.control(id, DeviceControlRequest(type = DeviceCommandType.SPEAK_TEXT, text = chunk))
+                mutableState.update { it.copy(lastCommand = result) }
+                check(result.acknowledged && result.ack?.status != CommandAckStatus.FAILED) {
+                    "ESP 未能接收日记第 ${index + 1}/${chunks.size} 段，请稍后重试"
+                }
+            }
+        }
+    }
 
     fun control(request: DeviceControlRequest) = withPot { id ->
         val result = api.control(id, request)
@@ -382,4 +389,36 @@ class SmartPotViewModel : ViewModel() {
 internal fun scheduleDisplayTime(dueAt: Instant, timezone: String): String {
     val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
     return DateTimeFormatter.ofPattern("MM-dd/HH:mm").format(dueAt.atZone(zone))
+}
+
+internal fun splitTextForTts(text: String, maxUtf8Bytes: Int = 220, maxChars: Int = 90): List<String> {
+    require(maxUtf8Bytes >= 16)
+    require(maxChars >= 8)
+    val normalized = text.trim()
+    if (normalized.isEmpty()) return emptyList()
+    val chunks = mutableListOf<String>()
+    val current = StringBuilder()
+    var currentBytes = 0
+    var offset = 0
+
+    fun flush() {
+        current.toString().trim().takeIf(String::isNotEmpty)?.let(chunks::add)
+        current.clear()
+        currentBytes = 0
+    }
+
+    while (offset < normalized.length) {
+        val codePoint = normalized.codePointAt(offset)
+        val token = String(Character.toChars(codePoint))
+        val tokenBytes = token.toByteArray(Charsets.UTF_8).size
+        if ((currentBytes + tokenBytes > maxUtf8Bytes || current.length + token.length > maxChars) && current.isNotEmpty()) flush()
+        current.append(token)
+        currentBytes += tokenBytes
+        offset += Character.charCount(codePoint)
+
+        val sentenceEnd = codePoint in intArrayOf('。'.code, '！'.code, '？'.code, '!'.code, '?'.code, ';'.code, '\n'.code)
+        if (sentenceEnd && currentBytes >= maxUtf8Bytes * 2 / 3) flush()
+    }
+    flush()
+    return chunks
 }
