@@ -206,14 +206,32 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { state -> state.copy(diaries = (listOf(diary) + state.diaries).distinctBy(PlantDiary::id)) }
     }
 
-    fun recordPomodoro() = withPot { id ->
-        api.addFocusSession(id)
-        mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
+    fun recordPomodoro() {
+        val id = mutableState.value.selectedPotId ?: return
+        adjustPomodoroLocally(1)
+        viewModelScope.launch {
+            runCatching { api.addFocusSession(id) }
+                .onFailure {
+                    adjustPomodoroLocally(-1)
+                    fail(it)
+                }
+        }
     }
 
-    fun removePomodoro() = withPot { id ->
-        api.deleteLatestFocusSession(id)
-        mutableState.update { it.copy(careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
+    fun removePomodoro() {
+        val id = mutableState.value.selectedPotId ?: return
+        val count = mutableState.value.careOverview?.focus?.pomodoroCount
+            ?: mutableState.value.focusDaily.lastOrNull()?.pomodoroCount
+            ?: 0
+        if (count <= 0) return
+        adjustPomodoroLocally(-1)
+        viewModelScope.launch {
+            runCatching { api.deleteLatestFocusSession(id) }
+                .onFailure {
+                    adjustPomodoroLocally(1)
+                    fail(it)
+                }
+        }
     }
 
     fun addSchedule(title: String, dueAt: Instant) = withPot { id ->
@@ -229,9 +247,25 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(schedule = api.schedule(id), careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
     }
 
-    fun toggleSchedule(item: ScheduleItem, completed: Boolean) = withPot { id ->
-        api.updateSchedule(id, item.id, UpdateScheduleItemRequest(completed = completed))
-        mutableState.update { it.copy(schedule = api.schedule(id), careOverview = careOverview(id), focusDaily = api.focusDaily(id)) }
+    fun toggleSchedule(item: ScheduleItem, completed: Boolean) {
+        val id = mutableState.value.selectedPotId ?: return
+        val changedAt = Instant.now().toString()
+        updateScheduleItemLocally(
+            item.copy(
+                completed = completed,
+                completedAt = if (completed) changedAt else null,
+                updatedAt = changedAt,
+            ),
+        )
+        viewModelScope.launch {
+            runCatching { api.updateSchedule(id, item.id, UpdateScheduleItemRequest(completed = completed)) }
+                .onSuccess(::updateScheduleItemLocally)
+                .onFailure { error ->
+                    val current = mutableState.value.schedule?.items?.firstOrNull { it.id == item.id }
+                    if (current?.completed == completed) updateScheduleItemLocally(item)
+                    fail(error)
+                }
+        }
     }
 
     fun speakDiary(diary: PlantDiary) = control(
@@ -271,6 +305,42 @@ class SmartPotViewModel : ViewModel() {
 
     private fun fail(error: Throwable) {
         mutableState.update { it.copy(loading = false, error = error.message ?: "网络请求失败") }
+    }
+
+    private fun adjustPomodoroLocally(delta: Int) {
+        mutableState.update { state ->
+            val today = LocalDate.now(zoneId(state.snapshot?.pot?.timezone)).toString()
+            val current = state.careOverview?.focus
+                ?: state.focusDaily.firstOrNull { it.date == today }
+                ?: return@update state
+            val updated = current.copy(
+                pomodoroCount = (current.pomodoroCount + delta).coerceAtLeast(0),
+                focusMinutes = (current.focusMinutes + delta * 25).coerceAtLeast(0),
+            )
+            val focusDaily = if (state.focusDaily.any { it.date == today }) {
+                state.focusDaily.map { if (it.date == today) updated else it }
+            } else {
+                state.focusDaily + updated
+            }
+            state.copy(
+                careOverview = state.careOverview?.let { overview ->
+                    if (overview.date == today) overview.copy(focus = updated) else overview
+                },
+                focusDaily = focusDaily,
+            )
+        }
+    }
+
+    private fun updateScheduleItemLocally(updatedItem: ScheduleItem) {
+        mutableState.update { state ->
+            val schedule = state.schedule ?: return@update state
+            state.copy(
+                schedule = schedule.copy(
+                    revision = schedule.revision + 1,
+                    items = schedule.items.map { if (it.id == updatedItem.id) updatedItem else it },
+                ),
+            )
+        }
     }
 
     private suspend fun careOverview(id: String): CareDayOverview {

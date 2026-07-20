@@ -86,6 +86,7 @@ static lv_obj_t *s_projection_stage;
 static lv_obj_t *s_projection_art;
 static lv_obj_t *s_projection_text;
 static lv_obj_t *s_message_popup;
+static lv_obj_t *s_message_popup_label;
 static lv_obj_t *s_motion_status_label;
 static lv_obj_t *s_motion_roll_label;
 static lv_obj_t *s_motion_pitch_label;
@@ -2982,20 +2983,14 @@ static void message_popup_y_anim_cb(void *obj, int32_t value)
     lv_obj_set_y((lv_obj_t *)obj, value);
 }
 
-static void delete_message_popup_unlocked(void)
-{
-    if (s_message_popup != NULL) {
-        lv_anim_delete(s_message_popup, message_popup_y_anim_cb);
-        lv_obj_delete(s_message_popup);
-        s_message_popup = NULL;
-    }
-}
-
 static void message_popup_finish_cb(lv_timer_t *timer)
 {
     s_message_finish_timer = NULL;
     lv_timer_delete(timer);
-    delete_message_popup_unlocked();
+    if (s_message_popup != NULL) {
+        lv_obj_add_flag(s_message_popup, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_y(s_message_popup, -MESSAGE_POPUP_H);
+    }
 }
 
 static void message_popup_hide_cb(lv_timer_t *timer)
@@ -3019,8 +3014,41 @@ static void message_popup_hide_cb(lv_timer_t *timer)
     lv_timer_set_repeat_count(s_message_finish_timer, 1);
 }
 
+static void ensure_message_popup_unlocked(void)
+{
+    if (s_message_popup != NULL) {
+        return;
+    }
+
+    s_message_popup = lv_obj_create(lv_screen_active());
+    lv_obj_remove_style_all(s_message_popup);
+    lv_obj_set_size(s_message_popup, UI_SCREEN_W - 56, MESSAGE_POPUP_H);
+    lv_obj_align(s_message_popup, LV_ALIGN_TOP_MID, 0, -MESSAGE_POPUP_H);
+    lv_obj_set_style_radius(s_message_popup, 24, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_message_popup, lv_color_hex(0x173f2d), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_message_popup, 238, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_message_popup, lv_color_hex(0x9ee5b3), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_message_popup, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_message_popup, 18, LV_PART_MAIN);
+    lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_message_popup, LV_OBJ_FLAG_HIDDEN);
+
+    s_message_popup_label = lv_label_create(s_message_popup);
+    lv_label_set_text(s_message_popup_label, "");
+    lv_label_set_long_mode(s_message_popup_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(s_message_popup_label, UI_SCREEN_W - 112);
+    lv_obj_set_style_text_align(s_message_popup_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_message_popup_label,
+                               s_schedule_title_font != NULL ? s_schedule_title_font : schedule_font(),
+                               LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_message_popup_label, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_center(s_message_popup_label);
+}
+
 static void show_message_popup_unlocked(const char *text, uint32_t duration_ms)
 {
+    ensure_message_popup_unlocked();
     if (s_message_hold_timer != NULL) {
         lv_timer_delete(s_message_hold_timer);
         s_message_hold_timer = NULL;
@@ -3029,37 +3057,19 @@ static void show_message_popup_unlocked(const char *text, uint32_t duration_ms)
         lv_timer_delete(s_message_finish_timer);
         s_message_finish_timer = NULL;
     }
-    delete_message_popup_unlocked();
-
-    s_message_popup = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(s_message_popup, UI_SCREEN_W, MESSAGE_POPUP_H);
-    lv_obj_set_pos(s_message_popup, 0, -MESSAGE_POPUP_H);
-    lv_obj_set_style_radius(s_message_popup, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_message_popup, lv_color_hex(0x173f2d), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_message_popup, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_message_popup, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_message_popup, 18, LV_PART_MAIN);
-    lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_message_popup, LV_OBJ_FLAG_CLICKABLE);
-
-    lv_obj_t *label = lv_label_create(s_message_popup);
-    lv_label_set_text(label, text);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(label, UI_SCREEN_W - 72);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_text_font(label,
-                               s_schedule_title_font != NULL ? s_schedule_title_font : schedule_font(),
-                               LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_center(label);
+    lv_anim_delete(s_message_popup, message_popup_y_anim_cb);
+    lv_label_set_text(s_message_popup_label, text);
+    lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_y(s_message_popup, -MESSAGE_POPUP_H);
     lv_obj_move_foreground(s_message_popup);
 
     lv_anim_t slide;
     lv_anim_init(&slide);
     lv_anim_set_var(&slide, s_message_popup);
     lv_anim_set_exec_cb(&slide, message_popup_y_anim_cb);
-    lv_anim_set_values(&slide, -MESSAGE_POPUP_H, 0);
+    lv_anim_set_values(&slide, -MESSAGE_POPUP_H, 12);
     lv_anim_set_duration(&slide, 240);
+    lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
     lv_anim_start(&slide);
 
     s_message_hold_timer = lv_timer_create(message_popup_hide_cb,

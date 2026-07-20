@@ -17,6 +17,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -44,6 +45,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -1629,7 +1631,15 @@ private fun ScheduleTable(
                 val color = if (item.completed) Color(0xFF9AA09B) else Color(0xFF222622)
                 val decoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 12.dp, end = 4.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .toggleable(
+                            value = item.completed,
+                            role = Role.Checkbox,
+                            onValueChange = { checked -> toggleSchedule(item, checked) },
+                        )
+                        .padding(start = 12.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -1649,7 +1659,7 @@ private fun ScheduleTable(
                         )
                         Checkbox(
                             checked = item.completed,
-                            onCheckedChange = { checked -> toggleSchedule(item, checked) },
+                            onCheckedChange = null,
                         )
                     }
                 }
