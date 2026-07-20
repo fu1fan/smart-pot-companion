@@ -1799,6 +1799,14 @@ private fun CompanionChatCard(
     onToggleExpanded: () -> Unit,
 ) {
     val messages = state.messages
+    val messageScrollState = rememberScrollState()
+    val latestMessageId = messages.lastOrNull()?.id
+    LaunchedEffect(expanded, state.selectedChatDate, latestMessageId) {
+        if (expanded && latestMessageId != null) {
+            repeat(2) { withFrameNanos { } }
+            messageScrollState.scrollTo(messageScrollState.maxValue)
+        }
+    }
     Card(
         Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -1831,7 +1839,7 @@ private fun CompanionChatCard(
                     Text("这一天还没有对话记录", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     Column(
-                        Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(messageScrollState),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         messages.forEach { message -> CompanionChatBubble(message, zone) }
