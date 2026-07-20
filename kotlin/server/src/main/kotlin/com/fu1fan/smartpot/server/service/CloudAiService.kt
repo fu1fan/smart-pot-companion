@@ -34,6 +34,7 @@ class CloudAiService(
     private val config: AppConfig,
     private val store: SmartPotStore,
     private val affinity: AffinityService,
+    private val conversationMemories: ConversationMemoryService,
 ) : AutoCloseable {
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) { json(com.fu1fan.smartpot.server.appJson) }
@@ -55,6 +56,7 @@ class CloudAiService(
         )
         val assistant = ChatMessage(UUID.randomUUID().toString(), pot.id, ChatRole.ASSISTANT, responseText, Instant.now().toString(), "AI")
         store.saveMessage(assistant)
+        conversationMemories.enqueue(pot, user)
         return ChatResponse(user, assistant)
     }
 

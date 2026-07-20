@@ -85,7 +85,12 @@ class InMemorySmartPotStore : SmartPotStore {
     }
 
     override suspend fun listMemories(potId: String) = memories[potId]?.let { synchronized(it) { it.toList() } } ?: emptyList()
-    override suspend fun saveMemory(memory: UserMemory) { memories.computeIfAbsent(memory.potId) { mutableListOf() }.add(memory) }
+    override suspend fun saveMemory(memory: UserMemory) {
+        val list = memories.computeIfAbsent(memory.potId) { mutableListOf() }
+        synchronized(list) {
+            if (list.none { it.id == memory.id }) list += memory
+        }
+    }
     override suspend fun deleteMemory(potId: String, memoryId: String): Boolean = memories[potId]?.let { list ->
         synchronized(list) { list.removeAll { it.id == memoryId } }
     } ?: false

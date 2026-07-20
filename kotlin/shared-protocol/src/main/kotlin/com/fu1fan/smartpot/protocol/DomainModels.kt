@@ -104,11 +104,20 @@ data class CareReminder(
 )
 
 @Serializable
+enum class MemoryCategory { INTEREST, BIRTHDAY, MILESTONE, ANNIVERSARY, HABIT, OTHER }
+
+@Serializable
+enum class MemorySource { MANUAL, AUTO }
+
+@Serializable
 data class UserMemory(
     val id: String,
     val potId: String,
     val content: String,
     val createdAt: String,
+    val category: MemoryCategory = MemoryCategory.OTHER,
+    val source: MemorySource = MemorySource.MANUAL,
+    val sourceMessageId: String? = null,
 )
 
 @Serializable
@@ -312,7 +321,7 @@ data class RedeemShareRequest(val code: String, val actorName: String)
 data class ShareSession(val token: String, val potId: String, val actorName: String, val expiresAt: String)
 
 @Serializable
-enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS, SCHEDULE, CHAT }
+enum class RealtimeEventType { SNAPSHOT, TELEMETRY, ONLINE, ALERT, COMMAND_ACK, DIARY, AFFINITY, FOCUS, SCHEDULE, CHAT, MEMORY }
 
 @Serializable
 data class RealtimeEvent(

@@ -18,6 +18,8 @@ import com.fu1fan.smartpot.protocol.DeviceEvent
 import com.fu1fan.smartpot.protocol.DeviceEventType
 import com.fu1fan.smartpot.protocol.DeviceReportedState
 import com.fu1fan.smartpot.protocol.DiaryAuthor
+import com.fu1fan.smartpot.protocol.MemoryCategory
+import com.fu1fan.smartpot.protocol.MemorySource
 import com.fu1fan.smartpot.protocol.PlantDiary
 import com.fu1fan.smartpot.protocol.PlantRules
 import com.fu1fan.smartpot.protocol.PlantSpecies
@@ -33,8 +35,11 @@ import com.fu1fan.smartpot.protocol.UserMemory
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
 import com.fu1fan.smartpot.server.service.AffinityService
+import com.fu1fan.smartpot.server.service.ConversationMemoryService
 import com.fu1fan.smartpot.server.service.RealtimeHub
+import com.fu1fan.smartpot.server.service.explicitMemoryCandidates
 import com.fu1fan.smartpot.server.service.injectServerChatHistory
+import com.fu1fan.smartpot.server.service.parseMemoryCandidates
 import com.fu1fan.smartpot.server.service.reportedProfileMatches
 import com.fu1fan.smartpot.server.service.weatherCodeLabel
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
@@ -215,6 +220,54 @@ class ApplicationTest {
 
         assertEquals(HttpStatusCode.NoContent, deleted.status)
         assertTrue(api.get("/api/v1/pots/${pot.id}/memories") { bearerAuth(config.demoToken) }.body<List<com.fu1fan.smartpot.protocol.UserMemory>>().isEmpty())
+    }
+
+    @Test
+    fun `conversation facts are extracted into idempotent long term memories`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.seedSpecies(SpeciesCatalog.all)
+        val pot = store.savePot(
+            PotProfile(
+                id = "66666666-6666-6666-6666-666666666666",
+                deviceId = "esp32-auto-memory",
+                displayName = "小麦",
+                species = requireNotNull(store.findSpecies("pothos")),
+                createdAt = "2026-07-20T00:00:00Z",
+            ),
+        )
+        val service = ConversationMemoryService(config, store, RealtimeHub(), this)
+        val message = ChatMessage(
+            id = "77777777-7777-7777-7777-777777777777",
+            potId = pot.id,
+            role = ChatRole.USER,
+            content = "我的生日是8月12日，我喜欢摄影。",
+            createdAt = "2026-07-20T08:00:00Z",
+            source = "ESP",
+        )
+
+        val first = service.extractAndSave(pot, message)
+        val replay = service.extractAndSave(pot, message)
+
+        assertEquals(2, first.size)
+        assertTrue(replay.isEmpty())
+        assertEquals(setOf(MemoryCategory.BIRTHDAY, MemoryCategory.INTEREST), first.map { it.category }.toSet())
+        assertTrue(first.all { it.source == MemorySource.AUTO && it.sourceMessageId == message.id })
+        service.close()
+    }
+
+    @Test
+    fun `memory model JSON parser rejects unsupported categories`() {
+        val parsed = parseMemoryCandidates(
+            """```json
+                {"memories":[
+                  {"category":"HABIT","content":"主人每天晨跑","confidence":0.97,"replaceMemoryId":null},
+                  {"category":"TEMPORARY","content":"主人今天有点困","confidence":0.99,"replaceMemoryId":null}
+                ]}
+            ```""".trimIndent(),
+        )
+        assertEquals(1, parsed.size)
+        assertEquals(MemoryCategory.HABIT, parsed.single().category)
+        assertEquals(MemoryCategory.ANNIVERSARY, explicitMemoryCandidates("我们的结婚纪念日是5月20日").single().category)
     }
 
     @Test

@@ -41,6 +41,7 @@ class MqttGateway(
     private val alertService: AlertService,
     private val affinityService: AffinityService,
     private val realtime: RealtimeHub,
+    private val conversationMemories: ConversationMemoryService,
 ) : AutoCloseable {
     private var client: Mqtt5AsyncClient? = null
     var commandService: CommandService? = null
@@ -252,6 +253,7 @@ class MqttGateway(
         store.saveMessage(response.assistantMessage)
         affinityService.award(pot.id, "chat:${response.userMessage.id}", 1, Instant.parse(response.userMessage.createdAt))
         realtime.publish(RealtimeEvent(RealtimeEventType.CHAT, pot.id, appJson.encodeToJsonElement(response)))
+        conversationMemories.enqueue(pot, response.userMessage)
     }
 
     override fun close() {

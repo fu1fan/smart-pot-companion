@@ -34,6 +34,7 @@ data class ServerServices(
     val realtime: RealtimeHub,
     val shares: ShareTokenService,
     val affinity: AffinityService,
+    val conversationMemories: ConversationMemoryService,
 )
 
 fun Application.configureRoutes(services: ServerServices) {
@@ -104,9 +105,7 @@ fun Application.configureRoutes(services: ServerServices) {
                     post("/memories") {
                         val pot = call.requirePot(services)
                         val request = call.receive<CreateMemoryRequest>()
-                        require(request.content.isNotBlank() && request.content.length <= 500) { "记忆内容应为 1-500 个字符" }
-                        val memory = UserMemory(UUID.randomUUID().toString(), pot.id, request.content.trim(), Instant.now().toString())
-                        services.store.saveMemory(memory)
+                        val memory = services.conversationMemories.saveManual(pot.id, request.content)
                         call.respond(HttpStatusCode.Created, memory)
                     }
                     delete("/memories/{memoryId}") {

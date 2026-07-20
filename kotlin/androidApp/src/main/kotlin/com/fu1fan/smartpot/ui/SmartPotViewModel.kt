@@ -143,7 +143,7 @@ class SmartPotViewModel : ViewModel() {
                 runCatching {
                     api.realtime(id).collect { event ->
                         when (event.type) {
-                            RealtimeEventType.FOCUS, RealtimeEventType.DIARY, RealtimeEventType.SCHEDULE -> refreshAll(id)
+                            RealtimeEventType.FOCUS, RealtimeEventType.DIARY, RealtimeEventType.SCHEDULE, RealtimeEventType.MEMORY -> refreshAll(id)
                             RealtimeEventType.CHAT -> refreshChat(id)
                             RealtimeEventType.COMMAND_ACK -> Unit
                             else -> refreshSnapshot(id)
@@ -181,12 +181,14 @@ class SmartPotViewModel : ViewModel() {
         val today = LocalDate.now(zoneId(mutableState.value.snapshot?.pot?.timezone)).toString()
         val days = api.chatDays(id)
         val messages = api.messages(id, today)
+        val memories = api.memories(id)
         mutableState.update {
             it.copy(
                 chatDays = (listOf(ChatDaySummary(today, 0)) + days).distinctBy(ChatDaySummary::date),
                 selectedChatDate = today,
                 messages = messages,
                 todayMessages = messages,
+                memories = memories,
             )
         }
     }
