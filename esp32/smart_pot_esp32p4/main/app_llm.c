@@ -43,10 +43,7 @@
 
 #define LLM_RESPONSE_CAPACITY 4096
 #define LLM_SSE_LINE_CAPACITY 1024
-#define LLM_VOICE_HEADER_CAPACITY 192
-#define LLM_TTS_SEGMENT_CAPACITY 240
-#define LLM_TTS_FIRST_SEGMENT_BYTES 36
-#define LLM_TTS_NEXT_SEGMENT_BYTES 72
+#define LLM_VOICE_INSTRUCTION_CAPACITY 192
 #define SCHEDULE_CONFIDENCE_MIN 0.50
 #define SCHEDULE_PENDING_TIMEOUT_US 90000000LL
 
@@ -86,106 +83,28 @@ typedef struct {
     int line_len;
     char raw_error[512];
     int raw_error_len;
-    char voice_header[LLM_VOICE_HEADER_CAPACITY];
-    int voice_header_len;
-    bool voice_header_done;
-    char voice_instruction[LLM_VOICE_HEADER_CAPACITY];
-    bool tts_started;
-    bool tts_failed;
-    char tts_segment[LLM_TTS_SEGMENT_CAPACITY];
-    int tts_segment_len;
-    uint32_t tts_segments_sent;
     int64_t request_started_us;
     int64_t first_delta_us;
 } http_resp_t;
 
-static bool contains_strong_punctuation(const char *text)
-{
-    return strstr(text, "。") != NULL || strstr(text, "！") != NULL ||
-           strstr(text, "？") != NULL || strchr(text, '!') != NULL ||
-           strchr(text, '?') != NULL || strstr(text, "；") != NULL ||
-           strchr(text, ';') != NULL;
-}
-
-static void stream_flush_tts(http_resp_t *resp, bool force)
-{
-    if (!resp->tts_started || resp->tts_failed || resp->tts_segment_len <= 0) {
-        return;
-    }
-    int threshold = resp->tts_segments_sent == 0 ?
-                    LLM_TTS_FIRST_SEGMENT_BYTES : LLM_TTS_NEXT_SEGMENT_BYTES;
-    if (!force && resp->tts_segment_len < threshold &&
-        !contains_strong_punctuation(resp->tts_segment)) {
-        return;
-    }
-    resp->tts_segment[resp->tts_segment_len] = '\0';
-    if (!app_tts_stream_push(resp->tts_segment)) {
-        ESP_LOGW(TAG, "Failed to queue DeepSeek stream segment for TTS");
-        resp->tts_failed = true;
-        app_tts_stream_abort();
-        return;
-    }
-    ESP_LOGI(TAG, "DeepSeek -> Seed-TTS segment %u: %s",
-             (unsigned int)(resp->tts_segments_sent + 1), resp->tts_segment);
-    resp->tts_segments_sent++;
-    resp->tts_segment_len = 0;
-    resp->tts_segment[0] = '\0';
-}
-
-static void append_visible_text(http_resp_t *resp, const char *text)
+static void append_model_output(http_resp_t *resp, const char *text)
 {
     if (resp == NULL || text == NULL || text[0] == '\0') {
         return;
     }
-
     size_t delta_len = strlen(text);
-    int full_copy = (int)delta_len;
-    if (resp->len + full_copy >= resp->cap) {
-        full_copy = resp->cap - resp->len - 1;
+    int copy = (int)delta_len;
+    if (resp->len + copy >= resp->cap) {
+        copy = resp->cap - resp->len - 1;
     }
-    if (full_copy > 0) {
-        memcpy(resp->buf + resp->len, text, full_copy);
-        resp->len += full_copy;
+    if (copy > 0) {
+        memcpy(resp->buf + resp->len, text, copy);
+        resp->len += copy;
         resp->buf[resp->len] = '\0';
-        app_ui_set_dialog_status(resp->buf);
-    }
-
-    const char *cursor = text;
-    while (*cursor != '\0' && !resp->tts_failed) {
-        size_t remaining = strlen(cursor);
-        size_t space = sizeof(resp->tts_segment) - resp->tts_segment_len - 1;
-        size_t copy = remaining < space ? remaining : space;
-        if (copy == 0) {
-            stream_flush_tts(resp, true);
-            if (resp->tts_failed) break;
-            continue;
-        }
-        while (copy > 0 && (((unsigned char)cursor[copy]) & 0xc0) == 0x80) {
-            copy--;
-        }
-        if (copy == 0) break;
-        memcpy(resp->tts_segment + resp->tts_segment_len, cursor, copy);
-        resp->tts_segment_len += copy;
-        resp->tts_segment[resp->tts_segment_len] = '\0';
-        cursor += copy;
-        stream_flush_tts(resp, false);
     }
 }
 
-static void start_voice_stream(http_resp_t *resp, const char *tone)
-{
-    const char *safe_tone = tone != NULL && tone[0] != '\0' ? tone : "自然、亲切";
-    snprintf(resp->voice_instruction, sizeof(resp->voice_instruction),
-             "请使用%s的语气自然表达，保持樱桃小丸子活泼、亲切的角色感。", safe_tone);
-    resp->tts_started = app_tts_stream_begin(resp->voice_instruction);
-    if (!resp->tts_started) {
-        ESP_LOGW(TAG, "Seed-TTS stream could not start; will use complete-response fallback");
-    } else {
-        ESP_LOGI(TAG, "DeepSeek voice instruction: %s", resp->voice_instruction);
-    }
-}
-
-static const char *skip_voice_header_padding(const char *text)
+static const char *skip_reply_padding(const char *text)
 {
     const unsigned char *cursor = (const unsigned char *)text;
     if (cursor[0] == 0xef && cursor[1] == 0xbb && cursor[2] == 0xbf) {
@@ -203,8 +122,7 @@ static const char *skip_voice_header_padding(const char *text)
     return (const char *)cursor;
 }
 
-static bool parse_voice_header(const char *header, char *tone, size_t tone_size,
-                               const char **after_header)
+static const char *strip_accidental_tone_prefix(const char *reply)
 {
     static const struct {
         const char *prefix;
@@ -220,110 +138,76 @@ static bool parse_voice_header(const char *header, char *tone, size_t tone_size,
         { "（语气：", "）" },
         { "语气:", "\n" },
         { "语气：", "\n" },
+        { "[情绪:", "]" },
+        { "[情绪：", "]" },
+        { "【情绪:", "】" },
+        { "【情绪：", "】" },
+        { "情绪:", "\n" },
+        { "情绪：", "\n" },
     };
 
-    const char *start = skip_voice_header_padding(header);
+    const char *start = skip_reply_padding(reply);
     for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
         size_t prefix_len = strlen(formats[i].prefix);
         if (strncmp(start, formats[i].prefix, prefix_len) != 0) {
             continue;
         }
-        const char *tone_start = start + prefix_len;
-        const char *end = strstr(tone_start, formats[i].suffix);
+        const char *value_start = start + prefix_len;
+        const char *end = strstr(value_start, formats[i].suffix);
         if (end == NULL && strcmp(formats[i].suffix, "\n") == 0) {
-            end = strchr(tone_start, '\r');
+            end = strchr(value_start, '\r');
         }
-        if (end == NULL || end == tone_start) {
-            return false;
+        if (end != NULL && end > value_start) {
+            return skip_reply_padding(end + strlen(formats[i].suffix));
         }
-
-        const char *tone_end = end;
-        while (tone_end > tone_start &&
-               (isspace((unsigned char)tone_end[-1]) || tone_end[-1] == '*')) {
-            tone_end--;
-        }
-        size_t tone_len = (size_t)(tone_end - tone_start);
-        if (tone_len == 0) {
-            return false;
-        }
-        if (tone_len >= tone_size) {
-            tone_len = tone_size - 1;
-        }
-        memcpy(tone, tone_start, tone_len);
-        tone[tone_len] = '\0';
-
-        const char *after = end + strlen(formats[i].suffix);
-        while (*after == '*' || isspace((unsigned char)*after)) {
-            after++;
-        }
-        *after_header = after;
-        return true;
     }
-    return false;
+    return start;
 }
 
-static bool consume_voice_header(http_resp_t *resp, bool force_fallback)
+static bool parse_structured_reply(char *output, size_t output_capacity,
+                                   char *tone, size_t tone_capacity)
 {
-    char tone[96] = { 0 };
-    const char *after_header = NULL;
-    if (parse_voice_header(resp->voice_header, tone, sizeof(tone), &after_header)) {
-        resp->voice_header_done = true;
-        start_voice_stream(resp, tone);
-        if (after_header != NULL && after_header[0] != '\0') {
-            append_visible_text(resp, after_header);
-        }
-        resp->voice_header_len = 0;
-        resp->voice_header[0] = '\0';
-        return true;
+    char *json_start = strchr(output, '{');
+    char *json_end = strrchr(output, '}');
+    if (json_start == NULL || json_end == NULL || json_end <= json_start) {
+        return false;
     }
-    if (!force_fallback) {
+    json_end[1] = '\0';
+
+    cJSON *root = cJSON_Parse(json_start);
+    if (root == NULL) {
+        return false;
+    }
+    cJSON *reply_item = cJSON_GetObjectItemCaseSensitive(root, "reply");
+    if (!cJSON_IsString(reply_item) || reply_item->valuestring == NULL) {
+        reply_item = cJSON_GetObjectItemCaseSensitive(root, "text");
+    }
+    cJSON *tone_item = cJSON_GetObjectItemCaseSensitive(root, "tone");
+    if (!cJSON_IsString(tone_item) || tone_item->valuestring == NULL) {
+        tone_item = cJSON_GetObjectItemCaseSensitive(root, "emotion");
+    }
+    if (!cJSON_IsString(reply_item) || reply_item->valuestring == NULL ||
+        reply_item->valuestring[0] == '\0') {
+        cJSON_Delete(root);
         return false;
     }
 
-    resp->voice_header_done = true;
-    start_voice_stream(resp, "自然、亲切");
-    append_visible_text(resp, resp->voice_header);
-    resp->voice_header_len = 0;
-    resp->voice_header[0] = '\0';
+    const char *clean_reply = strip_accidental_tone_prefix(reply_item->valuestring);
+    utf8_strlcpy(output, clean_reply, output_capacity);
+    utf8_strlcpy(tone,
+                 cJSON_IsString(tone_item) && tone_item->valuestring != NULL ?
+                 tone_item->valuestring : "自然、亲切",
+                 tone_capacity);
+    cJSON_Delete(root);
     return true;
 }
 
-static void stream_append_delta(http_resp_t *resp, const char *delta)
+static void build_voice_instruction(char *instruction, size_t instruction_capacity,
+                                    const char *tone)
 {
-    if (resp == NULL || delta == NULL || delta[0] == '\0') {
-        return;
-    }
-    if (resp->first_delta_us == 0) {
-        resp->first_delta_us = esp_timer_get_time();
-        ESP_LOGI(TAG, "DeepSeek first SSE delta after %lld ms",
-                 (resp->first_delta_us - resp->request_started_us) / 1000);
-    }
-    if (resp->voice_header_done) {
-        append_visible_text(resp, delta);
-        return;
-    }
-
-    const char *cursor = delta;
-    while (*cursor != '\0' && !resp->voice_header_done) {
-        if (resp->voice_header_len + 1 >= (int)sizeof(resp->voice_header)) {
-            consume_voice_header(resp, true);
-            break;
-        }
-        char ch = *cursor++;
-        resp->voice_header[resp->voice_header_len++] = ch;
-        resp->voice_header[resp->voice_header_len] = '\0';
-        if (ch == ']' || ch == ')' || ch == '\n' ||
-            strstr(resp->voice_header, "】") != NULL ||
-            strstr(resp->voice_header, "）") != NULL) {
-            consume_voice_header(resp, false);
-        }
-    }
-    if (resp->voice_header_done && *cursor != '\0') {
-        while (*cursor == '*' || isspace((unsigned char)*cursor)) {
-            cursor++;
-        }
-        append_visible_text(resp, cursor);
-    }
+    const char *safe_tone = tone != NULL && tone[0] != '\0' ? tone : "自然、亲切";
+    snprintf(instruction, instruction_capacity,
+             "请使用%s的语气自然表达，保持樱桃小丸子活泼、亲切的角色感。", safe_tone);
 }
 
 static void stream_process_sse_line(http_resp_t *resp)
@@ -357,7 +241,12 @@ static void stream_process_sse_line(http_resp_t *resp)
         cJSON *delta_obj = cJSON_GetObjectItem(choice0, "delta");
         cJSON *content = cJSON_GetObjectItem(delta_obj, "content");
         if (cJSON_IsString(content) && content->valuestring != NULL) {
-            stream_append_delta(resp, content->valuestring);
+            if (resp->first_delta_us == 0) {
+                resp->first_delta_us = esp_timer_get_time();
+                ESP_LOGI(TAG, "DeepSeek first SSE delta after %lld ms",
+                         (resp->first_delta_us - resp->request_started_us) / 1000);
+            }
+            append_model_output(resp, content->valuestring);
         }
         cJSON_Delete(root);
     }
@@ -445,9 +334,11 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
     }
 
     cJSON_AddStringToObject(root, "model", CONFIG_SMART_POT_DEEPSEEK_MODEL);
-    cJSON_AddNumberToObject(root, "max_tokens", 112);
+    cJSON_AddNumberToObject(root, "max_tokens", 160);
     cJSON_AddNumberToObject(root, "temperature", 0.7);
     cJSON_AddBoolToObject(root, "stream", true);
+    cJSON *response_format = cJSON_AddObjectToObject(root, "response_format");
+    cJSON_AddStringToObject(response_format, "type", "json_object");
     cJSON *thinking = cJSON_AddObjectToObject(root, "thinking");
     cJSON_AddStringToObject(thinking, "type", "disabled");
     cJSON *messages = cJSON_AddArrayToObject(root, "messages");
@@ -460,10 +351,11 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
                             "Do not volunteer sensor readings or care advice unless asked. "
                             "Use the previous dialogue messages to preserve context and remember user details. "
                             "If the speech is unclear, ask the user to repeat. "
-                            "Every answer MUST begin with exactly one control line in this format: [语气:开心、亲切、轻快]. "
-                            "Choose two to four concise Chinese tone words that match the content and plant mood. "
-                            "The control line is metadata for speech synthesis only: never repeat, explain, quote, or place it in the answer text. "
-                            "Do not wrap the control line in Markdown. After that line, output only the concise Simplified Chinese answer.");
+                            "Return exactly one JSON object in this format: "
+                            "{\"tone\":\"开心、亲切、轻快\",\"reply\":\"简洁的中文回复\"}. "
+                            "The tone field must contain two to four concise Chinese tone words for speech synthesis. "
+                            "The reply field must contain only what 小麦 should actually say. Never put tone names, speaking directions, "
+                            "bracketed stage directions, Markdown, or JSON text inside reply.");
     cJSON_AddItemToArray(messages, system_msg);
 
     app_memory_append_profile_message(messages);
@@ -566,42 +458,34 @@ static void llm_request_task(void *arg)
         if (resp.line_len > 0) {
             stream_process_sse_line(&resp);
         }
-        if (!resp.voice_header_done && resp.voice_header_len > 0) {
-            consume_voice_header(&resp, true);
-        }
         if (resp.len > 0) {
+            char tone[96] = { 0 };
+            char voice_instruction[LLM_VOICE_INSTRUCTION_CAPACITY] = { 0 };
+            ESP_LOGI(TAG, "DeepSeek structured response: %.512s", response);
+            if (!parse_structured_reply(response, LLM_RESPONSE_CAPACITY, tone, sizeof(tone))) {
+                ESP_LOGW(TAG, "DeepSeek returned invalid structured reply");
+                finish_voice_with_fallback("DeepSeek: invalid reply", "我刚才没组织好，再问我一次。");
+                goto request_done;
+            }
+            build_voice_instruction(voice_instruction, sizeof(voice_instruction), tone);
             app_ui_set_dialog_status(response);
             app_memory_add_exchange(trigger, response);
             app_cloud_publish_conversation(trigger, response);
-            bool stream_finish_queued = false;
-            if (resp.tts_started && !resp.tts_failed) {
-                stream_flush_tts(&resp, true);
-                if (!resp.tts_failed) {
-                    stream_finish_queued = app_tts_stream_finish();
-                }
+            if (!app_tts_speak_text_with_instruction(response, voice_instruction)) {
+                ESP_LOGW(TAG, "Failed to queue DeepSeek response for TTS");
+                app_voice_conversation_complete();
             }
-            if (!stream_finish_queued) {
-                if (resp.tts_started) {
-                    app_tts_stream_abort();
-                }
-                if (!app_tts_speak_text_with_instruction(response, resp.voice_instruction)) {
-                    ESP_LOGW(TAG, "Failed to queue complete DeepSeek response for TTS fallback");
-                    app_voice_conversation_complete();
-                }
-            }
-            ESP_LOGI(TAG, "DeepSeek streamed response: %.512s", response);
+            ESP_LOGI(TAG, "DeepSeek reply tone=%s text=%.512s", tone, response);
         } else {
             finish_voice_with_fallback("DeepSeek: empty reply", "我刚才没组织好，再问我一次。");
         }
     } else {
-        if (resp.tts_started) {
-            app_tts_stream_abort();
-        }
         ESP_LOGW(TAG, "DeepSeek request failed err=%s status=%d body=%.512s",
                  esp_err_to_name(err), status, resp.raw_error);
         finish_voice_with_fallback("DeepSeek: request failed", "我刚才联网慢了，再问我一次。");
     }
 
+request_done:
     if (err != ESP_OK) {
         /* A transport failure can leave the reusable handle in a bad state. */
         esp_http_client_cleanup(client);
