@@ -357,7 +357,6 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
         env_alert_state_t previous_state = hw->env_alert_state;
         hw->env_alert_state = next_state;
         hw->env_state_since_us = now_us;
-        hw->last_abnormal_reminder_us = 0;
         hw->state_change_pending = true;
         ESP_LOGI(TAG, "Environment reminder state changed: %d -> %d (soil=%u%% light=%u%%)",
                  previous_state, next_state, soil_percent, light_percent);
@@ -384,7 +383,7 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
     if (all_normal) {
         should_speak = hw->state_change_pending || !hw->normal_announced_today;
     } else {
-        should_speak = hw->state_change_pending || hw->last_abnormal_reminder_us == 0 ||
+        should_speak = hw->last_abnormal_reminder_us == 0 ||
                        now_us - hw->last_abnormal_reminder_us >= ENV_ABNORMAL_REMINDER_US;
     }
 
