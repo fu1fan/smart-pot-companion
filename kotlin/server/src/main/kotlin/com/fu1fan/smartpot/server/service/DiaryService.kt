@@ -80,6 +80,15 @@ class DiaryService(
         }
     }
 
+    suspend fun deleteManual(potId: String, diaryId: String): Boolean {
+        val diary = store.listDiaries(potId).firstOrNull { it.id == diaryId } ?: return false
+        require(diary.author == DiaryAuthor.USER) { "只能删除用户写的日记" }
+        if (!store.deleteUserDiary(potId, diaryId)) return false
+        affinity.revoke(potId, "diary:${diary.diaryDate}:USER")
+        realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, potId, appJson.encodeToJsonElement(diary)))
+        return true
+    }
+
     fun start(scope: CoroutineScope) = scope.launch {
         while (isActive) {
             store.listPots().forEach { pot ->

@@ -167,6 +167,9 @@ class InMemorySmartPotStore : SmartPotStore {
             list += diary
         }
     }
+    override suspend fun deleteUserDiary(potId: String, diaryId: String): Boolean = diaries[potId]?.let { list ->
+        synchronized(list) { list.removeAll { it.id == diaryId && it.author == DiaryAuthor.USER } }
+    } ?: false
 
     override suspend fun listFocusSessions(potId: String, since: String?) =
         focusSessions[potId]?.let { list ->

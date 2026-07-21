@@ -208,6 +208,14 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { state -> state.copy(diaries = (listOf(diary) + state.diaries).distinctBy(PlantDiary::id)) }
     }
 
+    fun deleteDiary(diary: PlantDiary) {
+        if (diary.author != DiaryAuthor.USER) return
+        withPot { id ->
+            api.deleteDiary(id, diary.id)
+            mutableState.update { state -> state.copy(diaries = state.diaries.filterNot { it.id == diary.id }) }
+        }
+    }
+
     fun recordPomodoro() {
         val id = mutableState.value.selectedPotId ?: return
         adjustPomodoroLocally(1)

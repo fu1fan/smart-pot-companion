@@ -147,7 +147,14 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     !state.potsLoaded -> ConnectionRetryScreen(state.error, viewModel::bootstrap)
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
                     tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
-                    tab == 1 -> CareScreen(state, viewModel::addCare, viewModel::saveDiary, viewModel::speakDiary, viewModel::refreshWeather)
+                    tab == 1 -> CareScreen(
+                        state,
+                        viewModel::addCare,
+                        viewModel::saveDiary,
+                        viewModel::deleteDiary,
+                        viewModel::speakDiary,
+                        viewModel::refreshWeather,
+                    )
                     tab == 2 -> CompanionScreen(
                         state,
                         viewModel::sendChat,
@@ -748,6 +755,7 @@ private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String) -> Unit,
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
+    deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
     refreshWeather: (Double, Double) -> Unit,
 ) {
@@ -812,6 +820,7 @@ private fun CareScreen(
                 expanded = diariesExpanded,
                 onToggleExpanded = { diariesExpanded = !diariesExpanded },
                 saveDiary = saveDiary,
+                deleteDiary = deleteDiary,
                 speakDiary = speakDiary,
             )
         }
@@ -1042,6 +1051,7 @@ private fun CareDiarySection(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
+    deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
@@ -1056,6 +1066,7 @@ private fun CareDiarySection(
     var authorName by rememberSaveable { mutableStateOf("") }
     var mood by rememberSaveable { mutableStateOf<String?>(null) }
     var imageDataUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDelete by remember { mutableStateOf<PlantDiary?>(null) }
     val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && imageDataUrls.size < 3) {
@@ -1070,6 +1081,26 @@ private fun CareDiarySection(
         mood = todayDiary?.moodEmoji
         imageDataUrls = todayDiary?.imageDataUrls.orEmpty()
         editorVisible = true
+    }
+
+    pendingDelete?.let { diary ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除这篇日记？") },
+            text = { Text("删除后无法恢复。小麦写的日记不会受到影响。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDelete = null
+                        deleteDiary(diary)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
     }
 
     Card(
@@ -1165,6 +1196,7 @@ private fun CareDiarySection(
                         diary = diary,
                         weather = state.careOverview?.weather?.takeIf { it.date == diary.diaryDate },
                         onSpeak = { speakDiary(diary) },
+                        onDelete = { pendingDelete = diary },
                     )
                 }
             }
@@ -1179,7 +1211,12 @@ private fun CareDiarySection(
 }
 
 @Composable
-private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: () -> Unit) {
+private fun CareDiaryEntry(
+    diary: PlantDiary,
+    weather: CareWeather?,
+    onSpeak: () -> Unit,
+    onDelete: () -> Unit,
+) {
     var expanded by rememberSaveable(diary.id) { mutableStateOf(false) }
     val displayContent = diaryDisplayContent(diary)
     val canExpand = displayContent.length > 90 || displayContent.count { it == '\n' } >= 3
@@ -1198,6 +1235,13 @@ private fun CareDiaryEntry(diary: PlantDiary, weather: CareWeather?, onSpeak: ()
             Text(diaryMoodEmoji(diary), fontSize = 16.sp)
             TextButton(onClick = onSpeak, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
                 Text("▷ ESP朗读", fontSize = 11.sp)
+            }
+            if (diary.author == DiaryAuthor.USER) {
+                TextButton(
+                    onClick = onDelete,
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("删除", fontSize = 11.sp) }
             }
         }
         Text(

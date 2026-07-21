@@ -146,6 +146,15 @@ fun Application.configureRoutes(services: ServerServices) {
                         val pot = call.requirePot(services)
                         call.respond(services.diary.generate(pot.id))
                     }
+                    delete("/diaries/{diaryId}") {
+                        val pot = call.requirePot(services)
+                        val diaryId = requireNotNull(call.parameters["diaryId"]) { "缺少日记 ID" }
+                        if (services.diary.deleteManual(pot.id, diaryId)) {
+                            call.respond(HttpStatusCode.NoContent)
+                        } else {
+                            call.respond(HttpStatusCode.NotFound)
+                        }
+                    }
                     get("/care-overview") {
                         val pot = call.requirePot(services)
                         val zone = zoneIdOf(pot.timezone)

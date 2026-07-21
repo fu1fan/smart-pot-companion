@@ -277,7 +277,7 @@ class ApplicationTest {
     }
 
     @Test
-    fun `user diary is separate from wheat diary and preserves uploaded images`() = testApplication {
+    fun `user diary supports images and deletion without deleting wheat diary`() = testApplication {
         val store = InMemorySmartPotStore()
         application { module(config, store, startMqtt = false) }
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
@@ -286,17 +286,16 @@ class ApplicationTest {
             contentType(ContentType.Application.Json)
             setBody(CreatePotRequest("esp32-diary-001", "小麦", "pothos"))
         }.body<PotProfile>()
-        store.saveDiary(
-            PlantDiary(
-                id = java.util.UUID.randomUUID().toString(),
-                potId = pot.id,
-                diaryDate = java.time.LocalDate.now(ZoneId.of(pot.timezone)).toString(),
-                title = "小麦的一天",
-                content = "今天晒到了暖暖的太阳。",
-                createdAt = Instant.now().toString(),
-                author = DiaryAuthor.WHEAT,
-            ),
+        val wheatDiary = PlantDiary(
+            id = java.util.UUID.randomUUID().toString(),
+            potId = pot.id,
+            diaryDate = java.time.LocalDate.now(ZoneId.of(pot.timezone)).toString(),
+            title = "小麦的一天",
+            content = "今天晒到了暖暖的太阳。",
+            createdAt = Instant.now().toString(),
+            author = DiaryAuthor.WHEAT,
         )
+        store.saveDiary(wheatDiary)
         val uploadedImage = "data:image/jpeg;base64,AQID"
 
         val created = api.post("/api/v1/pots/${pot.id}/diaries") {
@@ -318,6 +317,13 @@ class ApplicationTest {
         val diaries = api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<PlantDiary>>()
         assertEquals(2, diaries.size)
         assertEquals(setOf(DiaryAuthor.WHEAT, DiaryAuthor.USER), diaries.map(PlantDiary::author).toSet())
+
+        val rejected = api.delete("/api/v1/pots/${pot.id}/diaries/${wheatDiary.id}") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.BadRequest, rejected.status)
+        val deleted = api.delete("/api/v1/pots/${pot.id}/diaries/${updated.id}") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.NoContent, deleted.status)
+        val remaining = api.get("/api/v1/pots/${pot.id}/diaries") { bearerAuth(config.demoToken) }.body<List<PlantDiary>>()
+        assertEquals(listOf(wheatDiary.id), remaining.map(PlantDiary::id))
     }
 
     @Test

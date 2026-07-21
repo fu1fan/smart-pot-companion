@@ -264,6 +264,13 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         }
         Unit
     }
+    override suspend fun deleteUserDiary(potId: String, diaryId: String): Boolean = db { connection ->
+        connection.prepareStatement("DELETE FROM diaries WHERE id=?::uuid AND pot_id=?::uuid AND author='USER'").use { statement ->
+            statement.setString(1, diaryId)
+            statement.setString(2, potId)
+            statement.executeUpdate() > 0
+        }
+    }
 
     override suspend fun listFocusSessions(potId: String, since: String?): List<FocusSession> = db { c ->
         val sql = buildString {
