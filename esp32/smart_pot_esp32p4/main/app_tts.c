@@ -842,6 +842,13 @@ bool app_tts_speak_text(const char *text)
                           "请用自然、亲切、像朋友一样的语气说话。", false);
 }
 
+bool app_tts_speak_text_with_instruction(const char *text, const char *voice_instruction)
+{
+    const char *style = voice_instruction != NULL && voice_instruction[0] != '\0' ?
+                        voice_instruction : "请用自然、亲切、像朋友一样的语气说话。";
+    return queue_one_shot(text, true, TTS_VOLUME_CONVERSATION, 5, 1, style, false);
+}
+
 bool app_tts_speak_once(const char *text)
 {
     return queue_one_shot(text, true, TTS_VOLUME_COMMAND, 8, 2,

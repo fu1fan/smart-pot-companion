@@ -89,6 +89,7 @@ typedef struct {
     char voice_header[LLM_VOICE_HEADER_CAPACITY];
     int voice_header_len;
     bool voice_header_done;
+    char voice_instruction[LLM_VOICE_HEADER_CAPACITY];
     bool tts_started;
     bool tts_failed;
     char tts_segment[LLM_TTS_SEGMENT_CAPACITY];
@@ -173,16 +174,118 @@ static void append_visible_text(http_resp_t *resp, const char *text)
 
 static void start_voice_stream(http_resp_t *resp, const char *tone)
 {
-    char instruction[LLM_VOICE_HEADER_CAPACITY];
     const char *safe_tone = tone != NULL && tone[0] != '\0' ? tone : "自然、亲切";
-    snprintf(instruction, sizeof(instruction),
+    snprintf(resp->voice_instruction, sizeof(resp->voice_instruction),
              "请使用%s的语气自然表达，保持樱桃小丸子活泼、亲切的角色感。", safe_tone);
-    resp->tts_started = app_tts_stream_begin(instruction);
+    resp->tts_started = app_tts_stream_begin(resp->voice_instruction);
     if (!resp->tts_started) {
         ESP_LOGW(TAG, "Seed-TTS stream could not start; will use complete-response fallback");
     } else {
-        ESP_LOGI(TAG, "DeepSeek voice instruction: %s", instruction);
+        ESP_LOGI(TAG, "DeepSeek voice instruction: %s", resp->voice_instruction);
     }
+}
+
+static const char *skip_voice_header_padding(const char *text)
+{
+    const unsigned char *cursor = (const unsigned char *)text;
+    if (cursor[0] == 0xef && cursor[1] == 0xbb && cursor[2] == 0xbf) {
+        cursor += 3;
+    }
+    while (*cursor != '\0' && isspace(*cursor)) {
+        cursor++;
+    }
+    while (cursor[0] == '*' && cursor[1] == '*') {
+        cursor += 2;
+        while (*cursor != '\0' && isspace(*cursor)) {
+            cursor++;
+        }
+    }
+    return (const char *)cursor;
+}
+
+static bool parse_voice_header(const char *header, char *tone, size_t tone_size,
+                               const char **after_header)
+{
+    static const struct {
+        const char *prefix;
+        const char *suffix;
+    } formats[] = {
+        { "[语气:", "]" },
+        { "[语气：", "]" },
+        { "【语气:", "】" },
+        { "【语气：", "】" },
+        { "(语气:", ")" },
+        { "(语气：", ")" },
+        { "（语气:", "）" },
+        { "（语气：", "）" },
+        { "语气:", "\n" },
+        { "语气：", "\n" },
+    };
+
+    const char *start = skip_voice_header_padding(header);
+    for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+        size_t prefix_len = strlen(formats[i].prefix);
+        if (strncmp(start, formats[i].prefix, prefix_len) != 0) {
+            continue;
+        }
+        const char *tone_start = start + prefix_len;
+        const char *end = strstr(tone_start, formats[i].suffix);
+        if (end == NULL && strcmp(formats[i].suffix, "\n") == 0) {
+            end = strchr(tone_start, '\r');
+        }
+        if (end == NULL || end == tone_start) {
+            return false;
+        }
+
+        const char *tone_end = end;
+        while (tone_end > tone_start &&
+               (isspace((unsigned char)tone_end[-1]) || tone_end[-1] == '*')) {
+            tone_end--;
+        }
+        size_t tone_len = (size_t)(tone_end - tone_start);
+        if (tone_len == 0) {
+            return false;
+        }
+        if (tone_len >= tone_size) {
+            tone_len = tone_size - 1;
+        }
+        memcpy(tone, tone_start, tone_len);
+        tone[tone_len] = '\0';
+
+        const char *after = end + strlen(formats[i].suffix);
+        while (*after == '*' || isspace((unsigned char)*after)) {
+            after++;
+        }
+        *after_header = after;
+        return true;
+    }
+    return false;
+}
+
+static bool consume_voice_header(http_resp_t *resp, bool force_fallback)
+{
+    char tone[96] = { 0 };
+    const char *after_header = NULL;
+    if (parse_voice_header(resp->voice_header, tone, sizeof(tone), &after_header)) {
+        resp->voice_header_done = true;
+        start_voice_stream(resp, tone);
+        if (after_header != NULL && after_header[0] != '\0') {
+            append_visible_text(resp, after_header);
+        }
+        resp->voice_header_len = 0;
+        resp->voice_header[0] = '\0';
+        return true;
+    }
+    if (!force_fallback) {
+        return false;
+    }
+
+    resp->voice_header_done = true;
+    start_voice_stream(resp, "自然、亲切");
+    append_visible_text(resp, resp->voice_header);
+    resp->voice_header_len = 0;
+    resp->voice_header[0] = '\0';
+    return true;
 }
 
 static void stream_append_delta(http_resp_t *resp, const char *delta)
@@ -203,35 +306,22 @@ static void stream_append_delta(http_resp_t *resp, const char *delta)
     const char *cursor = delta;
     while (*cursor != '\0' && !resp->voice_header_done) {
         if (resp->voice_header_len + 1 >= (int)sizeof(resp->voice_header)) {
-            resp->voice_header_done = true;
-            start_voice_stream(resp, "自然、亲切");
-            append_visible_text(resp, resp->voice_header);
-            resp->voice_header_len = 0;
+            consume_voice_header(resp, true);
             break;
         }
         char ch = *cursor++;
         resp->voice_header[resp->voice_header_len++] = ch;
         resp->voice_header[resp->voice_header_len] = '\0';
-        if (ch == ']') {
-            char tone[96] = { 0 };
-            const char *prefix = "[语气:";
-            size_t prefix_len = strlen(prefix);
-            if (strncmp(resp->voice_header, prefix, prefix_len) == 0 &&
-                resp->voice_header_len > (int)prefix_len + 1) {
-                size_t tone_len = resp->voice_header_len - prefix_len - 1;
-                if (tone_len >= sizeof(tone)) tone_len = sizeof(tone) - 1;
-                memcpy(tone, resp->voice_header + prefix_len, tone_len);
-                tone[tone_len] = '\0';
-                start_voice_stream(resp, tone);
-            } else {
-                start_voice_stream(resp, "自然、亲切");
-                append_visible_text(resp, resp->voice_header);
-            }
-            resp->voice_header_done = true;
-            while (*cursor == '\r' || *cursor == '\n' || *cursor == ' ') cursor++;
+        if (ch == ']' || ch == ')' || ch == '\n' ||
+            strstr(resp->voice_header, "】") != NULL ||
+            strstr(resp->voice_header, "）") != NULL) {
+            consume_voice_header(resp, false);
         }
     }
     if (resp->voice_header_done && *cursor != '\0') {
+        while (*cursor == '*' || isspace((unsigned char)*cursor)) {
+            cursor++;
+        }
         append_visible_text(resp, cursor);
     }
 }
@@ -372,7 +462,8 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
                             "If the speech is unclear, ask the user to repeat. "
                             "Every answer MUST begin with exactly one control line in this format: [语气:开心、亲切、轻快]. "
                             "Choose two to four concise Chinese tone words that match the content and plant mood. "
-                            "After that line, output only the concise Simplified Chinese answer. Do not explain the control line.");
+                            "The control line is metadata for speech synthesis only: never repeat, explain, quote, or place it in the answer text. "
+                            "Do not wrap the control line in Markdown. After that line, output only the concise Simplified Chinese answer.");
     cJSON_AddItemToArray(messages, system_msg);
 
     app_memory_append_profile_message(messages);
@@ -476,9 +567,7 @@ static void llm_request_task(void *arg)
             stream_process_sse_line(&resp);
         }
         if (!resp.voice_header_done && resp.voice_header_len > 0) {
-            resp.voice_header_done = true;
-            start_voice_stream(&resp, "自然、亲切");
-            append_visible_text(&resp, resp.voice_header);
+            consume_voice_header(&resp, true);
         }
         if (resp.len > 0) {
             app_ui_set_dialog_status(response);
@@ -495,7 +584,7 @@ static void llm_request_task(void *arg)
                 if (resp.tts_started) {
                     app_tts_stream_abort();
                 }
-                if (!app_tts_speak_text(response)) {
+                if (!app_tts_speak_text_with_instruction(response, resp.voice_instruction)) {
                     ESP_LOGW(TAG, "Failed to queue complete DeepSeek response for TTS fallback");
                     app_voice_conversation_complete();
                 }
