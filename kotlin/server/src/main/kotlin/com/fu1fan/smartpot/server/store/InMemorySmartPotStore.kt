@@ -78,6 +78,10 @@ class InMemorySmartPotStore : SmartPotStore {
 
     override suspend fun listCareLogs(potId: String) = careLogs[potId]?.let { synchronized(it) { it.sortedByDescending(CareLog::occurredAt) } } ?: emptyList()
     override suspend fun saveCareLog(log: CareLog) { careLogs.computeIfAbsent(log.potId) { mutableListOf() }.add(log) }
+    override suspend fun deleteCareLog(potId: String, careLogId: String): Boolean {
+        val list = careLogs[potId] ?: return false
+        return synchronized(list) { list.removeAll { it.id == careLogId } }
+    }
     override suspend fun listReminders(potId: String) = reminders[potId]?.let { synchronized(it) { it.sortedBy(CareReminder::dueAt) } } ?: emptyList()
     override suspend fun saveReminder(reminder: CareReminder) {
         val list = reminders.computeIfAbsent(reminder.potId) { mutableListOf() }

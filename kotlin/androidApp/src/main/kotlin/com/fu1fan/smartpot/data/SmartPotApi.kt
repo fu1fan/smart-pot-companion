@@ -46,6 +46,7 @@ class SmartPotApi(
     suspend fun careLogs(id: String): List<CareLog> = getApi("/api/v1/pots/$id/care")
     suspend fun reminders(id: String): List<CareReminder> = getApi("/api/v1/pots/$id/reminders")
     suspend fun addCare(id: String, request: CreateCareLogRequest): CareLog = postApi("/api/v1/pots/$id/care", request)
+    suspend fun deleteCare(id: String, careLogId: String) = deleteApi("/api/v1/pots/$id/care/$careLogId")
     suspend fun careOverview(id: String, latitude: Double? = null, longitude: Double? = null): CareDayOverview {
         val locationQuery = if (latitude != null && longitude != null) "?latitude=$latitude&longitude=$longitude" else ""
         return getApi("/api/v1/pots/$id/care-overview$locationQuery")

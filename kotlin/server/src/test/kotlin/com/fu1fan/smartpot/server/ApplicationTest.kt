@@ -185,7 +185,12 @@ class ApplicationTest {
             setBody(CreateCareLogRequest(CareType.NEW_LEAF, note = "第一片新叶冒出来了", imageDataUrl = careImage))
         }
         assertEquals(HttpStatusCode.Created, care.status)
-        assertEquals(careImage, care.body<CareLog>().imageDataUrl)
+        val careLog = care.body<CareLog>()
+        assertEquals(careImage, careLog.imageDataUrl)
+
+        val deleteCare = api.delete("/api/v1/pots/${pot.id}/care/${careLog.id}") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.NoContent, deleteCare.status)
+        assertTrue(api.get("/api/v1/pots/${pot.id}/care") { bearerAuth(config.demoToken) }.body<List<CareLog>>().isEmpty())
 
         repeat(2) {
             val focus = api.post("/api/v1/pots/${pot.id}/focus/sessions") {

@@ -57,6 +57,13 @@ class CareService(
         return log
     }
 
+    suspend fun delete(potId: String, careLogId: String): Boolean {
+        val exists = store.listCareLogs(potId).any { it.id == careLogId }
+        if (!exists || !store.deleteCareLog(potId, careLogId)) return false
+        affinity.revoke(potId, "care:$careLogId")
+        return true
+    }
+
     private fun nextTitle(type: CareType) = when (type) {
         CareType.WATER -> "检查是否需要浇水"
         CareType.FERTILIZE -> "检查是否需要施肥"

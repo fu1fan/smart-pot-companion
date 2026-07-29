@@ -163,6 +163,17 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = careOverview(id)) }
     }
 
+    fun deleteCare(careLogId: String) = withPot { id ->
+        api.deleteCare(id, careLogId)
+        mutableState.update {
+            it.copy(
+                careLogs = api.careLogs(id),
+                snapshot = api.snapshot(id),
+                careOverview = careOverview(id),
+            )
+        }
+    }
+
     fun refreshWeather(latitude: Double, longitude: Double) = withPot { id ->
         val coarseLocation = round(latitude * 100.0) / 100.0 to round(longitude * 100.0) / 100.0
         weatherLocation = coarseLocation

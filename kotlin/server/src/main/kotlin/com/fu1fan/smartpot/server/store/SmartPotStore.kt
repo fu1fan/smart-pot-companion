@@ -34,6 +34,7 @@ interface SmartPotStore : AutoCloseable {
 
     suspend fun listCareLogs(potId: String): List<CareLog>
     suspend fun saveCareLog(log: CareLog)
+    suspend fun deleteCareLog(potId: String, careLogId: String): Boolean
     suspend fun listReminders(potId: String): List<CareReminder>
     suspend fun saveReminder(reminder: CareReminder)
 

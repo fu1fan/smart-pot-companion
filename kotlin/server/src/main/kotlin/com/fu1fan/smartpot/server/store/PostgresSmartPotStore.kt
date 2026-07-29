@@ -159,6 +159,13 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
 
     override suspend fun listCareLogs(potId: String): List<CareLog> = listPotJson("care_logs", potId, "occurred_at DESC")
     override suspend fun saveCareLog(log: CareLog) = saveJsonRecord("INSERT INTO care_logs(id,pot_id,occurred_at,data) VALUES (?::uuid,?::uuid,?::timestamptz,?::jsonb) ON CONFLICT(id) DO UPDATE SET data=EXCLUDED.data", log.id, log.potId, log.occurredAt, encode(log))
+    override suspend fun deleteCareLog(potId: String, careLogId: String): Boolean = db { connection ->
+        connection.prepareStatement("DELETE FROM care_logs WHERE id=?::uuid AND pot_id=?::uuid").use { statement ->
+            statement.setString(1, careLogId)
+            statement.setString(2, potId)
+            statement.executeUpdate() > 0
+        }
+    }
     override suspend fun listReminders(potId: String): List<CareReminder> = listPotJson("reminders", potId, "due_at")
     override suspend fun saveReminder(reminder: CareReminder) = saveJsonRecord("INSERT INTO reminders(id,pot_id,due_at,status,data) VALUES (?::uuid,?::uuid,?::timestamptz,?,?::jsonb) ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data", reminder.id, reminder.potId, reminder.dueAt, reminder.status.name, encode(reminder))
     override suspend fun listMemories(potId: String): List<UserMemory> = listPotJson("memories", potId, "created_at")

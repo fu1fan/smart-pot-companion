@@ -100,6 +100,15 @@ fun Application.configureRoutes(services: ServerServices) {
                         val pot = call.requirePot(services)
                         call.respond(HttpStatusCode.Created, services.care.add(pot, call.receive(), call.accessIdentity(services).actorName))
                     }
+                    delete("/care/{careLogId}") {
+                        val pot = call.requirePot(services)
+                        val careLogId = requireNotNull(call.parameters["careLogId"]) { "缺少养护记录 ID" }
+                        if (services.care.delete(pot.id, careLogId)) {
+                            call.respond(HttpStatusCode.NoContent)
+                        } else {
+                            call.respond(HttpStatusCode.NotFound)
+                        }
+                    }
                     get("/reminders") { call.respond(services.store.listReminders(call.requirePot(services).id)) }
                     get("/memories") { call.respond(services.store.listMemories(call.requirePot(services).id)) }
                     post("/memories") {

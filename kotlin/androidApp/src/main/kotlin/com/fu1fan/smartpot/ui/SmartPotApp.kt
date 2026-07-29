@@ -152,6 +152,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     tab == 1 -> CareScreen(
                         state,
                         viewModel::addCare,
+                        viewModel::deleteCare,
                         viewModel::saveDiary,
                         viewModel::deleteDiary,
                         viewModel::speakDiary,
@@ -1530,6 +1531,7 @@ private fun DashboardTextCard(
 private fun CareScreen(
     state: SmartPotUiState,
     addCare: (CareType, String, String?) -> Unit,
+    deleteCare: (String) -> Unit,
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
@@ -1551,6 +1553,8 @@ private fun CareScreen(
     var diariesExpanded by rememberSaveable { mutableStateOf(false) }
     var addRecordVisible by rememberSaveable { mutableStateOf(false) }
     var recordImageDataUrl by remember { mutableStateOf<String?>(null) }
+    var selectedCareType by remember { mutableStateOf<CareType?>(null) }
+    var pendingDeleteCareId by rememberSaveable { mutableStateOf<String?>(null) }
     var affinityImpactExpanded by rememberSaveable { mutableStateOf(false) }
     val careActions = listOf(CareType.WATER, CareType.FERTILIZE, CareType.PRUNE, CareType.REPOT, CareType.NEW_LEAF)
     val metrics = dashboardMetrics(state)
@@ -1560,6 +1564,19 @@ private fun CareScreen(
     fun scrollToSection(section: String, index: Int) {
         selectedShortcut = section
         scope.launch { listState.animateScrollToItem(index) }
+    }
+    pendingDeleteCareId?.let { careLogId ->
+        PixelConfirmDialog(
+            title = "删除成长记录",
+            text = "确定删除这条养护记录吗？对应的好感度加分也会撤销。",
+            confirmText = "删除",
+            danger = true,
+            onConfirm = {
+                deleteCare(careLogId)
+                pendingDeleteCareId = null
+            },
+            onDismiss = { pendingDeleteCareId = null },
+        )
     }
     Box(Modifier.fillMaxSize()) {
         Image(
@@ -1620,7 +1637,15 @@ private fun CareScreen(
                     state = state,
                     expanded = timelineExpanded,
                     onToggleExpanded = { timelineExpanded = !timelineExpanded },
-                    onAddRecord = { addRecordVisible = !addRecordVisible },
+                    onAddRecord = {
+                        addRecordVisible = !addRecordVisible
+                        if (!addRecordVisible) {
+                            selectedCareType = null
+                            recordImageDataUrl = null
+                            note = ""
+                        }
+                    },
+                    onDeleteRecord = { pendingDeleteCareId = it },
                 )
             }
             if (addRecordVisible) {
@@ -1631,14 +1656,21 @@ private fun CareScreen(
                         imageDataUrl = recordImageDataUrl,
                         onImageChange = { recordImageDataUrl = it },
                         actions = careActions,
-                        onAdd = { type ->
-                            addCare(type, note, recordImageDataUrl)
-                            note = ""
-                            recordImageDataUrl = null
-                            addRecordVisible = false
+                        selectedType = selectedCareType,
+                        onSelectType = { selectedCareType = it },
+                        onConfirm = {
+                            selectedCareType?.let { type ->
+                                addCare(type, note, recordImageDataUrl)
+                                note = ""
+                                recordImageDataUrl = null
+                                selectedCareType = null
+                                addRecordVisible = false
+                            }
                         },
                         onDismiss = {
+                            note = ""
                             recordImageDataUrl = null
+                            selectedCareType = null
                             addRecordVisible = false
                         },
                     )
@@ -1767,26 +1799,39 @@ private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics
     val levelProgress = affinityLevelProgress(affinity.score)
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelCream,
+        fill = Color.White,
         edge = CardBorder,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
+        contentPadding = PaddingValues(0.dp),
         showCornerBolts = false,
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("好感度等级", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("Lv. $level / 30", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("LV", fontSize = 12.sp, color = Leaf, fontWeight = FontWeight.Black)
+        Box(Modifier.fillMaxWidth().heightIn(min = 174.dp)) {
+            Image(
+                painter = painterResource(R.drawable.care_affinity_background),
+                contentDescription = null,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.Center,
+            )
+            Box(Modifier.matchParentSize().background(Color(0xFFFFFCF1).copy(alpha = 0.54f)))
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("好感度等级", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Lv. $level / 30", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("LV", fontSize = 12.sp, color = Leaf, fontWeight = FontWeight.Black)
+                    }
+                    PixelProgressBar(levelProgress, Modifier.fillMaxWidth())
+                    Text(
+                        if (level >= 30) "好感度已达到最高等级" else "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度",
+                        fontSize = 11.sp,
+                        color = Color(0xFF5C513D),
+                    )
                 }
-                PixelProgressBar(levelProgress, Modifier.fillMaxWidth())
-                Text(
-                    if (level >= 30) "好感度已达到最高等级" else "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度",
-                    fontSize = 11.sp,
-                    color = Muted,
-                )
+                PlantMascot(metrics.healthPercent, Modifier.padding(start = 10.dp).size(width = 105.dp, height = 112.dp))
             }
-            PlantMascot(metrics.healthPercent, Modifier.padding(start = 10.dp).size(width = 105.dp, height = 112.dp))
         }
     }
 }
@@ -1871,7 +1916,9 @@ private fun AddCareRecordCard(
     imageDataUrl: String?,
     onImageChange: (String?) -> Unit,
     actions: List<CareType>,
-    onAdd: (CareType) -> Unit,
+    selectedType: CareType?,
+    onSelectType: (CareType) -> Unit,
+    onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -1927,8 +1974,9 @@ private fun AddCareRecordCard(
             actions.chunked(3).forEach { rowActions ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     rowActions.forEach { type ->
-                        PixelOutlinedButton(
-                            onClick = { onAdd(type) },
+                        PixelButton(
+                            selected = selectedType == type,
+                            onClick = { onSelectType(type) },
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 8.dp),
                         ) {
@@ -1940,6 +1988,16 @@ private fun AddCareRecordCard(
                     repeat(3 - rowActions.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
+            Text(
+                selectedType?.let { "已选择：${careLabel(it)}，可继续填写备注或添加图片。" } ?: "请先选择记录类型。",
+                color = if (selectedType == null) Muted else Leaf,
+                fontSize = 11.sp,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                PixelOutlinedButton(onClick = onDismiss) { Text("取消") }
+                Spacer(Modifier.width(8.dp))
+                PixelButton(onClick = onConfirm, enabled = selectedType != null) { Text("确定添加") }
+            }
         }
     }
 }
@@ -1950,6 +2008,7 @@ private fun GrowthTimelineCard(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     onAddRecord: () -> Unit,
+    onDeleteRecord: (String) -> Unit,
 ) {
     val events = growthTimeline(state)
     val visibleEvents = if (expanded) events else events.take(3)
@@ -1982,7 +2041,22 @@ private fun GrowthTimelineCard(
                                 Text(event.detail, fontSize = 11.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        CareEventThumbnail(event, Modifier.padding(start = 8.dp).size(width = 68.dp, height = 58.dp))
+                        Column(
+                            Modifier.padding(start = 8.dp),
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            CareEventThumbnail(event, Modifier.size(width = 68.dp, height = 58.dp))
+                            event.careLogId?.let { careLogId ->
+                                PixelTextButton(
+                                    onClick = { onDeleteRecord(careLogId) },
+                                    danger = true,
+                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                                ) {
+                                    Text("删除", fontSize = 10.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -3426,6 +3500,7 @@ private data class GrowthTimelineEvent(
     val detail: String,
     val type: CareType,
     val imageDataUrl: String? = null,
+    val careLogId: String? = null,
 )
 
 private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
@@ -3445,6 +3520,7 @@ private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
             detail = log.note.ifBlank { log.actorName },
             type = log.type,
             imageDataUrl = log.imageDataUrl,
+            careLogId = log.id,
         )
     }
     return (listOfNotNull(created) + logs).sortedByDescending { it.date }
