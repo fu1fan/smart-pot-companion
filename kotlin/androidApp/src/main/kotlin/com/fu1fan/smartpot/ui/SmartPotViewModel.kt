@@ -158,9 +158,51 @@ class SmartPotViewModel : ViewModel() {
     private suspend fun refreshSnapshot(id: String) = runCatching { api.snapshot(id) }
         .onSuccess { value -> mutableState.update { it.copy(snapshot = value, error = null) } }
 
-    fun addCare(type: CareType, note: String, imageDataUrl: String?) = withPot { id ->
-        api.addCare(id, CreateCareLogRequest(type, note = note, imageDataUrl = imageDataUrl))
-        mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = careOverview(id)) }
+    fun addCare(type: CareType, note: String, imageDataUrl: String?) {
+        val potId = mutableState.value.selectedPotId ?: return
+        val optimisticId = "pending-${System.nanoTime()}"
+        val optimisticLog = CareLog(
+            id = optimisticId,
+            potId = potId,
+            type = type,
+            occurredAt = Instant.now().toString(),
+            note = note,
+            actorName = "主人",
+            imageDataUrl = imageDataUrl,
+        )
+        mutableState.update { state ->
+            state.copy(
+                careLogs = listOf(optimisticLog) + state.careLogs,
+                error = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                val savedLog = api.addCare(potId, CreateCareLogRequest(type, note = note, imageDataUrl = imageDataUrl))
+                val reminders = runCatching { api.reminders(potId) }.getOrNull()
+                val overview = runCatching { careOverview(potId) }.getOrNull()
+                Triple(savedLog, reminders, overview)
+            }.onSuccess { (savedLog, reminders, overview) ->
+                mutableState.update { state ->
+                    if (state.selectedPotId != potId) state
+                    else state.copy(
+                        careLogs = (listOf(savedLog) + state.careLogs.filterNot {
+                            it.id == optimisticId || it.id == savedLog.id
+                        }).sortedByDescending { it.occurredAt },
+                        reminders = reminders ?: state.reminders,
+                        careOverview = overview ?: state.careOverview,
+                    )
+                }
+            }.onFailure { error ->
+                mutableState.update { state ->
+                    if (state.selectedPotId != potId) state
+                    else state.copy(
+                        careLogs = state.careLogs.filterNot { it.id == optimisticId },
+                        error = error.message ?: "添加养护记录失败",
+                    )
+                }
+            }
+        }
     }
 
     fun deleteCare(careLogId: String) {

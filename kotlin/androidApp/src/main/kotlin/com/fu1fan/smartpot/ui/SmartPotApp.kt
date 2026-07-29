@@ -3030,7 +3030,13 @@ private fun CompanionScreen(
         )
     }
     Box(Modifier.fillMaxSize()) {
-        PixelNatureBackground(Modifier.matchParentSize(), green = true)
+        Image(
+            painter = painterResource(R.drawable.companion_page_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+        )
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
