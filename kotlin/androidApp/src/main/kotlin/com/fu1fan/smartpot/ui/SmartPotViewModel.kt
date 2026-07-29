@@ -163,14 +163,39 @@ class SmartPotViewModel : ViewModel() {
         mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = careOverview(id)) }
     }
 
-    fun deleteCare(careLogId: String) = withPot { id ->
-        api.deleteCare(id, careLogId)
-        mutableState.update {
-            it.copy(
-                careLogs = api.careLogs(id),
-                snapshot = api.snapshot(id),
-                careOverview = careOverview(id),
+    fun deleteCare(careLogId: String) {
+        val potId = mutableState.value.selectedPotId ?: return
+        val removedLog = mutableState.value.careLogs.firstOrNull { it.id == careLogId } ?: return
+        mutableState.update { state ->
+            state.copy(
+                careLogs = state.careLogs.filterNot { it.id == careLogId },
+                error = null,
             )
+        }
+        viewModelScope.launch {
+            runCatching { api.deleteCare(potId, careLogId) }
+                .onSuccess {
+                    val snapshot = runCatching { api.snapshot(potId) }.getOrNull()
+                    val overview = runCatching { careOverview(potId) }.getOrNull()
+                    mutableState.update { state ->
+                        if (state.selectedPotId != potId) state
+                        else state.copy(
+                            snapshot = snapshot ?: state.snapshot,
+                            careOverview = overview ?: state.careOverview,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { state ->
+                        if (state.selectedPotId != potId) state
+                        else state.copy(
+                            careLogs = (state.careLogs + removedLog)
+                                .distinctBy { it.id }
+                                .sortedByDescending { it.occurredAt },
+                            error = error.message ?: "删除养护记录失败",
+                        )
+                    }
+                }
         }
     }
 

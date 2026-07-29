@@ -2401,9 +2401,9 @@ private fun CareDiaryEntry(
             )
             Spacer(Modifier.width(8.dp))
             Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(diaryMoodEmoji(diary), fontSize = 16.sp)
+            DiaryMoodIcon(diary, Modifier.size(22.dp))
             PixelTextButton(onClick = onSpeak, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                Text("▷ ESP朗读", fontSize = 11.sp)
+                Text("朗读", fontSize = 11.sp)
             }
             if (diary.author == DiaryAuthor.USER) {
                 PixelTextButton(
@@ -2428,6 +2428,103 @@ private fun CareDiaryEntry(
         if (diary.author == DiaryAuthor.USER && diary.imageDataUrls.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(diary.imageDataUrls) { imageDataUrl -> DiaryPhoto(imageDataUrl, Modifier.size(88.dp)) }
+            }
+        }
+    }
+}
+
+private enum class DiaryMoodKind {
+    WATER,
+    SPROUT,
+    SUN,
+    HEART,
+    SLEEP,
+    NOTE,
+}
+
+@Composable
+private fun DiaryMoodIcon(diary: PlantDiary, modifier: Modifier = Modifier) {
+    val kind = diaryMoodKind(diary)
+    Box(
+        modifier
+            .background(Color(0xFFFFFBEC), RoundedCornerShape(4.dp))
+            .border(1.dp, CardBorder, RoundedCornerShape(4.dp))
+            .padding(3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val stroke = (size.minDimension * 0.1f).coerceAtLeast(1.5f)
+            when (kind) {
+                DiaryMoodKind.WATER -> {
+                    val drop = Path().apply {
+                        moveTo(w * 0.5f, h * 0.08f)
+                        cubicTo(w * 0.42f, h * 0.28f, w * 0.2f, h * 0.5f, w * 0.2f, h * 0.67f)
+                        cubicTo(w * 0.2f, h * 0.88f, w * 0.34f, h * 0.96f, w * 0.5f, h * 0.96f)
+                        cubicTo(w * 0.66f, h * 0.96f, w * 0.8f, h * 0.88f, w * 0.8f, h * 0.67f)
+                        cubicTo(w * 0.8f, h * 0.5f, w * 0.58f, h * 0.28f, w * 0.5f, h * 0.08f)
+                        close()
+                    }
+                    drawPath(drop, Color(0xFF65BDF2))
+                    drawCircle(Color(0xFFCDEEFF), w * 0.08f, Offset(w * 0.38f, h * 0.66f))
+                }
+                DiaryMoodKind.SPROUT -> {
+                    drawLine(Color(0xFF579451), Offset(w * 0.5f, h * 0.9f), Offset(w * 0.5f, h * 0.42f), stroke)
+                    val leftLeaf = Path().apply {
+                        moveTo(w * 0.48f, h * 0.58f)
+                        cubicTo(w * 0.12f, h * 0.58f, w * 0.12f, h * 0.2f, w * 0.18f, h * 0.18f)
+                        cubicTo(w * 0.43f, h * 0.2f, w * 0.5f, h * 0.4f, w * 0.48f, h * 0.58f)
+                        close()
+                    }
+                    val rightLeaf = Path().apply {
+                        moveTo(w * 0.52f, h * 0.48f)
+                        cubicTo(w * 0.58f, h * 0.2f, w * 0.86f, h * 0.14f, w * 0.9f, h * 0.18f)
+                        cubicTo(w * 0.88f, h * 0.44f, w * 0.7f, h * 0.56f, w * 0.52f, h * 0.48f)
+                        close()
+                    }
+                    drawPath(leftLeaf, Color(0xFF8BCB62))
+                    drawPath(rightLeaf, Color(0xFF70B84B))
+                }
+                DiaryMoodKind.SUN -> {
+                    drawCircle(Color(0xFFFFB83E), w * 0.25f, Offset(w * 0.5f, h * 0.5f))
+                    repeat(8) { index ->
+                        val angle = Math.toRadians(index * 45.0)
+                        val x1 = w * 0.5f + kotlin.math.cos(angle).toFloat() * w * 0.34f
+                        val y1 = h * 0.5f + kotlin.math.sin(angle).toFloat() * h * 0.34f
+                        val x2 = w * 0.5f + kotlin.math.cos(angle).toFloat() * w * 0.46f
+                        val y2 = h * 0.5f + kotlin.math.sin(angle).toFloat() * h * 0.46f
+                        drawLine(Color(0xFFF39A2D), Offset(x1, y1), Offset(x2, y2), stroke)
+                    }
+                }
+                DiaryMoodKind.HEART -> {
+                    val heart = Path().apply {
+                        moveTo(w * 0.5f, h * 0.9f)
+                        cubicTo(w * 0.38f, h * 0.76f, w * 0.12f, h * 0.58f, w * 0.12f, h * 0.34f)
+                        cubicTo(w * 0.12f, h * 0.08f, w * 0.42f, h * 0.08f, w * 0.5f, h * 0.3f)
+                        cubicTo(w * 0.58f, h * 0.08f, w * 0.88f, h * 0.08f, w * 0.88f, h * 0.34f)
+                        cubicTo(w * 0.88f, h * 0.58f, w * 0.62f, h * 0.76f, w * 0.5f, h * 0.9f)
+                        close()
+                    }
+                    drawPath(heart, Color(0xFFF27C86))
+                }
+                DiaryMoodKind.SLEEP -> {
+                    drawCircle(Color(0xFF7D82C8), w * 0.36f, Offset(w * 0.48f, h * 0.48f))
+                    drawCircle(Color(0xFFFFFBEC), w * 0.36f, Offset(w * 0.64f, h * 0.36f))
+                    drawCircle(Color(0xFFFFD65A), w * 0.07f, Offset(w * 0.25f, h * 0.2f))
+                }
+                DiaryMoodKind.NOTE -> {
+                    drawRoundRect(
+                        color = Color(0xFF8EC5A0),
+                        topLeft = Offset(w * 0.2f, h * 0.12f),
+                        size = Size(w * 0.64f, h * 0.76f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.06f),
+                    )
+                    drawLine(Color.White, Offset(w * 0.34f, h * 0.36f), Offset(w * 0.72f, h * 0.36f), stroke * 0.65f)
+                    drawLine(Color.White, Offset(w * 0.34f, h * 0.52f), Offset(w * 0.72f, h * 0.52f), stroke * 0.65f)
+                    drawLine(Color.White, Offset(w * 0.34f, h * 0.68f), Offset(w * 0.62f, h * 0.68f), stroke * 0.65f)
+                    drawLine(Color(0xFF638D6D), Offset(w * 0.28f, h * 0.08f), Offset(w * 0.28f, h * 0.92f), stroke)
+                }
             }
         }
     }
@@ -3566,14 +3663,15 @@ private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
     return (listOfNotNull(created) + logs).sortedByDescending { it.date }
 }
 
-private fun diaryMoodEmoji(diary: PlantDiary): String {
-    diary.moodEmoji?.takeIf { it.isNotBlank() }?.let { return it }
-    val content = diary.content
+private fun diaryMoodKind(diary: PlantDiary): DiaryMoodKind {
+    val content = listOfNotNull(diary.moodEmoji, diary.title, diary.content).joinToString(" ")
     return when {
-        content.contains("水") || content.contains("湿") -> "水"
-        content.contains("光") || content.contains("晒") -> "光"
-        content.contains("叶") || content.contains("芽") -> "芽"
-        else -> "记"
+        content.contains("水") || content.contains("湿") -> DiaryMoodKind.WATER
+        content.contains("叶") || content.contains("芽") -> DiaryMoodKind.SPROUT
+        content.contains("光") || content.contains("晒") || content.contains("晴") -> DiaryMoodKind.SUN
+        content.contains("爱") || content.contains("喜欢") || content.contains("开心") -> DiaryMoodKind.HEART
+        content.contains("睡") || content.contains("困") -> DiaryMoodKind.SLEEP
+        else -> DiaryMoodKind.NOTE
     }
 }
 
