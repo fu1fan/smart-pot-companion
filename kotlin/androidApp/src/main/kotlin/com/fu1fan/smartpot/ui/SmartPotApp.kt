@@ -2402,9 +2402,13 @@ private fun CareDiaryEntry(
             Spacer(Modifier.width(8.dp))
             Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             DiaryMoodIcon(diary, Modifier.size(22.dp))
-            PixelTextButton(onClick = onSpeak, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                Text("朗读", fontSize = 11.sp)
-            }
+            Text(
+                "朗读",
+                modifier = Modifier.clickable(onClick = onSpeak).padding(horizontal = 6.dp, vertical = 2.dp),
+                color = Leaf,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
             if (diary.author == DiaryAuthor.USER) {
                 PixelTextButton(
                     onClick = onDelete,
@@ -2421,9 +2425,13 @@ private fun CareDiaryEntry(
             overflow = TextOverflow.Ellipsis,
         )
         if (canExpand) {
-            PixelTextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(4.dp)) {
-                Text(if (expanded) "收起" else "展开全文", fontSize = 11.sp)
-            }
+            Text(
+                if (expanded) "收起" else "展开全文",
+                modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 3.dp),
+                color = Leaf,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
         if (diary.author == DiaryAuthor.USER && diary.imageDataUrls.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2446,10 +2454,7 @@ private enum class DiaryMoodKind {
 private fun DiaryMoodIcon(diary: PlantDiary, modifier: Modifier = Modifier) {
     val kind = diaryMoodKind(diary)
     Box(
-        modifier
-            .background(Color(0xFFFFFBEC), RoundedCornerShape(4.dp))
-            .border(1.dp, CardBorder, RoundedCornerShape(4.dp))
-            .padding(3.dp),
+        modifier.padding(2.dp),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.fillMaxSize()) {
@@ -3013,6 +3018,13 @@ private fun CompanionScreen(
     var chatExpanded by rememberSaveable { mutableStateOf(false) }
     var memoryExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingMemoryDelete by remember { mutableStateOf<UserMemory?>(null) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var selectedShortcut by rememberSaveable { mutableStateOf("voice") }
+    fun scrollToSection(section: String, index: Int) {
+        selectedShortcut = section
+        scope.launch { listState.animateScrollToItem(index) }
+    }
     val zone = runCatching { ZoneId.of(state.snapshot?.pot?.timezone ?: "Asia/Shanghai") }
         .getOrDefault(ZoneId.of("Asia/Shanghai"))
     val today = LocalDate.now(zone).toString()
@@ -3039,12 +3051,46 @@ private fun CompanionScreen(
         )
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
         ) {
             item {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    PixelTitleSign("陪伴", Modifier.fillMaxWidth(0.56f))
+                CompanionPageHeader()
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CompanionSectionShortcut(
+                        icon = "voice",
+                        label = "语音唤醒",
+                        selected = selectedShortcut == "voice",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("voice", 2) },
+                    )
+                    CompanionSectionShortcut(
+                        icon = "schedule",
+                        label = "已设提醒",
+                        selected = selectedShortcut == "schedule",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("schedule", 4) },
+                    )
+                    CompanionSectionShortcut(
+                        icon = "tomato",
+                        label = "番茄钟",
+                        selected = selectedShortcut == "tomato",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("tomato", 5) },
+                    )
+                    CompanionSectionShortcut(
+                        icon = "memory",
+                        label = "记忆库",
+                        selected = selectedShortcut == "memory",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("memory", 3) },
+                    )
                 }
             }
             item {
@@ -3108,6 +3154,128 @@ private fun CompanionScreen(
 }
 
 @Composable
+private fun CompanionPageHeader() {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(16.dp))
+        Text("陪伴", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.width(16.dp))
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun CompanionSectionShortcut(
+    icon: String,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val edge = if (selected) Color(0xFFA7BE72) else CardBorder
+    Box(
+        modifier
+            .height(88.dp)
+            .background(Color(0xFFFFFCF4).copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+            .border(1.dp, edge, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            CompanionShortcutIcon(icon, Modifier.size(38.dp))
+            Text(label, color = Color(0xFF304A1D), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun CompanionShortcutIcon(kind: String, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val stroke = 2.dp.toPx()
+        when (kind) {
+            "voice" -> {
+                drawRoundRect(
+                    Color(0xFF6FC482),
+                    topLeft = Offset(size.width * 0.36f, size.height * 0.10f),
+                    size = Size(size.width * 0.28f, size.height * 0.48f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.14f),
+                )
+                drawArc(
+                    color = Color(0xFF4B9A5E),
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(size.width * 0.23f, size.height * 0.30f),
+                    size = Size(size.width * 0.54f, size.height * 0.42f),
+                    style = Stroke(stroke, cap = StrokeCap.Round),
+                )
+                drawLine(Color(0xFF4B9A5E), Offset(size.width * 0.5f, size.height * 0.72f), Offset(size.width * 0.5f, size.height * 0.87f), stroke, StrokeCap.Round)
+                drawLine(Color(0xFF4B9A5E), Offset(size.width * 0.35f, size.height * 0.87f), Offset(size.width * 0.65f, size.height * 0.87f), stroke, StrokeCap.Round)
+            }
+            "schedule" -> {
+                drawRoundRect(
+                    Color(0xFFA8D990),
+                    topLeft = Offset(size.width * 0.12f, size.height * 0.16f),
+                    size = Size(size.width * 0.76f, size.height * 0.70f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx()),
+                )
+                drawRect(Color(0xFFEFF8E6), Offset(size.width * 0.17f, size.height * 0.31f), Size(size.width * 0.66f, size.height * 0.48f))
+                drawLine(Color(0xFF568A4F), Offset(size.width * 0.28f, size.height * 0.08f), Offset(size.width * 0.28f, size.height * 0.26f), stroke, StrokeCap.Round)
+                drawLine(Color(0xFF568A4F), Offset(size.width * 0.70f, size.height * 0.08f), Offset(size.width * 0.70f, size.height * 0.26f), stroke, StrokeCap.Round)
+                val check = Path().apply {
+                    moveTo(size.width * 0.30f, size.height * 0.54f)
+                    lineTo(size.width * 0.43f, size.height * 0.67f)
+                    lineTo(size.width * 0.70f, size.height * 0.42f)
+                }
+                drawPath(check, Color(0xFF4F9A58), style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            "tomato" -> {
+                drawCircle(Color(0xFFF27958), size.width * 0.31f, Offset(size.width * 0.5f, size.height * 0.56f))
+                drawCircle(Color(0xFFFF9C76), size.width * 0.08f, Offset(size.width * 0.40f, size.height * 0.45f))
+                val leaf = Path().apply {
+                    moveTo(size.width * 0.5f, size.height * 0.29f)
+                    lineTo(size.width * 0.34f, size.height * 0.22f)
+                    lineTo(size.width * 0.41f, size.height * 0.38f)
+                    lineTo(size.width * 0.25f, size.height * 0.37f)
+                    lineTo(size.width * 0.43f, size.height * 0.49f)
+                    lineTo(size.width * 0.5f, size.height * 0.29f)
+                    lineTo(size.width * 0.58f, size.height * 0.48f)
+                    lineTo(size.width * 0.75f, size.height * 0.36f)
+                    lineTo(size.width * 0.58f, size.height * 0.37f)
+                    lineTo(size.width * 0.66f, size.height * 0.22f)
+                    close()
+                }
+                drawPath(leaf, Color(0xFF5A9B4D))
+            }
+            else -> {
+                drawRoundRect(
+                    Color(0xFF84B47A),
+                    topLeft = Offset(size.width * 0.20f, size.height * 0.12f),
+                    size = Size(size.width * 0.64f, size.height * 0.76f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()),
+                )
+                drawRect(Color(0xFFEFF7E8), Offset(size.width * 0.31f, size.height * 0.20f), Size(size.width * 0.43f, size.height * 0.60f))
+                repeat(3) { index ->
+                    val y = size.height * (0.36f + index * 0.15f)
+                    drawLine(Color(0xFF65935D), Offset(size.width * 0.39f, y), Offset(size.width * 0.67f, y), stroke * 0.65f)
+                }
+                repeat(3) { index ->
+                    val y = size.height * (0.28f + index * 0.20f)
+                    drawLine(Color(0xFF5A8B51), Offset(size.width * 0.13f, y), Offset(size.width * 0.29f, y), stroke, StrokeCap.Round)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CompanionChatCard(
     state: SmartPotUiState,
     today: String,
@@ -3132,6 +3300,7 @@ private fun CompanionChatCard(
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(
@@ -3139,9 +3308,10 @@ private fun CompanionChatCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("和小麦聊聊天", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("手机和 ESP 的对话会统一保存在这里", color = Muted, fontSize = 11.sp)
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    CompanionHeaderSproutIcon(Modifier.size(23.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("与小麦的对话", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
                 }
                 Text(if (expanded) "⌃" else "⌄", color = Leaf, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
@@ -3183,21 +3353,92 @@ private fun CompanionChatCard(
 @Composable
 private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
     val fromUser = message.role == ChatRole.USER
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        if (!fromUser) {
+            CompanionChatAvatar(fromUser = false, Modifier.size(42.dp))
+            Spacer(Modifier.width(7.dp))
+        }
         Box(
             Modifier
-                .background(if (fromUser) BrightLeaf else Color(0xFFFFFDF4), RoundedCornerShape(10.dp))
-                .border(1.dp, if (fromUser) Leaf else CardBorder, RoundedCornerShape(10.dp)),
+                .widthIn(max = 250.dp)
+                .background(if (fromUser) Color(0xFFDDECCB) else Color(0xFFFFFDF4), RoundedCornerShape(11.dp))
+                .border(1.dp, if (fromUser) Color(0xFFC5DCA9) else CardBorder, RoundedCornerShape(11.dp)),
         ) {
-            Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp).widthIn(max = 270.dp)) {
-                Text(message.content, color = if (fromUser) Color.White else Ink, fontSize = 12.sp)
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+                Text(message.content, color = Ink, fontSize = 12.sp)
                 Spacer(Modifier.height(3.dp))
                 Text(
                     "${chatSourceLabel(message)} · ${chatTimeText(message.createdAt, zone)}",
                     fontSize = 9.sp,
-                    color = if (fromUser) Color.White.copy(alpha = 0.78f) else Muted,
+                    color = Muted,
                 )
             }
+        }
+        if (fromUser) {
+            Spacer(Modifier.width(7.dp))
+            CompanionChatAvatar(fromUser = true, Modifier.size(42.dp))
+        }
+    }
+}
+
+@Composable
+private fun CompanionHeaderSproutIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val stroke = 1.8.dp.toPx()
+        drawLine(Color(0xFF6B9C52), Offset(size.width * 0.5f, size.height * 0.86f), Offset(size.width * 0.5f, size.height * 0.38f), stroke, StrokeCap.Round)
+        drawOval(Color(0xFFA7C874), Offset(size.width * 0.05f, size.height * 0.18f), Size(size.width * 0.44f, size.height * 0.30f))
+        drawOval(Color(0xFF86B75B), Offset(size.width * 0.51f, size.height * 0.08f), Size(size.width * 0.44f, size.height * 0.30f))
+    }
+}
+
+@Composable
+private fun CompanionChatAvatar(fromUser: Boolean, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width * 0.5f, size.height * 0.56f)
+        drawCircle(Color(0xFFFFF7E8), size.width * 0.46f, center)
+        drawCircle(CardBorder, size.width * 0.46f, center, style = Stroke(1.dp.toPx()))
+        if (fromUser) {
+            drawCircle(Color(0xFFFFD6B6), size.width * 0.25f, Offset(center.x, center.y * 0.98f))
+            drawArc(
+                Color(0xFF6F4935),
+                startAngle = 176f,
+                sweepAngle = 188f,
+                useCenter = true,
+                topLeft = Offset(size.width * 0.21f, size.height * 0.15f),
+                size = Size(size.width * 0.58f, size.height * 0.58f),
+            )
+            drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.43f, size.height * 0.55f))
+            drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.57f, size.height * 0.55f))
+            drawArc(
+                Color(0xFFB66562),
+                startAngle = 10f,
+                sweepAngle = 160f,
+                useCenter = false,
+                topLeft = Offset(size.width * 0.43f, size.height * 0.56f),
+                size = Size(size.width * 0.14f, size.height * 0.10f),
+                style = Stroke(1.dp.toPx()),
+            )
+            drawOval(Color(0xFF9C705D), Offset(size.width * 0.28f, size.height * 0.73f), Size(size.width * 0.44f, size.height * 0.22f))
+        } else {
+            drawCircle(Color(0xFFFFE5B9), size.width * 0.28f, Offset(center.x, size.height * 0.62f))
+            drawCircle(Color(0xFF55442F), size.width * 0.025f, Offset(size.width * 0.42f, size.height * 0.61f))
+            drawCircle(Color(0xFF55442F), size.width * 0.025f, Offset(size.width * 0.58f, size.height * 0.61f))
+            drawArc(
+                Color(0xFF8C5B48),
+                startAngle = 12f,
+                sweepAngle = 156f,
+                useCenter = false,
+                topLeft = Offset(size.width * 0.43f, size.height * 0.63f),
+                size = Size(size.width * 0.14f, size.height * 0.08f),
+                style = Stroke(1.dp.toPx()),
+            )
+            drawLine(Color(0xFF64934F), Offset(size.width * 0.5f, size.height * 0.38f), Offset(size.width * 0.5f, size.height * 0.17f), 1.8.dp.toPx(), StrokeCap.Round)
+            drawOval(Color(0xFF8EC363), Offset(size.width * 0.17f, size.height * 0.04f), Size(size.width * 0.32f, size.height * 0.22f))
+            drawOval(Color(0xFF76AE52), Offset(size.width * 0.51f, size.height * 0.02f), Size(size.width * 0.32f, size.height * 0.22f))
         }
     }
 }
@@ -3216,6 +3457,8 @@ private fun CompanionMemoryCard(
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -3223,11 +3466,15 @@ private fun CompanionMemoryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text("专属记忆库", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                    Text("让小麦记住重要的事情", color = Muted, fontSize = 11.sp)
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    CompanionShortcutIcon("memory", Modifier.size(42.dp))
+                    Spacer(Modifier.width(9.dp))
+                    Column {
+                        Text("专属记忆库", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("让小麦记住重要的事情", color = Muted, fontSize = 11.sp)
+                    }
                 }
-                Text(if (expanded) "⌃" else "⌄", color = Leaf, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (expanded) "⌃" else "›", color = Muted, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
             }
             if (expanded) {
                 PixelTextField(
@@ -3286,6 +3533,7 @@ private fun CompanionScheduleCard(
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -3475,61 +3723,78 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        showCornerBolts = false,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                CompanionShortcutIcon("tomato", Modifier.size(25.dp))
+                Spacer(Modifier.width(6.dp))
                 Text("今日番茄钟", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                Row {
-                    PixelTextButton(onClick = { confirmDecrease = true }, enabled = count > 0, contentPadding = PaddingValues(horizontal = 7.dp), danger = true) {
-                        Text("－ 减少", fontSize = 12.sp)
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    PixelTextButton(onClick = recordPomodoro, contentPadding = PaddingValues(horizontal = 7.dp)) { Text("＋ 记录", fontSize = 12.sp) }
-                }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Text("$count 个", color = BrightLeaf, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                Text("$minutes min", color = BrightLeaf, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            PomodoroDial(
+                progress = (count.toFloat() / target).coerceIn(0f, 1f),
+                modifier = Modifier.size(168.dp),
+            )
+            PixelButton(
+                onClick = recordPomodoro,
+                modifier = Modifier.width(112.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
+            ) {
+                Text("开始", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
-            PixelProgressBar((count.toFloat() / target).coerceIn(0f, 1f), Modifier.fillMaxWidth())
-            Text("目标 $target 个番茄钟", color = Muted, fontSize = 10.sp)
             HorizontalDivider(color = CardBorder)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("日程完成度", fontWeight = FontWeight.Bold, color = Ink)
-                Text("$completion%", color = BrightLeaf, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                PixelTextButton(onClick = { confirmDecrease = true }, enabled = count > 0, contentPadding = PaddingValues(horizontal = 8.dp), danger = true) {
+                    Text("－", fontSize = 16.sp)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("$count 个 · $minutes min", color = BrightLeaf, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("目标 $target 个番茄钟", color = Muted, fontSize = 10.sp)
+                }
+                PixelTextButton(onClick = recordPomodoro, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    Text("＋", fontSize = 16.sp)
+                }
             }
-            CompanionCompletionChart(state.focusDaily)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("日程完成度", fontWeight = FontWeight.Bold, color = Ink)
+                Text("$completion%", color = BrightLeaf, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            PixelProgressBar((completion / 100f).coerceIn(0f, 1f), Modifier.fillMaxWidth())
         }
     }
 }
 
 @Composable
-private fun CompanionCompletionChart(values: List<DailyFocusSummary>) {
-    val points = values.takeLast(7)
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(105.dp)) {
-            if (points.size < 2) return@Canvas
-            repeat(3) { index ->
-                val y = size.height * index / 2f
-                drawLine(Color(0xFFF0F1ED), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-            }
-            val path = Path().apply {
-                points.forEachIndexed { index, item ->
-                    val x = size.width * index / (points.size - 1)
-                    val y = size.height * (1f - item.scheduleCompletionPercent.coerceIn(0, 100) / 100f)
-                    if (index == 0) moveTo(x, y) else lineTo(x, y)
-                }
-            }
-            drawPath(path, Leaf, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-            points.forEachIndexed { index, item ->
-                val x = size.width * index / (points.size - 1)
-                val y = size.height * (1f - item.scheduleCompletionPercent.coerceIn(0, 100) / 100f)
-                drawCircle(Color.White, 4.dp.toPx(), Offset(x, y))
-                drawCircle(Leaf, 2.7.dp.toPx(), Offset(x, y))
-            }
+private fun PomodoroDial(progress: Float, modifier: Modifier = Modifier) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.matchParentSize()) {
+            val stroke = 9.dp.toPx()
+            val inset = stroke
+            val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
+            val arcTopLeft = Offset(inset, inset)
+            drawArc(
+                color = Color(0xFFDDEEC9),
+                startAngle = 140f,
+                sweepAngle = 260f,
+                useCenter = false,
+                topLeft = arcTopLeft,
+                size = arcSize,
+                style = Stroke(stroke, cap = StrokeCap.Round),
+            )
+            drawArc(
+                color = Color(0xFF65A861),
+                startAngle = 140f,
+                sweepAngle = 260f * progress.coerceIn(0f, 1f),
+                useCenter = false,
+                topLeft = arcTopLeft,
+                size = arcSize,
+                style = Stroke(stroke, cap = StrokeCap.Round),
+            )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            points.forEach { Text(it.date.takeLast(5), color = Muted, fontSize = 9.sp) }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CompanionShortcutIcon("tomato", Modifier.size(28.dp))
+            Text("25:00", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text("每个番茄钟", color = Muted, fontSize = 11.sp)
         }
     }
 }
