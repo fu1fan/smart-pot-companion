@@ -2669,18 +2669,35 @@ private fun ControlScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
-                        Modifier.fillMaxWidth().clickable { lightExpanded = !lightExpanded },
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("植物补光", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
-                        Text(if (lightExpanded) "⌃" else "⌄", color = Leaf, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        ControlLightIcon(Modifier.size(38.dp))
+                        Column(Modifier.padding(start = 9.dp).weight(1f)) {
+                            Text("植物补光", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                            Text(
+                                "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"} · 标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
+                                color = Muted,
+                                fontSize = 9.sp,
+                                maxLines = 2,
+                            )
+                        }
+                        PixelSwitch(
+                            checked = manualOn,
+                            onCheckedChange = { checked ->
+                                manualOn = checked
+                                control(DeviceControlRequest(DeviceCommandType.SET_LIGHT_STRIP_CONTROL, lightStripManualMode = true, lightStripOn = checked))
+                            },
+                            enabled = manualMode,
+                        )
+                        Text(
+                            if (lightExpanded) "⌃" else "⌄",
+                            modifier = Modifier.padding(start = 7.dp).clickable { lightExpanded = !lightExpanded },
+                            color = Muted,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
-                    Text(
-                        "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"} · 标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
-                        color = Muted,
-                        fontSize = 10.sp,
-                    )
                     if (lightExpanded) {
                         PixelButton(
                             onClick = {
@@ -2696,20 +2713,6 @@ private fun ControlScreen(
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (manualMode) "退出手动开关灯模式" else "进入手动开关灯模式", fontSize = 12.sp) }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                                Text("手动开关灯", fontWeight = FontWeight.SemiBold, color = Ink)
-                                Text("仅在 APP 手动控制时生效", color = Muted, fontSize = 10.sp)
-                        }
-                        PixelSwitch(
-                            checked = manualOn,
-                            onCheckedChange = { checked ->
-                                manualOn = checked
-                                control(DeviceControlRequest(DeviceCommandType.SET_LIGHT_STRIP_CONTROL, lightStripManualMode = true, lightStripOn = checked))
-                            },
-                            enabled = manualMode,
-                        )
-                    }
                         HorizontalDivider(color = CardBorder)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -2788,11 +2791,12 @@ private fun ControlScreen(
                         Modifier.fillMaxWidth().clickable { shareExpanded = !shareExpanded },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("双", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Black)
-                        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                        ControlSectionIcon("share", Modifier.size(48.dp))
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
                             Text("双人共享", fontWeight = FontWeight.Bold, color = Ink)
                             Text("你和 ESP 一起照顾小麦", color = Muted, fontSize = 10.sp)
                         }
+                        ControlPlanterDecoration("crate", Modifier.size(width = 62.dp, height = 54.dp))
                         Text(if (shareExpanded) "⌃" else "›", color = Muted, fontSize = 18.sp)
                     }
                     if (shareExpanded) {
@@ -2817,11 +2821,12 @@ private fun ControlScreen(
                         Modifier.fillMaxWidth().clickable { settingsExpanded = !settingsExpanded },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("▦", fontSize = 20.sp, color = Ink)
-                        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                        ControlSectionIcon("settings", Modifier.size(48.dp))
+                        Column(Modifier.padding(start = 12.dp).weight(1f)) {
                             Text("更多设置", fontWeight = FontWeight.Bold, color = Ink)
                             Text("触摸互动、屏幕休眠、设备重启", color = Muted, fontSize = 10.sp)
                         }
+                        ControlPlanterDecoration("stool", Modifier.size(width = 62.dp, height = 54.dp))
                         Text(if (settingsExpanded) "⌃" else "›", color = Muted, fontSize = 18.sp)
                     }
                     if (settingsExpanded) {
@@ -2852,20 +2857,28 @@ private fun ControlScreen(
 @Composable
 private fun ControlDeviceStatusCard(state: SmartPotUiState) {
     val snapshot = state.snapshot
-    PixelPanel(
-        Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
-        showCornerBolts = false,
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(196.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Image(
+            painter = painterResource(R.drawable.control_status_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.FillBounds,
+        )
+        Column(
+            Modifier
+                .fillMaxWidth(0.53f)
+                .align(Alignment.CenterStart)
+                .padding(start = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
                 Text("设备状态", fontWeight = FontWeight.Bold, color = Ink)
                 Text(if (snapshot?.online == true) "在线" else "离线", color = if (snapshot?.online == true) BrightLeaf else Color(0xFFE05252), fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(if (snapshot?.online == true) "ESP 已连接" else "等待 ESP 连接", color = Muted, fontSize = 11.sp)
                 Text("设备：${snapshot?.pot?.deviceId ?: "--"}", color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            PlantMascot(dashboardMetrics(state).healthPercent, Modifier.size(width = 112.dp, height = 112.dp))
         }
     }
 }
@@ -2882,15 +2895,18 @@ private fun ControlProjectionCard(
     val emojis = listOf("heart", "smile", "happy", "thirsty", "dark", "weak", "wave", "star", "flower", "water", "sun", "sleep")
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
+        fill = Color(0xFFFFFDF5),
+        edge = CardBorder,
         showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("屏幕投送", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("↗", color = BrightLeaf, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("快捷投送", modifier = Modifier.padding(start = 7.dp), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ControlActionTile("▤", "发送文字", "发送到 ESP 屏幕", mode == "text", Modifier.weight(1f)) { onModeChange("text") }
-                ControlActionTile("表", "发送表情", "发送表情动画", mode == "emoji", Modifier.weight(1f)) { onModeChange("emoji") }
+                ControlActionTile("text", "发送文字", "发送到 ESP 屏幕", mode == "text", Modifier.weight(1f)) { onModeChange("text") }
+                ControlActionTile("emoji", "发送表情", "发送表情动画", mode == "emoji", Modifier.weight(1f)) { onModeChange("emoji") }
             }
             if (mode == "text") {
                 PixelTextField(text, onTextChange, placeholder = "输入要投送的中文或英文短句", modifier = Modifier.fillMaxWidth(), minLines = 2)
@@ -2920,20 +2936,132 @@ private fun ControlProjectionCard(
 }
 
 @Composable
-private fun ControlActionTile(icon: String, title: String, subtitle: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun ControlActionTile(kind: String, title: String, subtitle: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier = modifier
-            .height(72.dp)
-            .background(if (selected) WarmLeafSoft else Color(0xFFFFFDF4), RoundedCornerShape(8.dp))
-            .border(1.dp, if (selected) PixelGreenEdge else CardBorder, RoundedCornerShape(8.dp))
+            .height(78.dp)
+            .background(if (selected) WarmLeafSoft else Color(0xFFFFFDF7), RoundedCornerShape(10.dp))
+            .border(1.dp, if (selected) PixelGreenEdge else Color(0xFFE4D8B5), RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
     ) {
-        Row(Modifier.padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(icon, color = Leaf, fontSize = 21.sp)
-            Column(Modifier.padding(start = 9.dp)) {
-                Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        Row(Modifier.fillMaxSize().padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+            ControlProjectionIcon(kind, Modifier.size(42.dp))
+            Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 Text(subtitle, color = Muted, fontSize = 9.sp, maxLines = 1)
             }
+            Text("›", color = Color(0xFFC99B52), fontSize = 20.sp)
+        }
+    }
+}
+
+@Composable
+private fun ControlProjectionIcon(kind: String, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        if (kind == "text") {
+            drawCircle(Color(0xFF6BA85F), size.minDimension * 0.46f, center)
+            drawRoundRect(
+                color = Color.White,
+                topLeft = Offset(size.width * 0.18f, size.height * 0.25f),
+                size = Size(size.width * 0.64f, size.height * 0.42f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.width * 0.12f),
+            )
+            repeat(3) { index ->
+                drawCircle(Color(0xFF6BA85F), size.width * 0.035f, Offset(size.width * (0.37f + index * 0.13f), size.height * 0.46f))
+            }
+            val tail = androidx.compose.ui.graphics.Path().apply {
+                moveTo(size.width * 0.3f, size.height * 0.63f)
+                lineTo(size.width * 0.2f, size.height * 0.78f)
+                lineTo(size.width * 0.43f, size.height * 0.66f)
+                close()
+            }
+            drawPath(tail, Color.White)
+        } else {
+            drawCircle(Color(0xFFF4C55D), size.minDimension * 0.46f, center)
+            drawCircle(Color(0xFF5B412B), size.width * 0.045f, Offset(size.width * 0.37f, size.height * 0.42f))
+            drawCircle(Color(0xFF5B412B), size.width * 0.045f, Offset(size.width * 0.63f, size.height * 0.42f))
+            drawLine(
+                color = Color(0xFF5B412B),
+                start = Offset(size.width * 0.38f, size.height * 0.63f),
+                end = Offset(size.width * 0.62f, size.height * 0.63f),
+                strokeWidth = size.width * 0.04f,
+            )
+            drawCircle(Color(0xFFF08C77), size.width * 0.055f, Offset(size.width * 0.25f, size.height * 0.56f))
+            drawCircle(Color(0xFFF08C77), size.width * 0.055f, Offset(size.width * 0.75f, size.height * 0.56f))
+        }
+    }
+}
+
+@Composable
+private fun ControlLightIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val green = Color(0xFF5CA65D)
+        val center = Offset(size.width / 2f, size.height * 0.42f)
+        drawCircle(Color(0xFFEAF3D7), size.minDimension * 0.47f, Offset(size.width / 2f, size.height / 2f))
+        drawCircle(green, size.minDimension * 0.18f, center)
+        drawRoundRect(green, Offset(size.width * 0.41f, size.height * 0.58f), Size(size.width * 0.18f, size.height * 0.2f), androidx.compose.ui.geometry.CornerRadius(size.width * 0.04f))
+        repeat(8) { index ->
+            val angle = Math.toRadians(index * 45.0)
+            drawLine(
+                color = green,
+                start = Offset(center.x + kotlin.math.cos(angle).toFloat() * size.width * 0.28f, center.y + kotlin.math.sin(angle).toFloat() * size.height * 0.28f),
+                end = Offset(center.x + kotlin.math.cos(angle).toFloat() * size.width * 0.38f, center.y + kotlin.math.sin(angle).toFloat() * size.height * 0.38f),
+                strokeWidth = size.width * 0.055f,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ControlSectionIcon(kind: String, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val fill = if (kind == "share") Color(0xFFEAF2D4) else Color(0xFFFFEAC2)
+        val ink = if (kind == "share") Color(0xFF5C9B58) else Color(0xFFE5A337)
+        drawCircle(fill, size.minDimension * 0.48f, Offset(size.width / 2f, size.height / 2f))
+        if (kind == "share") {
+            drawCircle(ink, size.width * 0.11f, Offset(size.width * 0.38f, size.height * 0.38f))
+            drawCircle(ink, size.width * 0.11f, Offset(size.width * 0.64f, size.height * 0.38f))
+            drawCircle(ink, size.width * 0.105f, Offset(size.width * 0.5f, size.height * 0.55f))
+            drawRoundRect(ink, Offset(size.width * 0.19f, size.height * 0.54f), Size(size.width * 0.62f, size.height * 0.24f), androidx.compose.ui.geometry.CornerRadius(size.width * 0.1f))
+        } else {
+            drawCircle(ink, size.width * 0.22f, Offset(size.width / 2f, size.height / 2f), style = Stroke(size.width * 0.11f))
+            repeat(8) { index ->
+                val angle = Math.toRadians(index * 45.0)
+                val inner = size.width * 0.29f
+                val outer = size.width * 0.4f
+                drawLine(
+                    ink,
+                    Offset(size.width / 2f + kotlin.math.cos(angle).toFloat() * inner, size.height / 2f + kotlin.math.sin(angle).toFloat() * inner),
+                    Offset(size.width / 2f + kotlin.math.cos(angle).toFloat() * outer, size.height / 2f + kotlin.math.sin(angle).toFloat() * outer),
+                    strokeWidth = size.width * 0.12f,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlPlanterDecoration(kind: String, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val wood = Color(0xFFC99755)
+        val green = Color(0xFF80A84E)
+        val centerX = size.width / 2f
+        if (kind == "stool") {
+            drawRect(wood, Offset(size.width * 0.24f, size.height * 0.62f), Size(size.width * 0.52f, size.height * 0.09f))
+            drawLine(wood, Offset(size.width * 0.32f, size.height * 0.68f), Offset(size.width * 0.24f, size.height), size.width * 0.07f)
+            drawLine(wood, Offset(size.width * 0.68f, size.height * 0.68f), Offset(size.width * 0.76f, size.height), size.width * 0.07f)
+        } else {
+            drawRoundRect(wood, Offset(size.width * 0.15f, size.height * 0.58f), Size(size.width * 0.7f, size.height * 0.31f), androidx.compose.ui.geometry.CornerRadius(size.width * 0.04f))
+            repeat(3) { index ->
+                drawLine(Color(0xFFA8743E), Offset(size.width * (0.3f + index * 0.2f), size.height * 0.59f), Offset(size.width * (0.3f + index * 0.2f), size.height * 0.88f), size.width * 0.025f)
+            }
+        }
+        drawRoundRect(Color(0xFFD9B16C), Offset(size.width * 0.31f, size.height * 0.42f), Size(size.width * 0.38f, size.height * 0.25f), androidx.compose.ui.geometry.CornerRadius(size.width * 0.05f))
+        repeat(5) { index ->
+            val x = centerX + (index - 2) * size.width * 0.09f
+            drawLine(green, Offset(centerX, size.height * 0.46f), Offset(x, size.height * (0.12f + (index % 2) * 0.07f)), size.width * 0.035f)
+            drawCircle(Color(0xFF9CBD59), size.width * 0.075f, Offset(x, size.height * (0.12f + (index % 2) * 0.07f)))
         }
     }
 }
