@@ -864,6 +864,13 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
             .fillMaxSize()
             .background(Color(0xFFFFFAEA)),
     ) {
+        Image(
+            painter = painterResource(R.drawable.home_page_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+        )
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2664,12 +2671,12 @@ private fun ControlScreen(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(2.35f).clip(RoundedCornerShape(14.dp))) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(3.2f).clip(RoundedCornerShape(14.dp))) {
                         Image(
                             painter = painterResource(R.drawable.control_light_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.FillBounds,
+                            contentScale = ContentScale.Crop,
                         )
                         Row(
                             Modifier
@@ -2791,7 +2798,7 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(3f)
+                            .aspectRatio(3.35f)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable { shareExpanded = !shareExpanded },
                     ) {
@@ -2799,7 +2806,7 @@ private fun ControlScreen(
                             painter = painterResource(R.drawable.control_share_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.FillBounds,
+                            contentScale = ContentScale.Crop,
                         )
                         Column(
                             Modifier
@@ -2832,7 +2839,7 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(3f)
+                            .aspectRatio(3.35f)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable { settingsExpanded = !settingsExpanded },
                     ) {
@@ -2840,7 +2847,7 @@ private fun ControlScreen(
                             painter = painterResource(R.drawable.control_settings_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.FillBounds,
+                            contentScale = ContentScale.Crop,
                         )
                         Column(
                             Modifier
@@ -2902,13 +2909,14 @@ private fun ControlDeviceStatusCard(state: SmartPotUiState) {
     Box(
         Modifier
             .fillMaxWidth()
-            .aspectRatio(1.859f),
+            .aspectRatio(2.08f)
+            .clip(RoundedCornerShape(14.dp)),
     ) {
         Image(
             painter = painterResource(R.drawable.control_status_background),
             contentDescription = null,
             modifier = Modifier.matchParentSize(),
-            contentScale = ContentScale.FillBounds,
+            contentScale = ContentScale.Crop,
         )
         Column(
             Modifier
