@@ -1837,13 +1837,14 @@ private fun CareAffinityHeader(
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("好感度等级", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text("Lv. $level / 30", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
-                        Text("LV", fontSize = 12.sp, color = Leaf, fontWeight = FontWeight.Black)
-                    }
+                    Text("Lv. $level", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
                     PixelProgressBar(levelProgress, Modifier.fillMaxWidth())
                     Text(
-                        if (level >= 30) "好感度已达到最高等级" else "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度",
+                        if (level >= 30) {
+                            "好感度已达到最高等级（最高等级30）"
+                        } else {
+                            "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度（最高等级30）"
+                        },
                         fontSize = 11.sp,
                         color = Color(0xFF5C513D),
                     )
