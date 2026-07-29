@@ -43,6 +43,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -2643,9 +2644,7 @@ private fun ControlScreen(
             contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
         ) {
             item {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    PixelTitleSign("控制", Modifier.fillMaxWidth(0.56f))
-                }
+                ControlPageHeader()
             }
             item { ControlDeviceStatusCard(state) }
             item {
@@ -2663,12 +2662,12 @@ private fun ControlScreen(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.fillMaxWidth().height(92.dp)) {
+                    Box(Modifier.fillMaxWidth().height(92.dp).clip(RoundedCornerShape(14.dp))) {
                         Image(
                             painter = painterResource(R.drawable.control_light_header),
                             contentDescription = null,
-                            modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().height(214.dp).align(Alignment.Center),
+                            contentScale = ContentScale.FillBounds,
                         )
                         Row(
                             Modifier
@@ -2791,13 +2790,14 @@ private fun ControlScreen(
                         Modifier
                             .fillMaxWidth()
                             .height(92.dp)
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable { shareExpanded = !shareExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_share_header),
                             contentDescription = null,
-                            modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().height(174.dp).align(Alignment.Center),
+                            contentScale = ContentScale.FillBounds,
                         )
                         Column(
                             Modifier
@@ -2831,13 +2831,14 @@ private fun ControlScreen(
                         Modifier
                             .fillMaxWidth()
                             .height(92.dp)
+                            .clip(RoundedCornerShape(14.dp))
                             .clickable { settingsExpanded = !settingsExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_settings_header),
                             contentDescription = null,
-                            modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().height(188.dp).align(Alignment.Center),
+                            contentScale = ContentScale.FillBounds,
                         )
                         Column(
                             Modifier
@@ -2875,6 +2876,21 @@ private fun ControlScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ControlPageHeader() {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(16.dp))
+        Text("控制", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.width(16.dp))
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -3472,7 +3488,7 @@ private fun CompanionChatCard(
     }
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
+        fill = PixelPanelFill,
         edge = PixelGreenEdge,
         showCornerBolts = false,
     ) {
@@ -3651,7 +3667,7 @@ private fun CompanionMemoryCard(
 ) {
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
+        fill = PixelPanelFill,
         edge = PixelGreenEdge,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
         showCornerBolts = false,
@@ -3727,7 +3743,7 @@ private fun CompanionScheduleCard(
     }
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
+        fill = PixelPanelFill,
         edge = PixelGreenEdge,
         showCornerBolts = false,
     ) {
@@ -3943,7 +3959,7 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
     }
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
+        fill = PixelPanelFill,
         edge = PixelGreenEdge,
         showCornerBolts = false,
     ) {
