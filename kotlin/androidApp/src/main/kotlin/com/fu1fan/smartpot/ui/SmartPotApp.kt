@@ -245,13 +245,23 @@ private fun SpeciesPickerDialog(
     }
     Dialog(onDismissRequest = onDismiss) {
         PixelPanel(
-            Modifier.widthIn(max = 340.dp).wrapContentHeight(),
+            Modifier.fillMaxWidth(0.88f).widthIn(max = 320.dp).wrapContentHeight(),
             fill = PixelCream,
             edge = PixelWoodDark,
-            contentPadding = PaddingValues(12.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            showCornerBolts = false,
         ) {
             Column(Modifier.fillMaxWidth().wrapContentHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
+                    Text(
+                        "关闭",
+                        modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 4.dp, vertical = 2.dp),
+                        color = Leaf,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 PixelTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -261,9 +271,12 @@ private fun SpeciesPickerDialog(
                     singleLine = true,
                 )
                 if (filteredSpecies.isEmpty()) {
-                    Text("没有找到匹配的植物品种", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 18.dp))
+                    Text("没有找到匹配的植物品种", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 270.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LazyColumn(
+                        Modifier.fillMaxWidth().heightIn(max = 220.dp).wrapContentHeight(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         items(filteredSpecies, key = { it.id }) { plant ->
                             Row(
                                 Modifier
@@ -287,7 +300,6 @@ private fun SpeciesPickerDialog(
                         }
                     }
                 }
-                PixelTextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("关闭") }
             }
         }
     }
@@ -812,17 +824,23 @@ private fun PixelConfirmDialog(
 ) {
     Dialog(onDismissRequest = onDismiss) {
         PixelPanel(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth(0.82f).widthIn(max = 288.dp).wrapContentHeight(),
             fill = PixelCream,
             edge = PixelWoodDark,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 11.dp),
+            showCornerBolts = false,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, fontSize = 18.sp, fontWeight = FontWeight.Black, color = Ink)
-                Text(text, color = Ink, fontSize = 13.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
+                Text(text, color = Ink, fontSize = 12.sp)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    PixelTextButton(onClick = onDismiss) { Text("取消", fontSize = 12.sp) }
-                    Spacer(Modifier.width(8.dp))
-                    PixelTextButton(onClick = onConfirm, danger = danger) { Text(confirmText, fontSize = 12.sp) }
+                    PixelTextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 3.dp)) {
+                        Text("取消", fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    PixelTextButton(onClick = onConfirm, danger = danger, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 3.dp)) {
+                        Text(confirmText, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -3353,20 +3371,23 @@ private fun CompanionChatCard(
 @Composable
 private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
     val fromUser = message.role == ChatRole.USER
+    val bubbleColor = if (fromUser) Color(0xFFDDECCB) else Color(0xFFFFFDF4)
+    val bubbleEdge = if (fromUser) Color(0xFFC5DCA9) else CardBorder
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Bottom,
+        verticalAlignment = Alignment.Top,
     ) {
         if (!fromUser) {
             CompanionChatAvatar(fromUser = false, Modifier.size(42.dp))
-            Spacer(Modifier.width(7.dp))
+            Spacer(Modifier.width(5.dp))
+            ChatBubbleTail(fromUser = false, fill = bubbleColor, edge = bubbleEdge)
         }
         Box(
             Modifier
                 .widthIn(max = 250.dp)
-                .background(if (fromUser) Color(0xFFDDECCB) else Color(0xFFFFFDF4), RoundedCornerShape(11.dp))
-                .border(1.dp, if (fromUser) Color(0xFFC5DCA9) else CardBorder, RoundedCornerShape(11.dp)),
+                .background(bubbleColor, RoundedCornerShape(11.dp))
+                .border(1.dp, bubbleEdge, RoundedCornerShape(11.dp)),
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
                 Text(message.content, color = Ink, fontSize = 12.sp)
@@ -3379,9 +3400,30 @@ private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
             }
         }
         if (fromUser) {
-            Spacer(Modifier.width(7.dp))
+            ChatBubbleTail(fromUser = true, fill = bubbleColor, edge = bubbleEdge)
+            Spacer(Modifier.width(5.dp))
             CompanionChatAvatar(fromUser = true, Modifier.size(42.dp))
         }
+    }
+}
+
+@Composable
+private fun ChatBubbleTail(fromUser: Boolean, fill: Color, edge: Color) {
+    Canvas(Modifier.width(9.dp).height(18.dp).offset(y = 8.dp)) {
+        val tail = Path().apply {
+            if (fromUser) {
+                moveTo(0f, 0f)
+                lineTo(size.width, size.height * 0.5f)
+                lineTo(0f, size.height * 0.72f)
+            } else {
+                moveTo(size.width, 0f)
+                lineTo(0f, size.height * 0.5f)
+                lineTo(size.width, size.height * 0.72f)
+            }
+            close()
+        }
+        drawPath(tail, fill)
+        drawPath(tail, edge, style = Stroke(1.dp.toPx()))
     }
 }
 
@@ -3397,49 +3439,47 @@ private fun CompanionHeaderSproutIcon(modifier: Modifier = Modifier) {
 
 @Composable
 private fun CompanionChatAvatar(fromUser: Boolean, modifier: Modifier = Modifier) {
+    if (!fromUser) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Canvas(Modifier.matchParentSize()) {
+                drawCircle(Color(0xFFFFF7E8), size.width * 0.48f, center)
+                drawCircle(CardBorder, size.width * 0.48f, center, style = Stroke(1.dp.toPx()))
+            }
+            Image(
+                painter = painterResource(R.drawable.wheat_chat_avatar),
+                contentDescription = "小麦头像",
+                modifier = Modifier.fillMaxSize().padding(1.dp),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.Center,
+            )
+        }
+        return
+    }
     Canvas(modifier) {
         val center = Offset(size.width * 0.5f, size.height * 0.56f)
         drawCircle(Color(0xFFFFF7E8), size.width * 0.46f, center)
         drawCircle(CardBorder, size.width * 0.46f, center, style = Stroke(1.dp.toPx()))
-        if (fromUser) {
-            drawCircle(Color(0xFFFFD6B6), size.width * 0.25f, Offset(center.x, center.y * 0.98f))
-            drawArc(
-                Color(0xFF6F4935),
-                startAngle = 176f,
-                sweepAngle = 188f,
-                useCenter = true,
-                topLeft = Offset(size.width * 0.21f, size.height * 0.15f),
-                size = Size(size.width * 0.58f, size.height * 0.58f),
-            )
-            drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.43f, size.height * 0.55f))
-            drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.57f, size.height * 0.55f))
-            drawArc(
-                Color(0xFFB66562),
-                startAngle = 10f,
-                sweepAngle = 160f,
-                useCenter = false,
-                topLeft = Offset(size.width * 0.43f, size.height * 0.56f),
-                size = Size(size.width * 0.14f, size.height * 0.10f),
-                style = Stroke(1.dp.toPx()),
-            )
-            drawOval(Color(0xFF9C705D), Offset(size.width * 0.28f, size.height * 0.73f), Size(size.width * 0.44f, size.height * 0.22f))
-        } else {
-            drawCircle(Color(0xFFFFE5B9), size.width * 0.28f, Offset(center.x, size.height * 0.62f))
-            drawCircle(Color(0xFF55442F), size.width * 0.025f, Offset(size.width * 0.42f, size.height * 0.61f))
-            drawCircle(Color(0xFF55442F), size.width * 0.025f, Offset(size.width * 0.58f, size.height * 0.61f))
-            drawArc(
-                Color(0xFF8C5B48),
-                startAngle = 12f,
-                sweepAngle = 156f,
-                useCenter = false,
-                topLeft = Offset(size.width * 0.43f, size.height * 0.63f),
-                size = Size(size.width * 0.14f, size.height * 0.08f),
-                style = Stroke(1.dp.toPx()),
-            )
-            drawLine(Color(0xFF64934F), Offset(size.width * 0.5f, size.height * 0.38f), Offset(size.width * 0.5f, size.height * 0.17f), 1.8.dp.toPx(), StrokeCap.Round)
-            drawOval(Color(0xFF8EC363), Offset(size.width * 0.17f, size.height * 0.04f), Size(size.width * 0.32f, size.height * 0.22f))
-            drawOval(Color(0xFF76AE52), Offset(size.width * 0.51f, size.height * 0.02f), Size(size.width * 0.32f, size.height * 0.22f))
-        }
+        drawCircle(Color(0xFFFFD6B6), size.width * 0.25f, Offset(center.x, center.y * 0.98f))
+        drawArc(
+            Color(0xFF6F4935),
+            startAngle = 176f,
+            sweepAngle = 188f,
+            useCenter = true,
+            topLeft = Offset(size.width * 0.21f, size.height * 0.15f),
+            size = Size(size.width * 0.58f, size.height * 0.58f),
+        )
+        drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.43f, size.height * 0.55f))
+        drawCircle(Color(0xFF5A4031), size.width * 0.025f, Offset(size.width * 0.57f, size.height * 0.55f))
+        drawArc(
+            Color(0xFFB66562),
+            startAngle = 10f,
+            sweepAngle = 160f,
+            useCenter = false,
+            topLeft = Offset(size.width * 0.43f, size.height * 0.56f),
+            size = Size(size.width * 0.14f, size.height * 0.10f),
+            style = Stroke(1.dp.toPx()),
+        )
+        drawOval(Color(0xFF9C705D), Offset(size.width * 0.28f, size.height * 0.73f), Size(size.width * 0.44f, size.height * 0.22f))
     }
 }
 
@@ -3705,7 +3745,26 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
     val minutes = today?.focusMinutes ?: 0
     val target = (today?.targetPomodoroCount ?: 4).coerceAtLeast(1)
     val completion = today?.scheduleCompletionPercent ?: 0
+    val sessionSeconds = 25 * 60
+    var remainingSeconds by rememberSaveable { mutableIntStateOf(sessionSeconds) }
+    var timerRunning by rememberSaveable { mutableStateOf(false) }
+    var timerEndEpochMs by rememberSaveable { mutableLongStateOf(0L) }
     var confirmDecrease by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(timerRunning, timerEndEpochMs) {
+        if (!timerRunning || timerEndEpochMs <= 0L) return@LaunchedEffect
+        while (timerRunning) {
+            val remaining = ((timerEndEpochMs - System.currentTimeMillis() + 999L) / 1000L).toInt()
+            if (remaining <= 0) {
+                remainingSeconds = sessionSeconds
+                timerRunning = false
+                timerEndEpochMs = 0L
+                recordPomodoro()
+                break
+            }
+            remainingSeconds = remaining.coerceAtMost(sessionSeconds)
+            delay(250)
+        }
+    }
     if (confirmDecrease) {
         PixelConfirmDialog(
             title = "减少一个番茄钟？",
@@ -3732,15 +3791,29 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
                 Text("今日番茄钟", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
             }
             PomodoroDial(
-                progress = (count.toFloat() / target).coerceIn(0f, 1f),
+                progress = 1f - remainingSeconds.toFloat() / sessionSeconds,
+                timeText = "%02d:%02d".format(remainingSeconds / 60, remainingSeconds % 60),
+                statusText = if (timerRunning) "专注中..." else if (remainingSeconds < sessionSeconds) "已暂停" else "准备专注",
                 modifier = Modifier.size(168.dp),
             )
             PixelButton(
-                onClick = recordPomodoro,
+                onClick = {
+                    if (timerRunning) {
+                        timerRunning = false
+                        timerEndEpochMs = 0L
+                    } else {
+                        timerEndEpochMs = System.currentTimeMillis() + remainingSeconds * 1000L
+                        timerRunning = true
+                    }
+                },
                 modifier = Modifier.width(112.dp),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                Text("开始", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (timerRunning) "暂停" else if (remainingSeconds < sessionSeconds) "继续" else "开始",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
             HorizontalDivider(color = CardBorder)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -3765,7 +3838,12 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
 }
 
 @Composable
-private fun PomodoroDial(progress: Float, modifier: Modifier = Modifier) {
+private fun PomodoroDial(
+    progress: Float,
+    timeText: String,
+    statusText: String,
+    modifier: Modifier = Modifier,
+) {
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val stroke = 9.dp.toPx()
@@ -3793,8 +3871,8 @@ private fun PomodoroDial(progress: Float, modifier: Modifier = Modifier) {
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CompanionShortcutIcon("tomato", Modifier.size(28.dp))
-            Text("25:00", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Text("每个番茄钟", color = Muted, fontSize = 11.sp)
+            Text(timeText, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text(statusText, color = Muted, fontSize = 11.sp)
         }
     }
 }
