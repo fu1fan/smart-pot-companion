@@ -103,11 +103,8 @@ fun Application.configureRoutes(services: ServerServices) {
                     delete("/care/{careLogId}") {
                         val pot = call.requirePot(services)
                         val careLogId = requireNotNull(call.parameters["careLogId"]) { "缺少养护记录 ID" }
-                        if (services.care.delete(pot.id, careLogId)) {
-                            call.respond(HttpStatusCode.NoContent)
-                        } else {
-                            call.respond(HttpStatusCode.NotFound)
-                        }
+                        services.care.delete(pot.id, careLogId)
+                        call.respond(HttpStatusCode.NoContent)
                     }
                     get("/reminders") { call.respond(services.store.listReminders(call.requirePot(services).id)) }
                     get("/memories") { call.respond(services.store.listMemories(call.requirePot(services).id)) }

@@ -190,6 +190,8 @@ class ApplicationTest {
 
         val deleteCare = api.delete("/api/v1/pots/${pot.id}/care/${careLog.id}") { bearerAuth(config.demoToken) }
         assertEquals(HttpStatusCode.NoContent, deleteCare.status)
+        val deleteCareAgain = api.delete("/api/v1/pots/${pot.id}/care/${careLog.id}") { bearerAuth(config.demoToken) }
+        assertEquals(HttpStatusCode.NoContent, deleteCareAgain.status)
         assertTrue(api.get("/api/v1/pots/${pot.id}/care") { bearerAuth(config.demoToken) }.body<List<CareLog>>().isEmpty())
 
         repeat(2) {

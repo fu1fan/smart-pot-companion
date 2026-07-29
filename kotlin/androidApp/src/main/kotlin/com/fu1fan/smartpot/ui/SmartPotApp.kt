@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -243,12 +245,13 @@ private fun SpeciesPickerDialog(
     }
     Dialog(onDismissRequest = onDismiss) {
         PixelPanel(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth(0.84f).heightIn(max = 520.dp),
             fill = PixelCream,
             edge = PixelWoodDark,
+            contentPadding = PaddingValues(12.dp),
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("修改植物品种", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Ink)
+                Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
                 PixelTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -260,13 +263,13 @@ private fun SpeciesPickerDialog(
                 if (filteredSpecies.isEmpty()) {
                     Text("没有找到匹配的植物品种", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 18.dp))
                 } else {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 270.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         items(filteredSpecies, key = { it.id }) { plant ->
                             Row(
                                 Modifier
                                     .fillMaxWidth()
                                     .clickable { onSelect(plant.id) }
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
@@ -1554,7 +1557,6 @@ private fun CareScreen(
     var addRecordVisible by rememberSaveable { mutableStateOf(false) }
     var recordImageDataUrl by remember { mutableStateOf<String?>(null) }
     var selectedCareType by remember { mutableStateOf<CareType?>(null) }
-    var pendingDeleteCareId by rememberSaveable { mutableStateOf<String?>(null) }
     var affinityImpactExpanded by rememberSaveable { mutableStateOf(false) }
     val careActions = listOf(CareType.WATER, CareType.FERTILIZE, CareType.PRUNE, CareType.REPOT, CareType.NEW_LEAF)
     val metrics = dashboardMetrics(state)
@@ -1564,19 +1566,6 @@ private fun CareScreen(
     fun scrollToSection(section: String, index: Int) {
         selectedShortcut = section
         scope.launch { listState.animateScrollToItem(index) }
-    }
-    pendingDeleteCareId?.let { careLogId ->
-        PixelConfirmDialog(
-            title = "删除成长记录",
-            text = "确定删除这条养护记录吗？对应的好感度加分也会撤销。",
-            confirmText = "删除",
-            danger = true,
-            onConfirm = {
-                deleteCare(careLogId)
-                pendingDeleteCareId = null
-            },
-            onDismiss = { pendingDeleteCareId = null },
-        )
     }
     Box(Modifier.fillMaxSize()) {
         Image(
@@ -1612,20 +1601,19 @@ private fun CareScreen(
                         label = "时间轴",
                         selected = selectedShortcut == "timeline",
                         modifier = Modifier.weight(1f),
-                        onClick = { scrollToSection("timeline", 4) },
+                        onClick = { scrollToSection("timeline", 3) },
                     )
                     CareSectionShortcut(
                         icon = "diary",
                         label = "养护日记",
                         selected = selectedShortcut == "diary",
                         modifier = Modifier.weight(1f),
-                        onClick = { scrollToSection("diary", if (addRecordVisible) 6 else 5) },
+                        onClick = { scrollToSection("diary", if (addRecordVisible) 5 else 4) },
                     )
                 }
             }
-            item { CareAffinityHeader(state, metrics) }
             item {
-                AffinityImpactCard(
+                CareAffinityHeader(
                     state = state,
                     metrics = metrics,
                     expanded = affinityImpactExpanded,
@@ -1645,7 +1633,7 @@ private fun CareScreen(
                             note = ""
                         }
                     },
-                    onDeleteRecord = { pendingDeleteCareId = it },
+                    onDeleteRecord = deleteCare,
                 )
             }
             if (addRecordVisible) {
@@ -1793,7 +1781,12 @@ private fun CareShortcutIcon(kind: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics) {
+private fun CareAffinityHeader(
+    state: SmartPotUiState,
+    metrics: DashboardMetrics,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
     val affinity = PlantRules.normalizeAffinity(state.snapshot?.affinity ?: AffinityState())
     val level = affinityLevelNumber(affinity.score)
     val levelProgress = affinityLevelProgress(affinity.score)
@@ -1829,15 +1822,16 @@ private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics
                         fontSize = 11.sp,
                         color = Color(0xFF5C513D),
                     )
+                    AffinityImpactContent(state, metrics, expanded, onToggle)
                 }
-                PlantMascot(metrics.healthPercent, Modifier.padding(start = 10.dp).size(width = 105.dp, height = 112.dp))
+                Spacer(Modifier.width(118.dp))
             }
         }
     }
 }
 
 @Composable
-private fun AffinityImpactCard(
+private fun AffinityImpactContent(
     state: SmartPotUiState,
     metrics: DashboardMetrics,
     expanded: Boolean,
@@ -1878,33 +1872,26 @@ private fun AffinityImpactCard(
         }
         if (snapshot != null && !snapshot.online) add("设备离线 -1")
     }
-    PixelPanel(
-        Modifier.fillMaxWidth(),
-        fill = PixelCream,
-        edge = CardBorder,
-        showCornerBolts = false,
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onToggle),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("今日好感影响因素", fontWeight = FontWeight.Bold, color = Ink)
-                Text(if (expanded) "︿" else "﹀", color = Leaf, fontWeight = FontWeight.Bold)
-            }
-            if (expanded) {
-                Text(
-                    "加分：${positive.ifEmpty { listOf("暂无加分记录") }.joinToString(" · ")}",
-                    fontSize = 12.sp,
-                    color = BrightLeaf,
-                )
-                Text(
-                    "扣分：${negative.ifEmpty { listOf("暂无扣分项") }.joinToString(" · ")}",
-                    fontSize = 12.sp,
-                    color = if (negative.isEmpty()) Muted else Color(0xFFD45A52),
-                )
-            }
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(top = 3.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("今日好感影响因素", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text(if (expanded) "︿" else "﹀", color = Leaf, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+        if (expanded) {
+            Text(
+                "加分：${positive.ifEmpty { listOf("暂无加分记录") }.joinToString(" · ")}",
+                fontSize = 10.sp,
+                color = BrightLeaf,
+            )
+            Text(
+                "扣分：${negative.ifEmpty { listOf("暂无扣分项") }.joinToString(" · ")}",
+                fontSize = 10.sp,
+                color = if (negative.isEmpty()) Muted else Color(0xFFD45A52),
+            )
         }
     }
 }
@@ -2027,37 +2014,11 @@ private fun GrowthTimelineCard(
                 Text("还没有成长记录", color = Muted, fontSize = 12.sp)
             } else {
                 visibleEvents.forEachIndexed { index, event ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 70.dp), verticalAlignment = Alignment.Top) {
-                        Box(Modifier.width(32.dp).height(72.dp), contentAlignment = Alignment.TopCenter) {
-                            if (index < visibleEvents.lastIndex) {
-                                Box(Modifier.padding(top = 27.dp).width(2.dp).height(52.dp).background(CardBorder))
-                            }
-                            CareTypeIcon(event.type, Modifier.size(22.dp))
-                        }
-                        Column(Modifier.weight(1f).padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(event.date, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
-                            Text(event.title, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
-                            if (event.detail.isNotBlank()) {
-                                Text(event.detail, fontSize = 11.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                        Column(
-                            Modifier.padding(start = 8.dp),
-                            horizontalAlignment = Alignment.End,
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            CareEventThumbnail(event, Modifier.size(width = 68.dp, height = 58.dp))
-                            event.careLogId?.let { careLogId ->
-                                PixelTextButton(
-                                    onClick = { onDeleteRecord(careLogId) },
-                                    danger = true,
-                                    contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
-                                ) {
-                                    Text("删除", fontSize = 10.sp)
-                                }
-                            }
-                        }
-                    }
+                    SwipeToDeleteTimelineEvent(
+                        event = event,
+                        showConnector = index < visibleEvents.lastIndex,
+                        onDelete = onDeleteRecord,
+                    )
                 }
             }
             if (events.size > 3) {
@@ -2066,6 +2027,76 @@ private fun GrowthTimelineCard(
                     Text(if (expanded) "收起记录 ︿" else "查看全部记录 ›", fontSize = 12.sp)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SwipeToDeleteTimelineEvent(
+    event: GrowthTimelineEvent,
+    showConnector: Boolean,
+    onDelete: (String) -> Unit,
+) {
+    val careLogId = event.careLogId
+    val density = LocalDensity.current
+    val thresholdPx = with(density) { 92.dp.toPx() }
+    var dragOffset by remember(careLogId) { mutableFloatStateOf(0f) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 70.dp)
+            .background(if (dragOffset > 0f) Color(0xFFFBE4DF) else Color.Transparent, RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (careLogId != null && dragOffset > 0f) {
+            Text(
+                if (dragOffset >= thresholdPx) "松开删除" else "向右滑动删除",
+                modifier = Modifier.padding(start = 12.dp),
+                color = PixelDanger,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(dragOffset.roundToInt(), 0) }
+                .background(PixelCream)
+                .then(
+                    if (careLogId == null) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(careLogId) {
+                            detectHorizontalDragGestures(
+                                onDragEnd = {
+                                    if (dragOffset >= thresholdPx) onDelete(careLogId)
+                                    dragOffset = 0f
+                                },
+                                onDragCancel = { dragOffset = 0f },
+                            ) { change, amount ->
+                                dragOffset = (dragOffset + amount).coerceIn(0f, thresholdPx * 1.2f)
+                                change.consume()
+                            }
+                        }
+                    },
+                )
+                .heightIn(min = 70.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(Modifier.width(32.dp).height(72.dp), contentAlignment = Alignment.TopCenter) {
+                if (showConnector) {
+                    Box(Modifier.padding(top = 27.dp).width(2.dp).height(52.dp).background(CardBorder))
+                }
+                CareTypeIcon(event.type, Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f).padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(event.date, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
+                Text(event.title, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
+                if (event.detail.isNotBlank()) {
+                    Text(event.detail, fontSize = 11.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            CareEventThumbnail(event, Modifier.padding(start = 8.dp).size(width = 68.dp, height = 58.dp))
         }
     }
 }
