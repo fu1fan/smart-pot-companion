@@ -252,16 +252,7 @@ private fun SpeciesPickerDialog(
             showCornerBolts = false,
         ) {
             Column(Modifier.fillMaxWidth().wrapContentHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
-                    Text(
-                        "关闭",
-                        modifier = Modifier.clickable(onClick = onDismiss).padding(horizontal = 4.dp, vertical = 2.dp),
-                        color = Leaf,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+                Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
                 PixelTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -300,6 +291,7 @@ private fun SpeciesPickerDialog(
                         }
                     }
                 }
+                PixelTextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("关闭") }
             }
         }
     }
@@ -494,8 +486,8 @@ private fun PixelPanel(
 }
 
 @Composable
-private fun PixelPanelTexture(fill: Color) {
-    Canvas(Modifier.fillMaxSize()) {
+private fun BoxScope.PixelPanelTexture(fill: Color) {
+    Canvas(Modifier.matchParentSize()) {
         val cell = 36.dp.toPx()
         val tint = when (fill) {
             PixelPanelFill -> Color(0xFFDDBF78)

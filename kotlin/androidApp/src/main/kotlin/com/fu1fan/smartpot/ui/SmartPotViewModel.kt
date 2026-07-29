@@ -19,6 +19,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 data class SmartPotUiState(
     val loading: Boolean = true,
@@ -404,13 +405,26 @@ class SmartPotViewModel : ViewModel() {
 
     private fun adjustPomodoroLocally(delta: Int) {
         mutableState.update { state ->
-            val today = LocalDate.now(zoneId(state.snapshot?.pot?.timezone)).toString()
+            val zone = zoneId(state.snapshot?.pot?.timezone)
+            val todayDate = LocalDate.now(zone)
+            val today = todayDate.toString()
             val current = state.careOverview?.focus
                 ?: state.focusDaily.firstOrNull { it.date == today }
                 ?: return@update state
+            val updatedCount = (current.pomodoroCount + delta).coerceAtLeast(0)
+            val hasDailySchedule = state.schedule?.items.orEmpty().any { item ->
+                runCatching { Instant.parse(item.createdAt).atZone(zone).toLocalDate() == todayDate }.getOrDefault(false)
+            }
             val updated = current.copy(
-                pomodoroCount = (current.pomodoroCount + delta).coerceAtLeast(0),
+                pomodoroCount = updatedCount,
                 focusMinutes = (current.focusMinutes + delta * 25).coerceAtLeast(0),
+                scheduleCompletionPercent = if (hasDailySchedule) {
+                    current.scheduleCompletionPercent
+                } else {
+                    (updatedCount.toDouble() / current.targetPomodoroCount.coerceAtLeast(1) * 100)
+                        .roundToInt()
+                        .coerceIn(0, 100)
+                },
             )
             val focusDaily = if (state.focusDaily.any { it.date == today }) {
                 state.focusDaily.map { if (it.date == today) updated else it }
