@@ -1283,16 +1283,30 @@ private fun DashboardMetricCard(
                 PixelMetricGlyph(iconKind, iconColor, Modifier.size(24.dp))
                 Text(title, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
-            Row(verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 Text(
                     value,
-                    fontSize = if (value.length >= 6) 19.sp else 29.sp,
+                    fontSize = when {
+                        value.length >= 6 -> 17.sp
+                        value.length == 5 -> 19.sp
+                        value.length == 4 -> 23.sp
+                        else -> 29.sp
+                    },
                     fontWeight = FontWeight.Black,
                     color = Ink,
                     maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(Modifier.width(3.dp))
-                Text(unit, fontSize = 13.sp, color = Ink, modifier = Modifier.padding(bottom = 4.dp))
+                Text(
+                    unit,
+                    fontSize = if (unit.length > 1) 11.sp else 13.sp,
+                    color = Ink,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                )
             }
             Text(status, color = metricStatusColor(status), fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
         }
@@ -2930,6 +2944,7 @@ private fun ControlSliderCard(icon: String, title: String, value: Float, onValue
 @Composable
 private fun ScheduleTable(
     schedules: List<ScheduleItem>,
+    timezone: String,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
 ) {
     var now by remember { mutableStateOf(Instant.now()) }
@@ -2945,64 +2960,56 @@ private fun ScheduleTable(
         } != false
     }.sortedWith(compareBy<ScheduleItem> { it.completed }.thenBy { it.dueAt ?: it.displayTime }.thenBy { it.createdAt })
 
-    PixelPanel(
-        Modifier.fillMaxWidth(),
-        fill = Color(0xFFFFFDF0),
-        edge = PixelGreenEdge,
-        contentPadding = PaddingValues(0.dp),
-    ) {
-        Column {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (rows.isEmpty()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF1F6E5), RoundedCornerShape(10.dp))
+                    .border(1.dp, Color(0xFFDCE7C4), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("今天还没有日程", color = Muted, fontSize = 12.sp)
+            }
+        }
+        rows.forEach { item ->
+            val color = if (item.completed) Color(0xFF949B91) else Ink
+            val decoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
             Row(
-                Modifier.fillMaxWidth().background(Color(0xFFF0F4EE)).padding(horizontal = 12.dp, vertical = 10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (item.completed) Color(0xFFF0F1E9) else Color(0xFFF0F6DE),
+                        RoundedCornerShape(10.dp),
+                    )
+                    .border(1.dp, Color(0xFFDCE7C4), RoundedCornerShape(10.dp))
+                    .toggleable(
+                        value = item.completed,
+                        role = Role.Checkbox,
+                        onValueChange = { checked -> toggleSchedule(item, checked) },
+                    )
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("time", modifier = Modifier.width(112.dp), fontWeight = FontWeight.Bold, color = Color(0xFF3E5544))
-                Text("task", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = Color(0xFF3E5544))
-            }
-            HorizontalDivider()
-            if (rows.isEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("", modifier = Modifier.width(112.dp))
-                    Text("", modifier = Modifier.weight(1f))
-                }
-            }
-            rows.forEach { item ->
-                val color = if (item.completed) Color(0xFF9AA09B) else Color(0xFF222622)
-                val decoration = if (item.completed) TextDecoration.LineThrough else TextDecoration.None
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 56.dp)
-                        .toggleable(
-                            value = item.completed,
-                            role = Role.Checkbox,
-                            onValueChange = { checked -> toggleSchedule(item, checked) },
-                        )
-                        .padding(start = 12.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
-                        scheduleTimeText(item),
-                        modifier = Modifier.width(112.dp),
-                        fontSize = 13.sp,
+                        scheduleCardTimeText(item, timezone),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = color,
                         textDecoration = decoration,
                     )
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            item.title,
-                            modifier = Modifier.weight(1f),
-                            color = color,
-                            fontWeight = FontWeight.SemiBold,
-                            textDecoration = decoration,
-                        )
-                        PixelCheckbox(checked = item.completed)
-                    }
+                    Text(
+                        item.title,
+                        color = color,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = decoration,
+                    )
+                    Text(scheduleSourceLabel(item.source), color = Muted, fontSize = 9.sp)
                 }
-                HorizontalDivider()
+                PixelCheckbox(checked = item.completed)
             }
         }
     }
@@ -3568,9 +3575,18 @@ private fun CompanionScheduleCard(
         showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("主人关心（日程）", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                PixelTextButton(onClick = onToggleForm, contentPadding = PaddingValues(horizontal = 5.dp)) { Text(if (formVisible) "收起" else "＋ 添加日程", fontSize = 12.sp) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                CompanionShortcutIcon("schedule", Modifier.size(25.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("今日日程", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+            }
+            ScheduleTable(items, timezone, toggleSchedule)
+            PixelTextButton(
+                onClick = onToggleForm,
+                modifier = Modifier.align(Alignment.End),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp),
+            ) {
+                Text(if (formVisible) "收起" else "＋ 添加日程", fontSize = 12.sp)
             }
             if (formVisible) {
                 PixelTextField(title, onTitleChange, label = "任务名称", modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -3589,9 +3605,7 @@ private fun CompanionScheduleCard(
                     enabled = title.isNotBlank() && dueAt?.isAfter(Instant.now()) == true,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("添加并同步到 ESP") }
-                HorizontalDivider(color = CardBorder)
             }
-            ScheduleTable(items, toggleSchedule)
         }
     }
 }
@@ -4028,8 +4042,18 @@ private fun diaryDisplayContent(diary: PlantDiary): String {
     return cleaned.ifBlank { diary.content.trim() }
 }
 
-private fun scheduleTimeText(item: ScheduleItem): String =
-    item.displayTime.ifBlank { item.dueAt?.take(16)?.replace('T', ' ') ?: "未设置提醒时间" }
+private fun scheduleCardTimeText(item: ScheduleItem, timezone: String): String {
+    val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
+    val parsedTime = item.dueAt?.let { dueAt ->
+        runCatching { DateTimeFormatter.ofPattern("HH:mm").format(Instant.parse(dueAt).atZone(zone)) }.getOrNull()
+    }
+    if (parsedTime != null) return parsedTime
+    return item.displayTime
+        .substringAfterLast('/')
+        .substringAfterLast(' ')
+        .takeIf { it.matches(Regex("\\d{1,2}:\\d{2}")) }
+        ?: "待定"
+}
 
 private fun scheduleSourceLabel(source: String): String =
     if (source == "ESP") "ESP 语音" else "手机"
