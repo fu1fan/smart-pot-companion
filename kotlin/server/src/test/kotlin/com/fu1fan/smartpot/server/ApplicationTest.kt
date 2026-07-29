@@ -2,6 +2,7 @@ package com.fu1fan.smartpot.server
 
 import com.fu1fan.smartpot.protocol.CreatePotRequest
 import com.fu1fan.smartpot.protocol.CareDayOverview
+import com.fu1fan.smartpot.protocol.CareLog
 import com.fu1fan.smartpot.protocol.CareType
 import com.fu1fan.smartpot.protocol.ChatDaySummary
 import com.fu1fan.smartpot.protocol.ChatMessage
@@ -177,12 +178,14 @@ class ApplicationTest {
             setBody(CreatePotRequest("esp32-focus-001", "小麦", "pothos"))
         }.body<PotProfile>()
 
+        val careImage = "data:image/png;base64,AQID"
         val care = api.post("/api/v1/pots/${pot.id}/care") {
             bearerAuth(config.demoToken)
             contentType(ContentType.Application.Json)
-            setBody(CreateCareLogRequest(CareType.NEW_LEAF, note = "第一片新叶冒出来了"))
+            setBody(CreateCareLogRequest(CareType.NEW_LEAF, note = "第一片新叶冒出来了", imageDataUrl = careImage))
         }
         assertEquals(HttpStatusCode.Created, care.status)
+        assertEquals(careImage, care.body<CareLog>().imageDataUrl)
 
         repeat(2) {
             val focus = api.post("/api/v1/pots/${pot.id}/focus/sessions") {

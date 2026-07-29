@@ -158,8 +158,8 @@ class SmartPotViewModel : ViewModel() {
     private suspend fun refreshSnapshot(id: String) = runCatching { api.snapshot(id) }
         .onSuccess { value -> mutableState.update { it.copy(snapshot = value, error = null) } }
 
-    fun addCare(type: CareType, note: String) = withPot { id ->
-        api.addCare(id, CreateCareLogRequest(type, note = note))
+    fun addCare(type: CareType, note: String, imageDataUrl: String?) = withPot { id ->
+        api.addCare(id, CreateCareLogRequest(type, note = note, imageDataUrl = imageDataUrl))
         mutableState.update { it.copy(careLogs = api.careLogs(id), reminders = api.reminders(id), careOverview = careOverview(id)) }
     }
 

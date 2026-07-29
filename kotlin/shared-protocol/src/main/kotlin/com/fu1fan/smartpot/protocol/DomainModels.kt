@@ -81,6 +81,7 @@ data class CareLog(
     val occurredAt: String,
     val note: String = "",
     val actorName: String = "主人",
+    val imageDataUrl: String? = null,
 )
 
 @Serializable
@@ -88,6 +89,7 @@ data class CreateCareLogRequest(
     val type: CareType,
     val occurredAt: String? = null,
     val note: String = "",
+    val imageDataUrl: String? = null,
 )
 
 @Serializable

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,13 +37,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -77,31 +77,35 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private val Leaf = Color(0xFF407A52)
 private val BrightLeaf = Color(0xFF2E9254)
 private val SoftLeaf = Color(0xFFE5F0E4)
-private val Sand = Color(0xFFF8F9F5)
+private val Sand = Color(0xFFFFFAEC)
 private val Ink = Color(0xFF1E241F)
-private val Muted = Color(0xFF777D78)
-private val CardBorder = Color(0xFFE9ECE6)
-private val Sky = Color(0xFF2D9CDB)
-private val Sun = Color(0xFFFFB000)
-private val Violet = Color(0xFF8B5CF6)
-private val PixelSkyTop = Color(0xFF3BA8F2)
-private val PixelSkyBottom = Color(0xFF77D4FF)
-private val PixelPanelFill = Color(0xDDF0FBFF)
-private val PixelPanelEdge = Color(0xFF126FA8)
-private val PixelPanelLight = Color(0xFF86D5FF)
-private val PixelWood = Color(0xFFB56724)
-private val PixelWoodDark = Color(0xFF5D2B13)
-private val PixelSign = Color(0xFFFFE2AA)
-private val PixelCream = Color(0xFFFFF7D9)
-private val PixelGreenPanel = Color(0xFFE9F7C8)
-private val PixelGreenEdge = Color(0xFF1D662E)
-private val PixelDisabled = Color(0xFFBFC4B3)
+private val Muted = Color(0xFF897D68)
+private val CardBorder = Color(0xFFE8D6A5)
+private val Sky = Color(0xFF48A9E6)
+private val Sun = Color(0xFFFF9D28)
+private val Violet = Color(0xFF8D78D9)
+private val PixelSkyTop = Color(0xFFEAF7FF)
+private val PixelSkyBottom = Color(0xFFFFF5DE)
+private val PixelPanelFill = Color(0xFFFFFBEE)
+private val PixelPanelEdge = Color(0xFFD8A851)
+private val PixelPanelLight = Color(0xFFFFF7D8)
+private val PixelWood = Color(0xFFB77931)
+private val PixelWoodDark = Color(0xFF7A451C)
+private val PixelSign = Color(0xFFFFE8B5)
+private val PixelCream = Color(0xFFFFFCF1)
+private val PixelGreenPanel = Color(0xFFF4FCE8)
+private val PixelGreenEdge = Color(0xFF9FB85E)
+private val PixelDisabled = Color(0xFFD9D3C3)
 private val PixelDanger = Color(0xFFD14343)
+private val WarmShadow = Color(0x332B1A08)
+private val WarmLine = Color(0xFFDCC889)
+private val WarmLeafSoft = Color(0xFFEAF4D7)
 
 private data class DashboardMetrics(
     val growthDays: Int?,
@@ -287,43 +291,26 @@ private fun SpeciesPickerDialog(
 
 @Composable
 private fun PixelBottomBar(selectedTab: Int, onSelect: (Int) -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(PixelWoodDark),
+    val items = listOf("首页" to "⌂", "养护" to "♧", "陪伴" to "♡", "控制" to "◎")
+    NavigationBar(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = Color(0xFFFFFCF5),
+        tonalElevation = 2.dp,
     ) {
-        Canvas(Modifier.fillMaxWidth().height(12.dp)) {
-            val grass = 5.dp.toPx()
-            drawRect(Color(0xFF61B843), size = Size(size.width, grass))
-            drawRect(Color(0xFF2E7D32), topLeft = Offset(0f, grass), size = Size(size.width, 2.dp.toPx()))
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(74.dp)
-                .background(Color(0xFF7A3F19))
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf("首页" to "home", "养护" to "care", "陪伴" to "heart", "控制" to "gear").forEachIndexed { index, item ->
-                val selected = selectedTab == index
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .background(if (selected) Color(0xFF5FA641) else PixelWood, RoundedCornerShape(3.dp))
-                        .border(2.dp, PixelWoodDark, RoundedCornerShape(3.dp))
-                        .clickable { onSelect(index) }
-                        .padding(top = 4.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        PixelNavGlyph(item.second, selected, Modifier.size(30.dp))
-                        Text(item.first, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                    PixelCornerBolts(PixelSign)
-                }
-            }
+        items.forEachIndexed { index, item ->
+            NavigationBarItem(
+                selected = selectedTab == index,
+                onClick = { onSelect(index) },
+                icon = { Text(item.second, fontSize = 22.sp, fontWeight = FontWeight.Bold) },
+                label = { Text(item.first) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = BrightLeaf,
+                    selectedTextColor = BrightLeaf,
+                    indicatorColor = SoftLeaf,
+                    unselectedIconColor = Muted,
+                    unselectedTextColor = Muted,
+                ),
+            )
         }
     }
 }
@@ -389,6 +376,14 @@ private fun PixelNavGlyph(kind: String, selected: Boolean, modifier: Modifier = 
 @Composable
 private fun PixelSkyDecor(modifier: Modifier = Modifier) {
     Canvas(modifier) {
+        val grid = 18.dp.toPx()
+        for (x in 0..(size.width / grid).toInt()) {
+            for (y in 0..(size.height / grid).toInt()) {
+                if ((x * 5 + y * 3) % 13 == 0) {
+                    drawCircle(Color(0xFFFFF6D4).copy(alpha = 0.36f), 2.dp.toPx(), Offset(x * grid, y * grid))
+                }
+            }
+        }
         fun cloud(x: Float, y: Float, scale: Float) {
             val unit = 8.dp.toPx() * scale
             val color = Color.White.copy(alpha = 0.72f)
@@ -397,9 +392,9 @@ private fun PixelSkyDecor(modifier: Modifier = Modifier) {
             drawRect(color, Offset(x + unit * 5f, y + unit * 0.5f), Size(unit * 2f, unit * 1.5f))
             drawRect(color.copy(alpha = 0.45f), Offset(x + unit * 3f, y + unit * 3f), Size(unit * 5f, unit))
         }
-        cloud(size.width * 0.72f, 22.dp.toPx(), 0.8f)
-        cloud(size.width * 0.48f, 154.dp.toPx(), 0.55f)
-        cloud(-20.dp.toPx(), 226.dp.toPx(), 0.7f)
+        cloud(size.width * 0.7f, 18.dp.toPx(), 0.72f)
+        cloud(size.width * 0.45f, 116.dp.toPx(), 0.5f)
+        cloud(-22.dp.toPx(), 208.dp.toPx(), 0.6f)
         listOf(
             Offset(size.width * 0.55f, 86.dp.toPx()),
             Offset(size.width * 0.9f, 96.dp.toPx()),
@@ -413,28 +408,36 @@ private fun PixelSkyDecor(modifier: Modifier = Modifier) {
 
 @Composable
 private fun PixelNatureBackground(modifier: Modifier = Modifier, green: Boolean = true) {
-    val top = if (green) Color(0xFF86B461) else PixelSkyTop
-    val bottom = if (green) Color(0xFFBEEA8B) else PixelSkyBottom
-    Canvas(modifier.background(top)) {
-        drawRect(bottom, Offset(0f, size.height * 0.52f), Size(size.width, size.height * 0.48f))
-        val cell = 10.dp.toPx()
-        for (x in 0 until (size.width / cell).toInt() + 1) {
-            for (y in 0 until (size.height / cell).toInt() + 1) {
-                if ((x + y) % 2 == 0) {
-                    drawRect(
-                        Color.White.copy(alpha = if (green) 0.08f else 0.05f),
-                        Offset(x * cell, y * cell),
-                        Size(cell * 0.48f, cell * 0.48f),
-                    )
+    val top = if (green) Color(0xFFF6FBEA) else PixelSkyTop
+    val bottom = if (green) Color(0xFFFFF9E6) else PixelSkyBottom
+    Canvas(modifier.background(bottom)) {
+        drawRect(top, Offset(0f, 0f), Size(size.width, size.height * 0.34f))
+        val cell = 28.dp.toPx()
+        for (x in 0..(size.width / cell).toInt() + 1) {
+            for (y in 0..(size.height / cell).toInt() + 1) {
+                if ((x + y) % 3 == 0) {
+                    drawCircle(Color(0xFFDCEBC1).copy(alpha = 0.18f), 3.dp.toPx(), Offset(x * cell, y * cell + 8.dp.toPx()))
                 }
             }
         }
-        drawRect(Color(0xFF3B8B37), Offset(0f, size.height - 18.dp.toPx()), Size(size.width, 18.dp.toPx()))
-        drawRect(Color(0xFF744019), Offset(0f, size.height - 8.dp.toPx()), Size(size.width, 8.dp.toPx()))
-        repeat(18) { i ->
-            val x = size.width * i / 18f
-            drawRect(Color(0xFF2F7F32), Offset(x, size.height - 24.dp.toPx()), Size(8.dp.toPx(), 12.dp.toPx()))
+        fun leaf(cx: Float, cy: Float, sx: Float, sy: Float, color: Color) {
+            val path = Path().apply {
+                moveTo(cx, cy - sy)
+                quadraticBezierTo(cx + sx, cy, cx, cy + sy)
+                quadraticBezierTo(cx - sx, cy, cx, cy - sy)
+                close()
+            }
+            drawPath(path, color)
+            drawLine(color.copy(alpha = 0.55f), Offset(cx, cy - sy * 0.75f), Offset(cx, cy + sy * 0.75f), 1.dp.toPx())
         }
+        repeat(5) { i ->
+            val x = if (i % 2 == 0) 18.dp.toPx() + i * 13.dp.toPx() else size.width - 38.dp.toPx() - i * 9.dp.toPx()
+            val y = size.height - 170.dp.toPx() + i * 24.dp.toPx()
+            rotate(if (i % 2 == 0) -28f else 28f, Offset(x, y)) {
+                leaf(x, y, 13.dp.toPx(), 26.dp.toPx(), Color(0xFFB8D58A).copy(alpha = 0.62f))
+            }
+        }
+        drawRect(Color(0xFFE9F3C9).copy(alpha = 0.56f), Offset(0f, size.height - 28.dp.toPx()), Size(size.width, 28.dp.toPx()))
     }
 }
 
@@ -444,6 +447,8 @@ private fun PixelPanel(
     fill: Color = PixelPanelFill,
     edge: Color = PixelPanelEdge,
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    showCornerBolts: Boolean = true,
+    fillContainer: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     Box(
@@ -452,47 +457,82 @@ private fun PixelPanel(
         Box(
             Modifier
                 .matchParentSize()
-                .offset(x = 3.dp, y = 3.dp)
-                .background(edge.copy(alpha = 0.32f), RoundedCornerShape(1.dp)),
+                .offset(x = 0.dp, y = 3.dp)
+                .background(WarmShadow, RoundedCornerShape(10.dp)),
         )
         Box(
-            Modifier
-                .fillMaxWidth()
-                .background(fill, RoundedCornerShape(1.dp))
-                .border(3.dp, edge, RoundedCornerShape(1.dp))
-                .padding(3.dp)
-                .border(1.dp, Color.White.copy(alpha = 0.75f), RoundedCornerShape(1.dp))
+            (if (fillContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                .background(fill, RoundedCornerShape(8.dp))
+                .border(1.dp, edge, RoundedCornerShape(8.dp))
+                .padding(1.dp)
+                .border(1.dp, Color.White.copy(alpha = 0.78f), RoundedCornerShape(7.dp))
                 .padding(contentPadding),
         ) {
+            PixelPanelTexture(fill)
             content()
-            PixelCornerBolts(Color(0xFFFFCB53))
+            if (showCornerBolts) {
+                PixelCornerBolts(Color(0xFFE3B566))
+            }
         }
     }
 }
 
 @Composable
-private fun BoxScope.PixelCornerBolts(color: Color) {
-    val bolt = Modifier.size(7.dp).background(color).border(1.dp, PixelWoodDark)
-    Box(bolt.align(Alignment.TopStart))
-    Box(bolt.align(Alignment.TopEnd))
-    Box(bolt.align(Alignment.BottomStart))
-    Box(bolt.align(Alignment.BottomEnd))
+private fun PixelPanelTexture(fill: Color) {
+    Canvas(Modifier.fillMaxSize()) {
+        val cell = 36.dp.toPx()
+        val tint = when (fill) {
+            PixelPanelFill -> Color(0xFFDDBF78)
+            PixelGreenPanel -> Color(0xFFB8D98C)
+            PixelCream -> Color(0xFFE8C982)
+            else -> Color.White
+        }.copy(alpha = 0.11f)
+        for (x in 0..(size.width / cell).toInt() + 1) {
+            for (y in 0..(size.height / cell).toInt() + 1) {
+                if ((x * 2 + y * 3) % 4 == 0) {
+                    drawCircle(tint, 2.2.dp.toPx(), Offset(x * cell + 8.dp.toPx(), y * cell + 12.dp.toPx()))
+                }
+            }
+        }
+        drawRect(Color.White.copy(alpha = 0.22f), Offset(0f, 0f), Size(size.width, 1.dp.toPx()))
+    }
 }
 
 @Composable
-private fun PixelTitleSign(title: String, modifier: Modifier = Modifier) {
+private fun BoxScope.PixelCornerBolts(color: Color) {
+    val bolt = Modifier.size(5.dp).background(color).border(1.dp, PixelWood)
+    Box(bolt.align(Alignment.TopStart).offset(5.dp, 5.dp))
+    Box(bolt.align(Alignment.TopEnd).offset((-5).dp, 5.dp))
+    Box(bolt.align(Alignment.BottomStart).offset(5.dp, (-5).dp))
+    Box(bolt.align(Alignment.BottomEnd).offset((-5).dp, (-5).dp))
+}
+
+@Composable
+private fun PixelTitleSign(title: String, modifier: Modifier = Modifier, compact: Boolean = false) {
     Box(
         modifier
-            .height(60.dp)
-            .background(PixelSign, RoundedCornerShape(1.dp))
-            .border(4.dp, PixelWoodDark, RoundedCornerShape(1.dp))
-            .padding(3.dp)
-            .border(1.dp, Color(0xFFFFF0C8), RoundedCornerShape(1.dp))
-            .padding(horizontal = 18.dp),
+            .height(if (compact) 44.dp else 52.dp)
+            .background(PixelSign, RoundedCornerShape(2.dp))
+            .border(2.dp, PixelWood, RoundedCornerShape(2.dp))
+            .padding(2.dp)
+            .border(1.dp, Color(0xFFFFF2CD), RoundedCornerShape(1.dp))
+            .padding(horizontal = if (compact) 12.dp else 18.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(title, color = PixelWoodDark, fontSize = 28.sp, fontWeight = FontWeight.Black)
-        PixelCornerBolts(PixelWood)
+        Canvas(Modifier.matchParentSize()) {
+            val plank = 8.dp.toPx()
+            for (y in 0..(size.height / plank).toInt()) {
+                val c = if (y % 2 == 0) Color(0xFFFFDDA4) else Color(0xFFFFEDC5)
+                drawRect(c.copy(alpha = 0.42f), Offset(0f, y * plank), Size(size.width, 4.dp.toPx()))
+            }
+            listOf(0.18f, 0.42f, 0.74f).forEach { fx ->
+                val y = size.height * fx
+                drawRect(Color(0xFFB87932).copy(alpha = 0.28f), Offset(14.dp.toPx(), y), Size(size.width - 28.dp.toPx(), 1.dp.toPx()))
+            }
+            drawRect(WarmShadow, Offset(4.dp.toPx(), size.height - 1.dp.toPx()), Size(size.width - 8.dp.toPx(), 2.dp.toPx()))
+        }
+        Text(title, color = PixelWoodDark, fontSize = if (compact) 21.sp else 25.sp, fontWeight = FontWeight.Black)
+        PixelCornerBolts(Color(0xFFE6AD60))
     }
 }
 
@@ -502,26 +542,32 @@ private fun PixelButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     selected: Boolean = false,
-    fill: Color = if (selected) Color(0xFF5FA641) else PixelWood,
+    fill: Color = if (selected) Color(0xFF2F8F50) else BrightLeaf,
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val container = if (enabled) fill else PixelDisabled
-    val edge = if (enabled) PixelWoodDark else Color(0xFF7B7D72)
+    val edge = if (enabled) Color(0xFF267240) else Color(0xFF9D998B)
     val contentColor = when {
         !enabled -> Color(0xFF6D725F)
-        fill == PixelCream -> PixelWoodDark
+        fill == PixelCream || fill == PixelPanelFill -> PixelWoodDark
         else -> Color.White
     }
     Box(
         modifier
             .offset(y = if (pressed && enabled) 2.dp else 0.dp)
-            .background(container, RoundedCornerShape(1.dp))
-            .border(3.dp, edge, RoundedCornerShape(1.dp))
-            .padding(2.dp)
-            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.55f else 0.25f), RoundedCornerShape(1.dp))
+            .drawBehind {
+                if (enabled) {
+                    val shadow = if (pressed) 1.dp.toPx() else 2.dp.toPx()
+                    drawRoundRect(edge.copy(alpha = 0.35f), Offset(0f, shadow), Size(size.width, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(10.dp.toPx(), 10.dp.toPx()))
+                }
+            }
+            .background(container, RoundedCornerShape(10.dp))
+            .border(1.dp, edge, RoundedCornerShape(10.dp))
+            .padding(1.dp)
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.42f else 0.2f), RoundedCornerShape(9.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -573,13 +619,19 @@ private fun PixelTextButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val edge = if (danger) PixelDanger else PixelGreenEdge
+    val edge = if (danger) PixelDanger else Leaf
     val contentColor = if (enabled) edge else PixelDisabled
     Box(
         modifier
             .offset(y = if (pressed && enabled) 1.dp else 0.dp)
-            .background(PixelCream.copy(alpha = 0.55f), RoundedCornerShape(1.dp))
-            .border(1.dp, edge.copy(alpha = if (enabled) 1f else 0.45f), RoundedCornerShape(1.dp))
+            .drawBehind {
+                if (enabled) {
+                    val shadow = if (pressed) 0.5.dp.toPx() else 1.dp.toPx()
+                    drawRoundRect(edge.copy(alpha = 0.14f), Offset(0f, shadow), Size(size.width, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
+                }
+            }
+            .background(PixelCream.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+            .border(1.dp, edge.copy(alpha = if (enabled) 0.34f else 0.18f), RoundedCornerShape(8.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -633,8 +685,8 @@ private fun PixelTextField(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = if (minLines > 1) (44 + minLines * 18).dp else 44.dp)
-                        .background(if (enabled) Color(0xFFFFFDF0) else Color(0xFFE1E3D4), RoundedCornerShape(1.dp))
-                        .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp))
+                        .background(if (enabled) Color(0xFFFFFDF4) else Color(0xFFE7E2D5), RoundedCornerShape(6.dp))
+                        .border(1.dp, CardBorder, RoundedCornerShape(6.dp))
                         .padding(horizontal = 10.dp, vertical = 10.dp),
                     contentAlignment = Alignment.CenterStart,
                 ) {
@@ -659,17 +711,17 @@ private fun PixelSwitch(
     Box(
         modifier
             .size(width = 54.dp, height = 30.dp)
-            .background(if (checked) Color(0xFF4E9D3C) else Color(0xFFE8E2CD), RoundedCornerShape(1.dp))
-            .border(3.dp, PixelWoodDark, RoundedCornerShape(1.dp))
+            .background(if (checked) BrightLeaf else Color(0xFFE8E2CD), RoundedCornerShape(15.dp))
+            .border(1.dp, if (checked) Leaf else CardBorder, RoundedCornerShape(15.dp))
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(4.dp),
+            .padding(3.dp),
         contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
         Box(
             Modifier
-                .size(18.dp)
-                .background(if (enabled) PixelCream else PixelDisabled, RoundedCornerShape(1.dp))
-                .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp)),
+                .size(22.dp)
+                .background(if (enabled) PixelCream else PixelDisabled, RoundedCornerShape(12.dp))
+                .border(1.dp, CardBorder, RoundedCornerShape(12.dp)),
         )
     }
 }
@@ -712,12 +764,11 @@ private fun PixelSlider(
         ) {
             val trackH = 9.dp.toPx()
             val y = (size.height - trackH) / 2f
-            drawRect(Color(0xFFE9F1CF), Offset(0f, y), Size(size.width, trackH))
-            drawRect(PixelWoodDark, Offset(0f, y), Size(size.width, trackH), style = Stroke(2.dp.toPx()))
-            drawRect(BrightLeaf, Offset(2.dp.toPx(), y + 2.dp.toPx()), Size((size.width - 4.dp.toPx()) * fraction, trackH - 4.dp.toPx()))
+            drawRoundRect(Color(0xFFE9EEDC), Offset(0f, y), Size(size.width, trackH), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
+            drawRoundRect(BrightLeaf, Offset(0f, y), Size(size.width * fraction, trackH), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
             val knobX = (size.width * fraction).coerceIn(7.dp.toPx(), size.width - 7.dp.toPx())
-            drawRect(PixelCream, Offset(knobX - 6.dp.toPx(), y - 5.dp.toPx()), Size(12.dp.toPx(), trackH + 10.dp.toPx()))
-            drawRect(PixelWoodDark, Offset(knobX - 6.dp.toPx(), y - 5.dp.toPx()), Size(12.dp.toPx(), trackH + 10.dp.toPx()), style = Stroke(2.dp.toPx()))
+            drawRoundRect(PixelCream, Offset(knobX - 5.dp.toPx(), y - 6.dp.toPx()), Size(10.dp.toPx(), trackH + 12.dp.toPx()), cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()))
+            drawRoundRect(Leaf, Offset(knobX - 5.dp.toPx(), y - 6.dp.toPx()), Size(10.dp.toPx(), trackH + 12.dp.toPx()), cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()), style = Stroke(1.dp.toPx()))
         }
     }
 }
@@ -726,12 +777,10 @@ private fun PixelSlider(
 private fun PixelProgressBar(progress: Float, modifier: Modifier = Modifier, fill: Color = BrightLeaf) {
     Box(
         modifier
-            .height(12.dp)
-            .background(Color(0xFFE9F1CF), RoundedCornerShape(1.dp))
-            .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp))
-            .padding(2.dp),
+            .height(9.dp)
+            .background(Color(0xFFE9EEDC), RoundedCornerShape(8.dp)),
     ) {
-        Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(fill))
+        Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(fill, RoundedCornerShape(8.dp)))
     }
 }
 
@@ -740,8 +789,8 @@ private fun PixelCheckbox(checked: Boolean, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(22.dp)
-            .background(if (checked) Color(0xFF69B84D) else PixelCream, RoundedCornerShape(1.dp))
-            .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp)),
+            .background(if (checked) BrightLeaf else PixelCream, RoundedCornerShape(4.dp))
+            .border(1.dp, if (checked) Leaf else CardBorder, RoundedCornerShape(4.dp)),
         contentAlignment = Alignment.Center,
     ) {
         if (checked) Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
@@ -797,16 +846,12 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
     Box(
         Modifier
             .fillMaxSize()
-            .background(PixelSkyTop),
+            .background(Color(0xFFFFFAEA)),
     ) {
-        Canvas(Modifier.matchParentSize()) {
-            drawRect(PixelSkyBottom, Offset(0f, size.height * 0.46f), Size(size.width, size.height * 0.54f))
-        }
-        PixelSkyDecor(Modifier.matchParentSize())
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp),
         ) {
             item {
                 DashboardHero(
@@ -830,7 +875,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     DashboardMetricCard(
-                        icon = "◆",
+                        iconKind = "water",
                         iconColor = Sky,
                         title = "土壤湿度",
                         value = snap?.telemetry?.soilPercent?.toString() ?: "--",
@@ -839,7 +884,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                         modifier = Modifier.weight(1f),
                     )
                     DashboardMetricCard(
-                        icon = "✣",
+                        iconKind = "sun",
                         iconColor = Sun,
                         title = "环境光照",
                         value = snap?.telemetry?.lightLux?.let(::compactMetricValue) ?: "--",
@@ -848,7 +893,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                         modifier = Modifier.weight(1f),
                     )
                     DashboardMetricCard(
-                        icon = "✤",
+                        iconKind = "spark",
                         iconColor = Violet,
                         title = "互动次数",
                         value = metrics.dailyInteractions.toString(),
@@ -859,7 +904,25 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                 }
             }
             item { CompanionScoreCard(metrics) }
-            item { TelemetryTrendCard(state.telemetry, snap?.telemetry, pot?.timezone) }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().height(184.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TelemetryTrendCard(
+                        state.telemetry,
+                        snap?.telemetry,
+                        pot?.timezone,
+                        Modifier.weight(1f).fillMaxHeight(),
+                        compact = true,
+                    )
+                    DashboardAttentionCard(
+                        snap,
+                        Modifier.weight(1f).fillMaxHeight(),
+                        compact = true,
+                    )
+                }
+            }
             item {
                 DashboardAdviceCard(
                     listOfNotNull(
@@ -869,7 +932,37 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                     ),
                 )
             }
-            item { DashboardAttentionCard(snap) }
+        }
+    }
+}
+
+@Composable
+private fun HomeReferenceBackground(modifier: Modifier = Modifier) {
+    Box(modifier) {
+        Canvas(Modifier.matchParentSize()) {
+            drawRect(Color(0xFFFFFAEA), Offset.Zero, size)
+            drawRect(Color(0xFFEAF7FA).copy(alpha = 0.9f), Offset(0f, 46.dp.toPx()), Size(size.width, 260.dp.toPx()))
+            drawRect(Color(0xFFFFFAEA), Offset(0f, 300.dp.toPx()), Size(size.width, size.height - 300.dp.toPx()))
+            fun softLeaf(cx: Float, cy: Float, scale: Float, angle: Float, color: Color) {
+                rotate(angle, Offset(cx, cy)) {
+                    val path = Path().apply {
+                        moveTo(cx, cy - 24.dp.toPx() * scale)
+                        quadraticBezierTo(cx + 16.dp.toPx() * scale, cy, cx, cy + 24.dp.toPx() * scale)
+                        quadraticBezierTo(cx - 16.dp.toPx() * scale, cy, cx, cy - 24.dp.toPx() * scale)
+                        close()
+                    }
+                    drawPath(path, color)
+                }
+            }
+            repeat(10) { index ->
+                softLeaf(
+                    cx = if (index % 2 == 0) 12.dp.toPx() + index * 9.dp.toPx() else size.width - 18.dp.toPx() - index * 7.dp.toPx(),
+                    cy = size.height - 84.dp.toPx() + (index % 4) * 18.dp.toPx(),
+                    scale = 0.55f + (index % 3) * 0.1f,
+                    angle = if (index % 2 == 0) -32f else 30f,
+                    color = Color(0xFFAFCF87).copy(alpha = 0.48f),
+                )
+            }
         }
     }
 }
@@ -882,71 +975,129 @@ private fun DashboardHero(
     canEditSpecies: Boolean,
     onEditSpecies: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        PixelTitleSign("你好，主人", Modifier.fillMaxWidth(0.58f))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(276.dp),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.home_garden_background),
+            contentDescription = "首页花园背景",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(238.dp),
+            contentScale = ContentScale.FillWidth,
+            alignment = Alignment.BottomCenter,
+        )
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(start = 8.dp, top = 6.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            PixelTitleSign("你好，主人", Modifier.width(194.dp), compact = true)
             Column(
                 Modifier
-                    .weight(1f)
+                    .width(196.dp)
                     .clickable(enabled = canEditSpecies, onClick = onEditSpecies),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
                     pot?.let { "${it.species.chineseName} · ${it.species.scientificName}" } ?: "正在连接你的盆栽",
-                    color = Color(0xFF12344F),
-                    fontSize = 15.sp,
+                    color = Color(0xFF3A7A94),
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     if (online) "${pot?.displayName ?: "小麦"}今天也在等你哦~" else "设备离线，数据会在连接后自动更新",
-                    color = if (online) Color(0xFF0D6D31) else Color(0xFF9A4F13),
-                    fontSize = 14.sp,
+                    color = if (online) Color(0xFF6F5B38) else Color(0xFF8B6736),
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
                 )
             }
-        }
-        Row(Modifier.fillMaxWidth().height(176.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.height(6.dp))
             PixelPanel(
-                modifier = Modifier.width(164.dp).fillMaxHeight(),
-                fill = Color(0xDDE5F7C9),
-                edge = Color(0xFF417A66),
-                contentPadding = PaddingValues(14.dp),
+                modifier = Modifier.width(148.dp).height(126.dp),
+                fill = Color(0xFFFFFDF2),
+                edge = CardBorder,
+                contentPadding = PaddingValues(7.dp),
             ) {
-                Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.fillMaxSize().padding(5.dp), verticalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         "成长第 ${metrics.growthDays?.toString() ?: "--"} 天",
-                        fontSize = 18.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = Ink,
                     )
-                    Text("我们一起的日子", fontSize = 13.sp, color = Ink)
+                    Text("我们一起的日子", fontSize = 9.sp, color = Muted)
                     Text(
                         metrics.growthDays?.toString() ?: "--",
-                        fontSize = 46.sp,
+                        fontSize = 38.sp,
                         fontWeight = FontWeight.Black,
                         color = Color(0xFF087D3C),
                     )
                 }
             }
-            Box(Modifier.weight(1f).fillMaxHeight().padding(top = 2.dp)) {
-                PlantMascot(metrics.healthPercent, Modifier.fillMaxSize())
-                Box(
-                    modifier = Modifier.align(Alignment.TopStart).offset(x = 4.dp, y = 12.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .background(PixelCream, RoundedCornerShape(1.dp))
-                            .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp))
-                            .padding(horizontal = 9.dp, vertical = 6.dp),
-                    ) {
-                        Text("♥", color = Color(0xFFFF6B68), fontSize = 19.sp)
-                    }
-                }
-            }
         }
+    }
+}
+
+@Composable
+private fun HomePixelMascot(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val u = (size.minDimension / 34f).coerceAtLeast(4f)
+        val ox = size.width / 2f - 15f * u
+        val oy = size.height / 2f - 10f * u
+        fun rect(x: Float, y: Float, w: Float, h: Float, color: Color) {
+            drawRect(color, Offset(ox + x * u, oy + y * u), Size(w * u, h * u))
+        }
+        fun outline(x: Float, y: Float, w: Float, h: Float, color: Color = PixelWoodDark) {
+            drawRect(color, Offset(ox + x * u, oy + y * u), Size(w * u, h * u), style = Stroke((u * 0.45f).coerceAtLeast(1f)))
+        }
+        rect(7f, 20.5f, 18f, 2f, Color(0x803A2B19))
+        rect(8f, 15f, 16f, 7f, Color(0xFFB96A22))
+        rect(6f, 13f, 20f, 4f, Color(0xFFE29237))
+        rect(7f, 13.5f, 18f, 1f, Color(0xFFFFB458))
+        outline(6f, 13f, 20f, 4f)
+        outline(8f, 15f, 16f, 7f)
+        rect(11f, 5f, 10f, 11f, Color(0xFFFFF0CF))
+        rect(9f, 8f, 14f, 8f, Color(0xFFFFF0CF))
+        rect(10f, 7f, 2f, 2f, Color(0xFFFFD5BA))
+        rect(20f, 7f, 2f, 2f, Color(0xFFFFD5BA))
+        rect(9f, 5f, 3f, 4f, Color(0xFFFFD5BA))
+        rect(20f, 5f, 3f, 4f, Color(0xFFFFD5BA))
+        rect(10f, 4f, 2f, 2f, Color(0xFFFFF0CF))
+        rect(20f, 4f, 2f, 2f, Color(0xFFFFF0CF))
+        outline(9f, 8f, 14f, 8f)
+        rect(12f, 10f, 2f, 3f, Color(0xFF181412))
+        rect(19f, 10f, 2f, 3f, Color(0xFF181412))
+        rect(12.4f, 10.3f, 0.8f, 0.8f, Color.White)
+        rect(19.4f, 10.3f, 0.8f, 0.8f, Color.White)
+        rect(14.2f, 13.2f, 1.1f, 0.7f, Color(0xFF241512))
+        rect(17.0f, 13.2f, 1.1f, 0.7f, Color(0xFF241512))
+        rect(12f, 14f, 2f, 1f, Color(0xFFFF9C9C))
+        rect(19f, 14f, 2f, 1f, Color(0xFFFF9C9C))
+        rect(14f, 2f, 2f, 6f, Color(0xFF4E8A24))
+        rect(11f, 1f, 4f, 3f, Color(0xFF8BC742))
+        rect(17f, 1f, 4f, 3f, Color(0xFF8BC742))
+        rect(13f, -1f, 3f, 3f, Color(0xFFA9D85A))
+        rect(16f, -1f, 3f, 3f, Color(0xFFA9D85A))
+        rect(10f, 2f, 5f, 1f, Color(0xFF376C22))
+        rect(18f, 2f, 5f, 1f, Color(0xFF376C22))
+        rect(23f, 8f, 3f, 2f, Color(0xFFFF94A7))
+        rect(24f, 7f, 1f, 4f, Color(0xFFFF94A7))
+        rect(24f, 8f, 1f, 1f, Color(0xFFFFEB72))
+        rect(25f, 12f, 2f, 2f, Color(0xFF7AC7EE))
+        rect(26f, 14f, 1f, 2f, Color(0xFF7AC7EE))
+        rect(5f, 18f, 2f, 3f, Color(0xFF6AB43E))
+        rect(6f, 17f, 3f, 1f, Color(0xFF8FD05A))
+        rect(3f, 2f, 1f, 1f, Color(0xFFFFE76B))
+        rect(4f, 1f, 1f, 3f, Color(0xFFFFE76B))
+        rect(2f, 2f, 3f, 1f, Color(0xFFFFE76B))
     }
 }
 
@@ -959,7 +1110,7 @@ private fun PlantMascot(@Suppress("UNUSED_PARAMETER") healthPercent: Int?, modif
         contentDescription = "小麦植物形象",
         modifier = modifier,
         contentScale = ContentScale.Fit,
-        filterQuality = FilterQuality.None,
+        filterQuality = FilterQuality.Medium,
     )
 }
 
@@ -1023,7 +1174,8 @@ private fun PlantHealthCard(
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
-        edge = PixelPanelEdge,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("植物健康值", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
@@ -1066,10 +1218,27 @@ private fun HealthGauge(healthPercent: Int?, modifier: Modifier = Modifier) {
     val progress = (healthPercent ?: 0).coerceIn(0, 100) / 100f
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
-            val inset = 11.dp.toPx()
-            val gaugeRect = Rect(Offset(inset, inset), Size(size.width - inset * 2f, size.height - inset * 2f))
-            drawArc(SoftLeaf, -215f, 250f, false, gaugeRect.topLeft, gaugeRect.size, style = Stroke(10.dp.toPx(), cap = StrokeCap.Round))
-            drawArc(BrightLeaf, -215f, 250f * progress, false, gaugeRect.topLeft, gaugeRect.size, style = Stroke(10.dp.toPx(), cap = StrokeCap.Round))
+            val stroke = 10.dp.toPx()
+            val inset = stroke / 2 + 4.dp.toPx()
+            val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+            drawArc(
+                Color(0xFFE7EAD9),
+                startAngle = 132f,
+                sweepAngle = 276f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(stroke, cap = StrokeCap.Round),
+            )
+            drawArc(
+                BrightLeaf,
+                startAngle = 132f,
+                sweepAngle = 276f * progress,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(stroke, cap = StrokeCap.Round),
+            )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(healthPercent?.toString() ?: "--", fontSize = 31.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -1080,7 +1249,7 @@ private fun HealthGauge(healthPercent: Int?, modifier: Modifier = Modifier) {
 
 @Composable
 private fun DashboardMetricCard(
-    icon: String,
+    iconKind: String,
     iconColor: Color,
     title: String,
     value: String,
@@ -1091,12 +1260,13 @@ private fun DashboardMetricCard(
     PixelPanel(
         modifier.height(108.dp),
         fill = PixelPanelFill,
-        edge = PixelPanelEdge,
+        edge = CardBorder,
         contentPadding = PaddingValues(horizontal = 9.dp, vertical = 10.dp),
+        showCornerBolts = false,
     ) {
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(icon, color = iconColor, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                PixelMetricGlyph(iconKind, iconColor, Modifier.size(24.dp))
                 Text(title, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             Row(verticalAlignment = Alignment.Bottom) {
@@ -1116,11 +1286,77 @@ private fun DashboardMetricCard(
 }
 
 @Composable
+private fun PixelMetricGlyph(kind: String, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val stroke = 1.5.dp.toPx()
+        when (kind) {
+            "water" -> {
+                val drop = Path().apply {
+                    moveTo(center.x, 1.5.dp.toPx())
+                    cubicTo(
+                        size.width * 0.78f,
+                        size.height * 0.38f,
+                        size.width * 0.83f,
+                        size.height * 0.72f,
+                        center.x,
+                        size.height - 2.dp.toPx(),
+                    )
+                    cubicTo(
+                        size.width * 0.17f,
+                        size.height * 0.72f,
+                        size.width * 0.22f,
+                        size.height * 0.38f,
+                        center.x,
+                        1.5.dp.toPx(),
+                    )
+                    close()
+                }
+                drawPath(drop, color)
+                drawCircle(Color.White.copy(alpha = 0.72f), 2.dp.toPx(), Offset(size.width * 0.42f, size.height * 0.48f))
+            }
+            "sun" -> {
+                drawCircle(color, size.minDimension * 0.24f, center)
+                repeat(8) { index ->
+                    rotate(index * 45f, center) {
+                        drawLine(
+                            color,
+                            Offset(center.x, 1.dp.toPx()),
+                            Offset(center.x, 5.dp.toPx()),
+                            strokeWidth = stroke,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                }
+            }
+            else -> {
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(2.dp.toPx(), 3.dp.toPx()),
+                    size = Size(size.width - 4.dp.toPx(), size.height - 8.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(7.dp.toPx(), 7.dp.toPx()),
+                )
+                val tail = Path().apply {
+                    moveTo(size.width * 0.35f, size.height - 6.dp.toPx())
+                    lineTo(size.width * 0.29f, size.height - 1.5.dp.toPx())
+                    lineTo(size.width * 0.52f, size.height - 6.dp.toPx())
+                    close()
+                }
+                drawPath(tail, color)
+                drawCircle(Color.White, 1.3.dp.toPx(), Offset(size.width * 0.40f, size.height * 0.48f))
+                drawCircle(Color.White, 1.3.dp.toPx(), Offset(size.width * 0.60f, size.height * 0.48f))
+            }
+        }
+    }
+}
+
+@Composable
 private fun CompanionScoreCard(metrics: DashboardMetrics) {
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
-        edge = PixelPanelEdge,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1148,21 +1384,30 @@ private fun StarRating(stars: Float) {
 }
 
 @Composable
-private fun TelemetryTrendCard(values: List<DeviceTelemetry>, latest: DeviceTelemetry?, timezone: String?) {
+private fun TelemetryTrendCard(
+    values: List<DeviceTelemetry>,
+    latest: DeviceTelemetry?,
+    timezone: String?,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
     val points = remember(values, latest, timezone) { hourlyTelemetryPoints(values, latest, timezone) }
     PixelPanel(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         fill = PixelPanelFill,
-        edge = PixelPanelEdge,
+        edge = CardBorder,
+        contentPadding = if (compact) PaddingValues(8.dp) else PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        showCornerBolts = false,
+        fillContainer = compact,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("最近趋势", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
+        Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 7.dp)) {
+            Text("最近趋势", fontSize = if (compact) 15.sp else 17.sp, fontWeight = FontWeight.Black, color = Ink)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                 TrendLegend(Sky, "湿度")
-                Spacer(Modifier.width(42.dp))
+                Spacer(Modifier.width(if (compact) 12.dp else 42.dp))
                 TrendLegend(Sun, "光照")
             }
-            Canvas(Modifier.fillMaxWidth().height(118.dp)) {
+            Canvas(Modifier.fillMaxWidth().height(if (compact) 72.dp else 118.dp)) {
                 val topPadding = 8.dp.toPx()
                 val bottomPadding = 7.dp.toPx()
                 val chartHeight = size.height - topPadding - bottomPadding
@@ -1193,11 +1438,16 @@ private fun TelemetryTrendCard(values: List<DeviceTelemetry>, latest: DeviceTele
                 drawSeries(Sun, { it.lightLux }, maxLight)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                points.forEach { point ->
+                val labels = if (compact && points.size > 3) {
+                    listOf(points.first(), points[points.lastIndex / 2], points.last())
+                } else {
+                    points
+                }
+                labels.forEach { point ->
                     Text(
                         point.hour.format(DateTimeFormatter.ofPattern("HH:00")),
                         color = Muted,
-                        fontSize = 9.sp,
+                        fontSize = if (compact) 8.sp else 9.sp,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -1218,16 +1468,21 @@ private fun TrendLegend(color: Color, label: String) {
 }
 
 @Composable
-private fun DashboardAdviceCard(lines: List<String>) {
+private fun DashboardAdviceCard(lines: List<String>, modifier: Modifier = Modifier) {
     DashboardTextCard(
         title = "位置与养护建议",
         lines = lines.filter(String::isNotBlank).distinct().take(3).ifEmpty { listOf("正在等待实时数据生成养护建议") },
         warning = false,
+        modifier = modifier,
     )
 }
 
 @Composable
-private fun DashboardAttentionCard(snapshot: PotSnapshot?) {
+private fun DashboardAttentionCard(
+    snapshot: PotSnapshot?,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
     val attentionLines = buildList {
         if (snapshot != null && !snapshot.online) add("设备当前离线，请检查网络连接")
         addAll(snapshot?.activeAlerts.orEmpty().map { it.message })
@@ -1236,22 +1491,35 @@ private fun DashboardAttentionCard(snapshot: PotSnapshot?) {
         title = "需要关注",
         lines = attentionLines.ifEmpty { listOf("各项指标正常，继续保持今天的养护节奏") },
         warning = attentionLines.isNotEmpty(),
+        modifier = modifier,
+        compact = compact,
+        fillContainer = compact,
     )
 }
 
 @Composable
-private fun DashboardTextCard(title: String, lines: List<String>, warning: Boolean) {
+private fun DashboardTextCard(
+    title: String,
+    lines: List<String>,
+    warning: Boolean,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    fillContainer: Boolean = false,
+) {
     PixelPanel(
-        Modifier.fillMaxWidth(),
+        modifier.fillMaxWidth(),
         fill = PixelPanelFill,
-        edge = PixelPanelEdge,
+        edge = CardBorder,
+        contentPadding = if (compact) PaddingValues(8.dp) else PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        showCornerBolts = false,
+        fillContainer = fillContainer,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
+        Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 5.dp)) {
+            Text(title, fontSize = if (compact) 15.sp else 17.sp, fontWeight = FontWeight.Black, color = Ink)
             lines.forEach { line ->
-                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 7.dp)) {
                     Text(if (warning) "△" else "•", color = if (warning) Color(0xFFFF5A5F) else Leaf, fontWeight = FontWeight.Black)
-                    Text(line, fontSize = 14.sp, color = Ink, modifier = Modifier.weight(1f))
+                    Text(line, fontSize = if (compact) 11.sp else 14.sp, color = Ink, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -1261,7 +1529,7 @@ private fun DashboardTextCard(title: String, lines: List<String>, warning: Boole
 @Composable
 private fun CareScreen(
     state: SmartPotUiState,
-    addCare: (CareType, String) -> Unit,
+    addCare: (CareType, String, String?) -> Unit,
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
@@ -1282,19 +1550,60 @@ private fun CareScreen(
     var timelineExpanded by rememberSaveable { mutableStateOf(false) }
     var diariesExpanded by rememberSaveable { mutableStateOf(false) }
     var addRecordVisible by rememberSaveable { mutableStateOf(false) }
+    var recordImageDataUrl by remember { mutableStateOf<String?>(null) }
     var affinityImpactExpanded by rememberSaveable { mutableStateOf(false) }
     val careActions = listOf(CareType.WATER, CareType.FERTILIZE, CareType.PRUNE, CareType.REPOT, CareType.NEW_LEAF)
     val metrics = dashboardMetrics(state)
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    var selectedShortcut by rememberSaveable { mutableStateOf("affinity") }
+    fun scrollToSection(section: String, index: Int) {
+        selectedShortcut = section
+        scope.launch { listState.animateScrollToItem(index) }
+    }
     Box(Modifier.fillMaxSize()) {
-        PixelNatureBackground(Modifier.matchParentSize(), green = true)
+        Image(
+            painter = painterResource(R.drawable.care_page_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+        )
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(top = 10.dp, bottom = 18.dp),
         ) {
             item {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    PixelTitleSign("养护", Modifier.fillMaxWidth(0.56f))
+                CarePageHeader()
+            }
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    CareSectionShortcut(
+                        icon = "heart",
+                        label = "好感度",
+                        selected = selectedShortcut == "affinity",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("affinity", 2) },
+                    )
+                    CareSectionShortcut(
+                        icon = "timeline",
+                        label = "时间轴",
+                        selected = selectedShortcut == "timeline",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("timeline", 4) },
+                    )
+                    CareSectionShortcut(
+                        icon = "diary",
+                        label = "养护日记",
+                        selected = selectedShortcut == "diary",
+                        modifier = Modifier.weight(1f),
+                        onClick = { scrollToSection("diary", if (addRecordVisible) 6 else 5) },
+                    )
                 }
             }
             item { CareAffinityHeader(state, metrics) }
@@ -1319,13 +1628,19 @@ private fun CareScreen(
                     AddCareRecordCard(
                         note = note,
                         onNoteChange = { note = it },
+                        imageDataUrl = recordImageDataUrl,
+                        onImageChange = { recordImageDataUrl = it },
                         actions = careActions,
                         onAdd = { type ->
-                            addCare(type, note)
+                            addCare(type, note, recordImageDataUrl)
                             note = ""
+                            recordImageDataUrl = null
                             addRecordVisible = false
                         },
-                        onDismiss = { addRecordVisible = false },
+                        onDismiss = {
+                            recordImageDataUrl = null
+                            addRecordVisible = false
+                        },
                     )
                 }
             }
@@ -1345,6 +1660,107 @@ private fun CareScreen(
 }
 
 @Composable
+private fun CarePageHeader() {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(16.dp))
+        Text("养护", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.width(16.dp))
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun CareSectionShortcut(
+    icon: String,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val edge = if (selected) Color(0xFFA7BE72) else CardBorder
+    Box(
+        modifier
+            .height(96.dp)
+            .background(Color(0xFFFFFCF4), RoundedCornerShape(12.dp))
+            .border(1.dp, edge, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            CareShortcutIcon(icon, Modifier.size(44.dp))
+            Text(label, color = Color(0xFF304A1D), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun CareShortcutIcon(kind: String, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        when (kind) {
+            "heart" -> {
+                val heart = Path().apply {
+                    moveTo(center.x, size.height * 0.82f)
+                    cubicTo(size.width * 0.18f, size.height * 0.62f, size.width * 0.08f, size.height * 0.27f, size.width * 0.31f, size.height * 0.20f)
+                    cubicTo(size.width * 0.43f, size.height * 0.16f, center.x, size.height * 0.25f, center.x, size.height * 0.31f)
+                    cubicTo(center.x, size.height * 0.25f, size.width * 0.57f, size.height * 0.16f, size.width * 0.69f, size.height * 0.20f)
+                    cubicTo(size.width * 0.92f, size.height * 0.27f, size.width * 0.82f, size.height * 0.62f, center.x, size.height * 0.82f)
+                    close()
+                }
+                drawPath(heart, Color(0xFFFF8C86))
+                drawPath(heart, Color(0xFFDA6964), style = Stroke(1.2.dp.toPx()))
+                drawCircle(Color.White.copy(alpha = 0.66f), 3.dp.toPx(), Offset(size.width * 0.34f, size.height * 0.31f))
+            }
+            "timeline" -> {
+                drawRoundRect(
+                    Color(0xFF9BC77C),
+                    topLeft = Offset(size.width * 0.14f, size.height * 0.16f),
+                    size = Size(size.width * 0.65f, size.height * 0.59f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx()),
+                )
+                drawRect(Color(0xFFEAF5DC), Offset(size.width * 0.19f, size.height * 0.30f), Size(size.width * 0.55f, size.height * 0.38f))
+                drawLine(Color(0xFF54854A), Offset(size.width * 0.29f, size.height * 0.08f), Offset(size.width * 0.29f, size.height * 0.27f), 2.dp.toPx(), StrokeCap.Round)
+                drawLine(Color(0xFF54854A), Offset(size.width * 0.62f, size.height * 0.08f), Offset(size.width * 0.62f, size.height * 0.27f), 2.dp.toPx(), StrokeCap.Round)
+                drawCircle(Color(0xFFFFFCF4), size.width * 0.22f, Offset(size.width * 0.72f, size.height * 0.70f))
+                drawCircle(Color(0xFF6A9660), size.width * 0.20f, Offset(size.width * 0.72f, size.height * 0.70f), style = Stroke(1.5.dp.toPx()))
+                drawLine(Color(0xFF6A9660), Offset(size.width * 0.72f, size.height * 0.70f), Offset(size.width * 0.72f, size.height * 0.59f), 1.5.dp.toPx(), StrokeCap.Round)
+                drawLine(Color(0xFF6A9660), Offset(size.width * 0.72f, size.height * 0.70f), Offset(size.width * 0.80f, size.height * 0.74f), 1.5.dp.toPx(), StrokeCap.Round)
+            }
+            else -> {
+                drawRoundRect(
+                    Color(0xFFA9D4F4),
+                    topLeft = Offset(size.width * 0.22f, size.height * 0.10f),
+                    size = Size(size.width * 0.60f, size.height * 0.76f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()),
+                )
+                drawRoundRect(
+                    Color(0xFFEAF7FF),
+                    topLeft = Offset(size.width * 0.30f, size.height * 0.18f),
+                    size = Size(size.width * 0.43f, size.height * 0.59f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+                )
+                repeat(3) { index ->
+                    val y = size.height * (0.34f + index * 0.13f)
+                    drawLine(Color(0xFF4D8EBB), Offset(size.width * 0.39f, y), Offset(size.width * 0.66f, y), 1.5.dp.toPx(), StrokeCap.Round)
+                }
+                repeat(4) { index ->
+                    val y = size.height * (0.22f + index * 0.16f)
+                    drawLine(Color(0xFF5F8CAC), Offset(size.width * 0.14f, y), Offset(size.width * 0.29f, y), 2.dp.toPx(), StrokeCap.Round)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics) {
     val affinity = PlantRules.normalizeAffinity(state.snapshot?.affinity ?: AffinityState())
     val level = affinityLevelNumber(affinity.score)
@@ -1352,8 +1768,9 @@ private fun CareAffinityHeader(state: SmartPotUiState, metrics: DashboardMetrics
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelCream,
-        edge = PixelWoodDark,
+        edge = CardBorder,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
+        showCornerBolts = false,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1419,7 +1836,8 @@ private fun AffinityImpactCard(
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelCream,
-        edge = PixelWoodDark,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(
@@ -1450,14 +1868,23 @@ private fun AffinityImpactCard(
 private fun AddCareRecordCard(
     note: String,
     onNoteChange: (String) -> Unit,
+    imageDataUrl: String?,
+    onImageChange: (String?) -> Unit,
     actions: List<CareType>,
     onAdd: (CareType) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            encodeDiaryPhoto(context, uri)?.let(onImageChange)
+        }
+    }
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
+        fill = PixelCream,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1471,6 +1898,32 @@ private fun AddCareRecordCard(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
             )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("记录图片", color = Muted, fontSize = 11.sp)
+                PixelOutlinedButton(
+                    onClick = { imagePicker.launch("image/*") },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(if (imageDataUrl == null) "选择图片" else "更换图片", fontSize = 11.sp)
+                }
+            }
+            imageDataUrl?.let { dataUrl ->
+                Box(Modifier.size(width = 104.dp, height = 78.dp)) {
+                    DiaryPhoto(dataUrl, Modifier.fillMaxSize())
+                    PixelButton(
+                        onClick = { onImageChange(null) },
+                        modifier = Modifier.align(Alignment.TopEnd).size(24.dp),
+                        fill = PixelDanger,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Text("×", color = Color.White, fontSize = 14.sp)
+                    }
+                }
+            }
             actions.chunked(3).forEach { rowActions ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     rowActions.forEach { type ->
@@ -1479,7 +1932,9 @@ private fun AddCareRecordCard(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(horizontal = 5.dp, vertical = 8.dp),
                         ) {
-                            Text("${careEmoji(type)} ${careLabel(type)}", fontSize = 12.sp, maxLines = 1)
+                            CareTypeIcon(type, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(careLabel(type), fontSize = 12.sp, maxLines = 1)
                         }
                     }
                     repeat(3 - rowActions.size) { Spacer(Modifier.weight(1f)) }
@@ -1500,8 +1955,9 @@ private fun GrowthTimelineCard(
     val visibleEvents = if (expanded) events else events.take(3)
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
+        fill = PixelCream,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1517,7 +1973,7 @@ private fun GrowthTimelineCard(
                             if (index < visibleEvents.lastIndex) {
                                 Box(Modifier.padding(top = 27.dp).width(2.dp).height(52.dp).background(CardBorder))
                             }
-                            Text(event.emoji, fontSize = 13.sp, fontWeight = FontWeight.Black, color = Leaf)
+                            CareTypeIcon(event.type, Modifier.size(22.dp))
                         }
                         Column(Modifier.weight(1f).padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(event.date, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
@@ -1548,13 +2004,99 @@ private fun CareEventThumbnail(event: GrowthTimelineEvent, modifier: Modifier = 
         event.title.contains("浇水") -> Color(0xFFD9EFF8)
         else -> Color(0xFFF1F4EB)
     }
-    Box(
-        modifier
-            .background(background, RoundedCornerShape(1.dp))
-            .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(event.emoji, fontSize = 27.sp)
+    if (event.imageDataUrl != null) {
+        DiaryPhoto(event.imageDataUrl, modifier)
+    } else {
+        Box(
+            modifier
+                .background(background, RoundedCornerShape(8.dp))
+                .border(1.dp, CardBorder, RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            CareTypeIcon(event.type, Modifier.size(34.dp))
+        }
+    }
+}
+
+@Composable
+private fun CareTypeIcon(type: CareType, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val stroke = (size.minDimension * 0.09f).coerceAtLeast(1.5.dp.toPx())
+        when (type) {
+            CareType.WATER -> {
+                val drop = Path().apply {
+                    moveTo(center.x, size.height * 0.06f)
+                    cubicTo(size.width * 0.78f, size.height * 0.37f, size.width * 0.82f, size.height * 0.72f, center.x, size.height * 0.94f)
+                    cubicTo(size.width * 0.18f, size.height * 0.72f, size.width * 0.22f, size.height * 0.37f, center.x, size.height * 0.06f)
+                    close()
+                }
+                drawPath(drop, Color(0xFF59B9EB))
+                drawCircle(Color.White.copy(alpha = 0.75f), size.minDimension * 0.08f, Offset(size.width * 0.42f, size.height * 0.47f))
+            }
+            CareType.PRUNE -> {
+                val dark = Color(0xFF59605D)
+                drawCircle(dark, size.minDimension * 0.16f, Offset(size.width * 0.27f, size.height * 0.30f), style = Stroke(stroke))
+                drawCircle(dark, size.minDimension * 0.16f, Offset(size.width * 0.27f, size.height * 0.70f), style = Stroke(stroke))
+                drawLine(dark, Offset(size.width * 0.39f, size.height * 0.40f), Offset(size.width * 0.88f, size.height * 0.78f), stroke, StrokeCap.Round)
+                drawLine(dark, Offset(size.width * 0.39f, size.height * 0.60f), Offset(size.width * 0.88f, size.height * 0.22f), stroke, StrokeCap.Round)
+                drawCircle(Color(0xFF8F9692), size.minDimension * 0.07f, center)
+            }
+            CareType.NEW_LEAF -> {
+                val green = Color(0xFF79B943)
+                drawLine(Color(0xFF4F8E38), Offset(center.x, size.height * 0.92f), Offset(center.x, size.height * 0.38f), stroke * 0.7f, StrokeCap.Round)
+                val leftLeaf = Path().apply {
+                    moveTo(center.x, size.height * 0.57f)
+                    quadraticBezierTo(size.width * 0.12f, size.height * 0.16f, size.width * 0.08f, size.height * 0.42f)
+                    quadraticBezierTo(size.width * 0.18f, size.height * 0.72f, center.x, size.height * 0.57f)
+                    close()
+                }
+                val rightLeaf = Path().apply {
+                    moveTo(center.x, size.height * 0.49f)
+                    quadraticBezierTo(size.width * 0.88f, size.height * 0.10f, size.width * 0.92f, size.height * 0.37f)
+                    quadraticBezierTo(size.width * 0.82f, size.height * 0.66f, center.x, size.height * 0.49f)
+                    close()
+                }
+                drawPath(leftLeaf, green)
+                drawPath(rightLeaf, Color(0xFF94CB55))
+            }
+            CareType.REPOT -> {
+                drawRect(Color(0xFF6FAE4D), Offset(size.width * 0.46f, size.height * 0.08f), Size(size.width * 0.08f, size.height * 0.40f))
+                drawOval(Color(0xFF8DCB5B), Offset(size.width * 0.18f, size.height * 0.12f), Size(size.width * 0.33f, size.height * 0.28f))
+                drawOval(Color(0xFF79B94C), Offset(size.width * 0.49f, size.height * 0.12f), Size(size.width * 0.33f, size.height * 0.28f))
+                val pot = Path().apply {
+                    moveTo(size.width * 0.20f, size.height * 0.48f)
+                    lineTo(size.width * 0.80f, size.height * 0.48f)
+                    lineTo(size.width * 0.69f, size.height * 0.90f)
+                    lineTo(size.width * 0.31f, size.height * 0.90f)
+                    close()
+                }
+                drawPath(pot, Color(0xFFC77B3E))
+                drawRect(Color(0xFFE19B58), Offset(size.width * 0.15f, size.height * 0.43f), Size(size.width * 0.70f, size.height * 0.13f))
+            }
+            CareType.FERTILIZE -> {
+                drawRoundRect(
+                    Color(0xFFB99A66),
+                    Offset(size.width * 0.20f, size.height * 0.16f),
+                    Size(size.width * 0.60f, size.height * 0.70f),
+                    androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()),
+                )
+                drawCircle(Color(0xFF7DAE50), size.minDimension * 0.15f, center)
+                drawLine(Color.White, Offset(center.x, size.height * 0.43f), Offset(center.x, size.height * 0.64f), stroke * 0.55f, StrokeCap.Round)
+            }
+            CareType.OTHER -> {
+                drawRoundRect(
+                    Color(0xFFA9D4F4),
+                    Offset(size.width * 0.20f, size.height * 0.12f),
+                    Size(size.width * 0.60f, size.height * 0.76f),
+                    androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+                )
+                repeat(3) { index ->
+                    val y = size.height * (0.34f + index * 0.16f)
+                    drawLine(Color.White, Offset(size.width * 0.32f, y), Offset(size.width * 0.68f, y), stroke * 0.55f, StrokeCap.Round)
+                }
+            }
+        }
     }
 }
 
@@ -1613,7 +2155,8 @@ private fun CareDiarySection(
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelCream,
-        edge = PixelWoodDark,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1627,8 +2170,9 @@ private fun CareDiarySection(
                 PixelPanel(
                     Modifier.fillMaxWidth(),
                     fill = Color(0xFFFFFDF0),
-                    edge = PixelGreenEdge,
+                    edge = CardBorder,
                     contentPadding = PaddingValues(10.dp),
+                    showCornerBolts = false,
                 ) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                         PixelTextField(
@@ -1786,8 +2330,9 @@ private fun TodayEnvironmentCard(state: SmartPotUiState) {
     }
     PixelPanel(
         Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
+        fill = PixelCream,
+        edge = CardBorder,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -2123,8 +2668,8 @@ private fun ControlActionTile(icon: String, title: String, subtitle: String, sel
     Box(
         modifier = modifier
             .height(72.dp)
-            .background(if (selected) Color(0xFFE3F5C8) else Color(0xFFFFFDF0), RoundedCornerShape(1.dp))
-            .border(2.dp, if (selected) PixelGreenEdge else PixelWoodDark, RoundedCornerShape(1.dp))
+            .background(if (selected) WarmLeafSoft else Color(0xFFFFFDF4), RoundedCornerShape(8.dp))
+            .border(1.dp, if (selected) PixelGreenEdge else CardBorder, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
     ) {
         Row(Modifier.padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2424,8 +2969,8 @@ private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start) {
         Box(
             Modifier
-                .background(if (fromUser) BrightLeaf else Color(0xFFF7F8F5), RoundedCornerShape(1.dp))
-                .border(2.dp, if (fromUser) PixelGreenEdge else PixelWoodDark, RoundedCornerShape(1.dp)),
+                .background(if (fromUser) BrightLeaf else Color(0xFFFFFDF4), RoundedCornerShape(10.dp))
+                .border(1.dp, if (fromUser) Leaf else CardBorder, RoundedCornerShape(10.dp)),
         ) {
             Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp).widthIn(max = 270.dp)) {
                 Text(message.content, color = if (fromUser) Color.White else Ink, fontSize = 12.sp)
@@ -2479,7 +3024,7 @@ private fun CompanionMemoryCard(
                 if (memories.isNotEmpty()) {
                     Text("已记住", color = Muted, fontSize = 11.sp)
                     memories.asReversed().forEach { item ->
-                        Box(Modifier.background(Color(0xFFF3F6ED), RoundedCornerShape(1.dp)).border(2.dp, PixelGreenEdge, RoundedCornerShape(1.dp))) {
+                        Box(Modifier.background(Color(0xFFF8FAEC), RoundedCornerShape(8.dp)).border(1.dp, CardBorder, RoundedCornerShape(8.dp))) {
                             Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(item.content, modifier = Modifier.weight(1f), fontSize = 11.sp, color = Color(0xFF4D534E), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 PixelTextButton(onClick = { onDelete(item) }, contentPadding = PaddingValues(horizontal = 7.dp), danger = true) {
@@ -2795,7 +3340,6 @@ private fun parseMinuteOfDay(value: String): Int? {
     return hour * 60 + minute
 }
 private fun careLabel(value: CareType) = when (value) { CareType.WATER -> "浇水"; CareType.FERTILIZE -> "施肥"; CareType.PRUNE -> "修剪"; CareType.REPOT -> "换盆"; CareType.NEW_LEAF -> "新叶"; CareType.OTHER -> "其他" }
-private fun careEmoji(value: CareType) = when (value) { CareType.WATER -> "水"; CareType.FERTILIZE -> "肥"; CareType.PRUNE -> "剪"; CareType.REPOT -> "盆"; CareType.NEW_LEAF -> "芽"; CareType.OTHER -> "记" }
 private fun affinityLabel(value: AffinityLevel) = when (value) {
     AffinityLevel.STRANGER -> "初次相识"
     AffinityLevel.FAMILIAR -> "渐渐熟悉"
@@ -2832,8 +3376,8 @@ private fun DiaryPhoto(dataUrl: String, modifier: Modifier = Modifier) {
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "日记照片",
             modifier = modifier
-                .background(Color(0xFFF2F4EF), RoundedCornerShape(1.dp))
-                .border(2.dp, PixelWoodDark, RoundedCornerShape(1.dp)),
+                .background(Color(0xFFF8FAEC), RoundedCornerShape(8.dp))
+                .border(1.dp, CardBorder, RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop,
         )
     }
@@ -2876,11 +3420,19 @@ private fun weatherEmoji(condition: String?): String = when {
     else -> "天"
 }
 
-private data class GrowthTimelineEvent(val date: String, val title: String, val detail: String, val emoji: String)
+private data class GrowthTimelineEvent(
+    val date: String,
+    val title: String,
+    val detail: String,
+    val type: CareType,
+    val imageDataUrl: String? = null,
+)
 
 private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
     val pot = state.snapshot?.pot
-    val created = pot?.createdAt?.take(10)?.let { GrowthTimelineEvent(it, "开始陪伴", pot.displayName, "芽") }
+    val created = pot?.createdAt?.take(10)?.let {
+        GrowthTimelineEvent(it, "开始陪伴", pot.displayName, CareType.NEW_LEAF)
+    }
     val logs = state.careLogs.sortedBy { it.occurredAt }.map { log ->
         val firstRepot = state.careLogs.filter { it.type == CareType.REPOT }.minByOrNull { it.occurredAt }?.id == log.id
         GrowthTimelineEvent(
@@ -2891,7 +3443,8 @@ private fun growthTimeline(state: SmartPotUiState): List<GrowthTimelineEvent> {
                 else -> careLabel(log.type)
             },
             detail = log.note.ifBlank { log.actorName },
-            emoji = careEmoji(log.type),
+            type = log.type,
+            imageDataUrl = log.imageDataUrl,
         )
     }
     return (listOfNotNull(created) + logs).sortedByDescending { it.date }

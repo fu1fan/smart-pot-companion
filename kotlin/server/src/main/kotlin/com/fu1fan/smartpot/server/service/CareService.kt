@@ -12,8 +12,22 @@ class CareService(
 ) {
     suspend fun add(pot: PotProfile, request: CreateCareLogRequest, actorName: String): CareLog {
         require(request.note.length <= 500) { "备注不能超过 500 个字符" }
+        request.imageDataUrl?.let { image ->
+            require(image.startsWith("data:image/jpeg;base64,") || image.startsWith("data:image/png;base64,")) {
+                "照片格式应为 JPEG 或 PNG"
+            }
+            require(image.length <= 1_500_000) { "单张照片不能超过约 1MB" }
+        }
         val occurred = request.occurredAt?.let(Instant::parse) ?: Instant.now()
-        val log = CareLog(UUID.randomUUID().toString(), pot.id, request.type, occurred.toString(), request.note.trim(), actorName)
+        val log = CareLog(
+            id = UUID.randomUUID().toString(),
+            potId = pot.id,
+            type = request.type,
+            occurredAt = occurred.toString(),
+            note = request.note.trim(),
+            actorName = actorName,
+            imageDataUrl = request.imageDataUrl,
+        )
         store.saveCareLog(log)
         val interval = when (request.type) {
             CareType.WATER -> pot.species.wateringIntervalDays
