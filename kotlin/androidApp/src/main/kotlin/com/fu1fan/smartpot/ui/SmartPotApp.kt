@@ -245,12 +245,12 @@ private fun SpeciesPickerDialog(
     }
     Dialog(onDismissRequest = onDismiss) {
         PixelPanel(
-            Modifier.fillMaxWidth(0.84f).heightIn(max = 520.dp),
+            Modifier.widthIn(max = 340.dp).wrapContentHeight(),
             fill = PixelCream,
             edge = PixelWoodDark,
             contentPadding = PaddingValues(12.dp),
         ) {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().wrapContentHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
                 PixelTextField(
                     value = query,
@@ -1552,7 +1552,7 @@ private fun CareScreen(
         }
     }
     var note by rememberSaveable { mutableStateOf("") }
-    var timelineExpanded by rememberSaveable { mutableStateOf(false) }
+    var timelineExpanded by remember(state.selectedPotId) { mutableStateOf(false) }
     var diariesExpanded by rememberSaveable { mutableStateOf(false) }
     var addRecordVisible by rememberSaveable { mutableStateOf(false) }
     var recordImageDataUrl by remember { mutableStateOf<String?>(null) }
@@ -2039,23 +2039,33 @@ private fun SwipeToDeleteTimelineEvent(
 ) {
     val careLogId = event.careLogId
     val density = LocalDensity.current
-    val thresholdPx = with(density) { 92.dp.toPx() }
+    val deleteWidth = 76.dp
+    val deleteWidthPx = with(density) { deleteWidth.toPx() }
     var dragOffset by remember(careLogId) { mutableFloatStateOf(0f) }
     Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 70.dp)
-            .background(if (dragOffset > 0f) Color(0xFFFBE4DF) else Color.Transparent, RoundedCornerShape(8.dp)),
-        contentAlignment = Alignment.CenterStart,
+            .background(Color(0xFFFBE4DF), RoundedCornerShape(8.dp)),
     ) {
-        if (careLogId != null && dragOffset > 0f) {
-            Text(
-                if (dragOffset >= thresholdPx) "松开删除" else "向右滑动删除",
-                modifier = Modifier.padding(start = 12.dp),
-                color = PixelDanger,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-            )
+        if (careLogId != null) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(deleteWidth)
+                    .height(70.dp)
+                    .background(
+                        PixelDanger,
+                        RoundedCornerShape(topStart = 0.dp, topEnd = 8.dp, bottomEnd = 8.dp, bottomStart = 0.dp),
+                    )
+                    .clickable {
+                        dragOffset = 0f
+                        onDelete(careLogId)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("删除", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Row(
             Modifier
@@ -2069,12 +2079,11 @@ private fun SwipeToDeleteTimelineEvent(
                         Modifier.pointerInput(careLogId) {
                             detectHorizontalDragGestures(
                                 onDragEnd = {
-                                    if (dragOffset >= thresholdPx) onDelete(careLogId)
-                                    dragOffset = 0f
+                                    dragOffset = if (dragOffset <= -deleteWidthPx / 2f) -deleteWidthPx else 0f
                                 },
                                 onDragCancel = { dragOffset = 0f },
                             ) { change, amount ->
-                                dragOffset = (dragOffset + amount).coerceIn(0f, thresholdPx * 1.2f)
+                                dragOffset = (dragOffset + amount).coerceIn(-deleteWidthPx, 0f)
                                 change.consume()
                             }
                         }
