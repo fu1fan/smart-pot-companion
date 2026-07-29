@@ -1846,8 +1846,10 @@ private fun CareAffinityHeader(
                         } else {
                             "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度（最高等级30）"
                         },
-                        fontSize = 11.sp,
+                        fontSize = 9.sp,
                         color = Color(0xFF5C513D),
+                        maxLines = 1,
+                        softWrap = false,
                     )
                     AffinityImpactContent(state, metrics, expanded, onToggle)
                 }
@@ -2662,11 +2664,11 @@ private fun ControlScreen(
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.fillMaxWidth().height(92.dp).clip(RoundedCornerShape(14.dp))) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(2.35f).clip(RoundedCornerShape(14.dp))) {
                         Image(
                             painter = painterResource(R.drawable.control_light_header),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxWidth().height(214.dp).align(Alignment.Center),
+                            modifier = Modifier.matchParentSize(),
                             contentScale = ContentScale.FillBounds,
                         )
                         Row(
@@ -2789,14 +2791,14 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(92.dp)
+                            .aspectRatio(3f)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable { shareExpanded = !shareExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_share_header),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxWidth().height(174.dp).align(Alignment.Center),
+                            modifier = Modifier.matchParentSize(),
                             contentScale = ContentScale.FillBounds,
                         )
                         Column(
@@ -2830,14 +2832,14 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(92.dp)
+                            .aspectRatio(3f)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable { settingsExpanded = !settingsExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_settings_header),
                             contentDescription = null,
-                            modifier = Modifier.fillMaxWidth().height(188.dp).align(Alignment.Center),
+                            modifier = Modifier.matchParentSize(),
                             contentScale = ContentScale.FillBounds,
                         )
                         Column(
@@ -2900,7 +2902,7 @@ private fun ControlDeviceStatusCard(state: SmartPotUiState) {
     Box(
         Modifier
             .fillMaxWidth()
-            .height(196.dp),
+            .aspectRatio(1.859f),
     ) {
         Image(
             painter = painterResource(R.drawable.control_status_background),
