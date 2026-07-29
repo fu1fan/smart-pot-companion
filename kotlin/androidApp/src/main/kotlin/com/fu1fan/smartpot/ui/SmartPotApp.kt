@@ -740,6 +740,7 @@ private fun PixelSlider(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     valueRange: ClosedFloatingPointRange<Float> = 0f..100f,
+    activeColor: Color = BrightLeaf,
     onValueChangeFinished: () -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxWidth().height(34.dp), contentAlignment = Alignment.CenterStart) {
@@ -773,10 +774,10 @@ private fun PixelSlider(
             val trackH = 9.dp.toPx()
             val y = (size.height - trackH) / 2f
             drawRoundRect(Color(0xFFE9EEDC), Offset(0f, y), Size(size.width, trackH), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
-            drawRoundRect(BrightLeaf, Offset(0f, y), Size(size.width * fraction, trackH), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
+            drawRoundRect(activeColor, Offset(0f, y), Size(size.width * fraction, trackH), cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx(), 8.dp.toPx()))
             val knobX = (size.width * fraction).coerceIn(7.dp.toPx(), size.width - 7.dp.toPx())
             drawRoundRect(PixelCream, Offset(knobX - 5.dp.toPx(), y - 6.dp.toPx()), Size(10.dp.toPx(), trackH + 12.dp.toPx()), cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()))
-            drawRoundRect(Leaf, Offset(knobX - 5.dp.toPx(), y - 6.dp.toPx()), Size(10.dp.toPx(), trackH + 12.dp.toPx()), cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()), style = Stroke(1.dp.toPx()))
+            drawRoundRect(activeColor, Offset(knobX - 5.dp.toPx(), y - 6.dp.toPx()), Size(10.dp.toPx(), trackH + 12.dp.toPx()), cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.dp.toPx(), 5.dp.toPx()), style = Stroke(1.dp.toPx()))
         }
     }
 }
@@ -2628,7 +2629,13 @@ private fun ControlScreen(
     val offPeriodValid = offStartMinute != null && offEndMinute != null && offStartMinute != offEndMinute
 
     Box(Modifier.fillMaxSize()) {
-        PixelNatureBackground(Modifier.matchParentSize(), green = false)
+        Image(
+            painter = painterResource(R.drawable.control_page_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.Center,
+        )
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -2658,6 +2665,7 @@ private fun ControlScreen(
                     Modifier.fillMaxWidth(),
                     fill = PixelGreenPanel,
                     edge = PixelGreenEdge,
+                    showCornerBolts = false,
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -2747,28 +2755,33 @@ private fun ControlScreen(
                 }
             }
             item {
-            ControlSliderCard(
-                icon = "亮",
-                title = "亮度调节",
-                value = brightness,
-                onValueChange = { brightness = it },
-                onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_BRIGHTNESS, brightnessPercent = brightness.toInt())) },
-            )
-            }
-            item {
-            ControlSliderCard(
-                icon = "音",
-                title = "音量调节",
-                value = volume,
-                onValueChange = { volume = it },
-                onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_VOLUME, volumePercent = volume.toInt())) },
-            )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ControlSliderCard(
+                        kind = "brightness",
+                        title = "亮度调节",
+                        value = brightness,
+                        accent = Color(0xFF5BA763),
+                        modifier = Modifier.weight(1f),
+                        onValueChange = { brightness = it },
+                        onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_BRIGHTNESS, brightnessPercent = brightness.toInt())) },
+                    )
+                    ControlSliderCard(
+                        kind = "volume",
+                        title = "音量调节",
+                        value = volume,
+                        accent = Color(0xFFE69B32),
+                        modifier = Modifier.weight(1f),
+                        onValueChange = { volume = it },
+                        onValueChangeFinished = { control(DeviceControlRequest(DeviceCommandType.SET_VOLUME, volumePercent = volume.toInt())) },
+                    )
+                }
             }
             item {
                 PixelPanel(
                     Modifier.fillMaxWidth(),
                     fill = PixelGreenPanel,
                     edge = PixelGreenEdge,
+                    showCornerBolts = false,
                 ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -2797,6 +2810,7 @@ private fun ControlScreen(
                     Modifier.fillMaxWidth(),
                     fill = PixelGreenPanel,
                     edge = PixelGreenEdge,
+                    showCornerBolts = false,
                 ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -2842,6 +2856,7 @@ private fun ControlDeviceStatusCard(state: SmartPotUiState) {
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        showCornerBolts = false,
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2869,6 +2884,7 @@ private fun ControlProjectionCard(
         Modifier.fillMaxWidth(),
         fill = PixelGreenPanel,
         edge = PixelGreenEdge,
+        showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("屏幕投送", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
@@ -2923,20 +2939,82 @@ private fun ControlActionTile(icon: String, title: String, subtitle: String, sel
 }
 
 @Composable
-private fun ControlSliderCard(icon: String, title: String, value: Float, onValueChange: (Float) -> Unit, onValueChangeFinished: () -> Unit) {
+private fun ControlSliderCard(
+    kind: String,
+    title: String,
+    value: Float,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
     PixelPanel(
-        Modifier.fillMaxWidth(),
-        fill = PixelGreenPanel,
-        edge = PixelGreenEdge,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+        modifier.height(168.dp),
+        fill = Color(0xFFFFFDF5),
+        edge = CardBorder,
+        showCornerBolts = false,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
     ) {
-        Column {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(icon, color = Leaf, fontSize = 18.sp)
-                Text(title, modifier = Modifier.padding(start = 9.dp).weight(1f), color = Ink, fontWeight = FontWeight.SemiBold)
-                Text("${value.toInt()}%", color = Ink, fontSize = 12.sp)
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ControlAdjustIcon(kind = kind, high = true, color = accent, modifier = Modifier.size(24.dp))
+                Text(title, modifier = Modifier.padding(start = 6.dp), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
-            PixelSlider(value = value, onValueChange = onValueChange, valueRange = 0f..100f, onValueChangeFinished = onValueChangeFinished)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value.toInt().toString(), color = accent, fontSize = 34.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+                Text("%", color = Ink, fontSize = 20.sp, modifier = Modifier.padding(start = 2.dp, bottom = 3.dp))
+            }
+            PixelSlider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = 0f..100f,
+                activeColor = accent,
+                onValueChangeFinished = onValueChangeFinished,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                ControlAdjustIcon(kind = kind, high = false, color = Muted, modifier = Modifier.size(18.dp))
+                ControlAdjustIcon(kind = kind, high = true, color = Muted, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ControlAdjustIcon(kind: String, high: Boolean, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        if (kind == "brightness") {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension * if (high) 0.22f else 0.17f
+            drawCircle(color = color, radius = radius, center = center)
+            val inner = size.minDimension * 0.34f
+            val outer = size.minDimension * if (high) 0.49f else 0.43f
+            repeat(8) { index ->
+                val angle = Math.toRadians(index * 45.0)
+                drawLine(
+                    color = color,
+                    start = Offset(center.x + kotlin.math.cos(angle).toFloat() * inner, center.y + kotlin.math.sin(angle).toFloat() * inner),
+                    end = Offset(center.x + kotlin.math.cos(angle).toFloat() * outer, center.y + kotlin.math.sin(angle).toFloat() * outer),
+                    strokeWidth = size.minDimension * 0.08f,
+                )
+            }
+        } else {
+            val midY = size.height / 2f
+            val left = size.width * 0.12f
+            val speakerRight = size.width * 0.48f
+            drawRect(color, Offset(left, size.height * 0.36f), Size(size.width * 0.16f, size.height * 0.28f))
+            val speaker = androidx.compose.ui.graphics.Path().apply {
+                moveTo(size.width * 0.28f, size.height * 0.36f)
+                lineTo(speakerRight, size.height * 0.18f)
+                lineTo(speakerRight, size.height * 0.82f)
+                lineTo(size.width * 0.28f, size.height * 0.64f)
+                close()
+            }
+            drawPath(speaker, color)
+            val waveCount = if (high) 2 else 1
+            repeat(waveCount) { index ->
+                val x = size.width * (0.62f + index * 0.16f)
+                drawLine(color, Offset(x, midY - size.height * (0.13f + index * 0.05f)), Offset(x, midY + size.height * (0.13f + index * 0.05f)), strokeWidth = size.minDimension * 0.08f)
+            }
         }
     }
 }

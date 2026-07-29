@@ -412,19 +412,13 @@ class SmartPotViewModel : ViewModel() {
                 ?: state.focusDaily.firstOrNull { it.date == today }
                 ?: return@update state
             val updatedCount = (current.pomodoroCount + delta).coerceAtLeast(0)
-            val hasDailySchedule = state.schedule?.items.orEmpty().any { item ->
-                runCatching { Instant.parse(item.createdAt).atZone(zone).toLocalDate() == todayDate }.getOrDefault(false)
-            }
             val updated = current.copy(
                 pomodoroCount = updatedCount,
                 focusMinutes = (current.focusMinutes + delta * 25).coerceAtLeast(0),
-                scheduleCompletionPercent = if (hasDailySchedule) {
-                    current.scheduleCompletionPercent
-                } else {
+                scheduleCompletionPercent =
                     (updatedCount.toDouble() / current.targetPomodoroCount.coerceAtLeast(1) * 100)
                         .roundToInt()
-                        .coerceIn(0, 100)
-                },
+                        .coerceIn(0, 100),
             )
             val focusDaily = if (state.focusDaily.any { it.date == today }) {
                 state.focusDaily.map { if (it.date == today) updated else it }

@@ -367,7 +367,7 @@ class ApplicationTest {
         assertTrue(completed.completed)
 
         val overview = api.get("/api/v1/pots/${pot.id}/care-overview") { bearerAuth(config.demoToken) }.body<CareDayOverview>()
-        assertEquals(100, overview.focus.scheduleCompletionPercent)
+        assertEquals(0, overview.focus.scheduleCompletionPercent)
     }
 
     @Test
