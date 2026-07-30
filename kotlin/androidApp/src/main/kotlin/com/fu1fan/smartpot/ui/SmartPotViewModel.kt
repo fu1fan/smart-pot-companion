@@ -48,6 +48,9 @@ data class SmartPotUiState(
     val messages: List<ChatMessage> = emptyList(),
     val todayMessages: List<ChatMessage> = emptyList(),
     val diaries: List<PlantDiary> = emptyList(),
+    val pomodoroRemainingSeconds: Int = 25 * 60,
+    val pomodoroTimerRunning: Boolean = false,
+    val pomodoroTimerEndEpochMs: Long = 0L,
     val lastCommand: CommandSubmission? = null,
     val shareCode: ShareCode? = null,
     val error: String? = null,
@@ -63,6 +66,19 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     private val storedUserName = sessionPreferences.getString(UserNameKey, null)?.trim().orEmpty().ifBlank { "主人" }
     private val storedUserId = sessionPreferences.getString(UserIdKey, null)?.trim().orEmpty()
     private val storedUserAvatar = sessionPreferences.getString(UserAvatarKey, null)?.takeIf(String::isNotBlank)
+    private val storedPomodoroEndEpochMs = sessionPreferences.getLong(PomodoroEndEpochMsKey, 0L)
+    private val restoredPomodoroRunning =
+        sessionPreferences.getBoolean(PomodoroRunningKey, false) &&
+            storedPomodoroEndEpochMs > System.currentTimeMillis()
+    private val restoredPomodoroRemainingSeconds =
+        if (restoredPomodoroRunning) {
+            ((storedPomodoroEndEpochMs - System.currentTimeMillis() + 999L) / 1000L)
+                .toInt()
+                .coerceIn(1, PomodoroSessionSeconds)
+        } else {
+            sessionPreferences.getInt(PomodoroRemainingSecondsKey, PomodoroSessionSeconds)
+                .coerceIn(1, PomodoroSessionSeconds)
+        }
     private val storedSessionValid =
         !storedSessionToken.isNullOrBlank() &&
             storedSessionExpiresAt
@@ -78,15 +94,24 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
             userName = storedUserName,
             userId = storedUserId,
             userAvatarDataUrl = storedUserAvatar,
+            pomodoroRemainingSeconds = restoredPomodoroRemainingSeconds,
+            pomodoroTimerRunning = restoredPomodoroRunning,
+            pomodoroTimerEndEpochMs = storedPomodoroEndEpochMs.takeIf { restoredPomodoroRunning } ?: 0L,
         ),
     )
     val state: StateFlow<SmartPotUiState> = mutableState.asStateFlow()
     private var realtimeJob: Job? = null
+    private var pomodoroTimerJob: Job? = null
     private var weatherLocation: Pair<Double, Double>? = null
 
     init {
         if (storedSessionToken != null && !storedSessionValid) {
             sessionPreferences.edit().remove(SessionTokenKey).remove(SessionExpiresAtKey).apply()
+        }
+        if (restoredPomodoroRunning) {
+            startPomodoroTicker()
+        } else if (sessionPreferences.getBoolean(PomodoroRunningKey, false)) {
+            resetPomodoroTimer()
         }
         if (!mutableState.value.inviteRequired) bootstrap()
     }
@@ -360,6 +385,50 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun startPomodoroTimer() {
+        val current = mutableState.value
+        if (current.pomodoroTimerRunning) return
+        val remaining = current.pomodoroRemainingSeconds.coerceIn(1, PomodoroSessionSeconds)
+        if (remaining == PomodoroSessionSeconds) {
+            control(DeviceControlRequest(DeviceCommandType.START_POMODORO))
+        }
+        val endEpochMs = System.currentTimeMillis() + remaining * 1_000L
+        sessionPreferences.edit()
+            .putBoolean(PomodoroRunningKey, true)
+            .putLong(PomodoroEndEpochMsKey, endEpochMs)
+            .putInt(PomodoroRemainingSecondsKey, remaining)
+            .apply()
+        mutableState.update {
+            it.copy(
+                pomodoroTimerRunning = true,
+                pomodoroTimerEndEpochMs = endEpochMs,
+                pomodoroRemainingSeconds = remaining,
+            )
+        }
+        startPomodoroTicker()
+    }
+
+    fun pausePomodoroTimer() {
+        val current = mutableState.value
+        if (!current.pomodoroTimerRunning) return
+        val remaining = (
+            (current.pomodoroTimerEndEpochMs - System.currentTimeMillis() + 999L) / 1_000L
+            ).toInt().coerceIn(1, PomodoroSessionSeconds)
+        pomodoroTimerJob?.cancel()
+        sessionPreferences.edit()
+            .putBoolean(PomodoroRunningKey, false)
+            .remove(PomodoroEndEpochMsKey)
+            .putInt(PomodoroRemainingSecondsKey, remaining)
+            .apply()
+        mutableState.update {
+            it.copy(
+                pomodoroTimerRunning = false,
+                pomodoroTimerEndEpochMs = 0L,
+                pomodoroRemainingSeconds = remaining,
+            )
+        }
+    }
+
     fun addSchedule(title: String, dueAt: Instant) = withPot { id ->
         val timezone = mutableState.value.snapshot?.pot?.timezone ?: "Asia/Shanghai"
         api.addSchedule(
@@ -478,6 +547,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                     userName = mutableState.value.userName,
                     userId = mutableState.value.userId,
                     userAvatarDataUrl = mutableState.value.userAvatarDataUrl,
+                    pomodoroRemainingSeconds = mutableState.value.pomodoroRemainingSeconds,
+                    pomodoroTimerRunning = mutableState.value.pomodoroTimerRunning,
+                    pomodoroTimerEndEpochMs = mutableState.value.pomodoroTimerEndEpochMs,
                     selectedPotId = session.potId,
                 )
                 val species = api.species()
@@ -577,7 +649,48 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     private fun zoneId(timezone: String?): ZoneId =
         runCatching { ZoneId.of(timezone ?: "Asia/Shanghai") }.getOrDefault(ZoneId.of("Asia/Shanghai"))
 
-    override fun onCleared() { api.close() }
+    private fun startPomodoroTicker() {
+        pomodoroTimerJob?.cancel()
+        pomodoroTimerJob = viewModelScope.launch {
+            while (isActive) {
+                val current = mutableState.value
+                if (!current.pomodoroTimerRunning || current.pomodoroTimerEndEpochMs <= 0L) break
+                val remaining = (
+                    (current.pomodoroTimerEndEpochMs - System.currentTimeMillis() + 999L) / 1_000L
+                    ).toInt()
+                if (remaining <= 0) {
+                    resetPomodoroTimer()
+                    recordPomodoro()
+                    break
+                }
+                if (remaining != current.pomodoroRemainingSeconds) {
+                    mutableState.update { it.copy(pomodoroRemainingSeconds = remaining.coerceAtMost(PomodoroSessionSeconds)) }
+                }
+                delay(250)
+            }
+        }
+    }
+
+    private fun resetPomodoroTimer() {
+        pomodoroTimerJob?.cancel()
+        sessionPreferences.edit()
+            .putBoolean(PomodoroRunningKey, false)
+            .remove(PomodoroEndEpochMsKey)
+            .putInt(PomodoroRemainingSecondsKey, PomodoroSessionSeconds)
+            .apply()
+        mutableState.update {
+            it.copy(
+                pomodoroRemainingSeconds = PomodoroSessionSeconds,
+                pomodoroTimerRunning = false,
+                pomodoroTimerEndEpochMs = 0L,
+            )
+        }
+    }
+
+    override fun onCleared() {
+        pomodoroTimerJob?.cancel()
+        api.close()
+    }
 
     companion object {
         private const val SessionTokenKey = "share_session_token"
@@ -585,6 +698,10 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         private const val UserNameKey = "user_name"
         private const val UserIdKey = "user_id"
         private const val UserAvatarKey = "user_avatar_data_url"
+        private const val PomodoroRunningKey = "pomodoro_running"
+        private const val PomodoroEndEpochMsKey = "pomodoro_end_epoch_ms"
+        private const val PomodoroRemainingSecondsKey = "pomodoro_remaining_seconds"
+        private const val PomodoroSessionSeconds = 25 * 60
     }
 }
 

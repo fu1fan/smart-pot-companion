@@ -180,7 +180,8 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::toggleSchedule,
                         viewModel::recordPomodoro,
                         viewModel::removePomodoro,
-                        { viewModel.control(DeviceControlRequest(DeviceCommandType.START_POMODORO)) },
+                        viewModel::startPomodoroTimer,
+                        viewModel::pausePomodoroTimer,
                     )
                     else -> ControlScreen(
                         state,
@@ -3399,7 +3400,8 @@ private fun CompanionScreen(
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
     recordPomodoro: () -> Unit,
     removePomodoro: () -> Unit,
-    startDevicePomodoro: () -> Unit,
+    startPomodoroTimer: () -> Unit,
+    pausePomodoroTimer: () -> Unit,
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var memory by rememberSaveable { mutableStateOf("") }
@@ -3539,7 +3541,15 @@ private fun CompanionScreen(
                     toggleSchedule = toggleSchedule,
                 )
             }
-            item { CompanionFocusCard(state, recordPomodoro, removePomodoro, startDevicePomodoro) }
+            item {
+                CompanionFocusCard(
+                    state = state,
+                    recordPomodoro = recordPomodoro,
+                    removePomodoro = removePomodoro,
+                    startPomodoroTimer = startPomodoroTimer,
+                    pausePomodoroTimer = pausePomodoroTimer,
+                )
+            }
         }
     }
 }
@@ -4155,7 +4165,8 @@ private fun CompanionFocusCard(
     state: SmartPotUiState,
     recordPomodoro: () -> Unit,
     removePomodoro: () -> Unit,
-    startDevicePomodoro: () -> Unit,
+    startPomodoroTimer: () -> Unit,
+    pausePomodoroTimer: () -> Unit,
 ) {
     val today = state.careOverview?.focus ?: state.focusDaily.lastOrNull()
     val count = today?.pomodoroCount ?: 0
@@ -4163,25 +4174,9 @@ private fun CompanionFocusCard(
     val target = (today?.targetPomodoroCount ?: 4).coerceAtLeast(1)
     val completion = today?.scheduleCompletionPercent ?: 0
     val sessionSeconds = 25 * 60
-    var remainingSeconds by rememberSaveable { mutableIntStateOf(sessionSeconds) }
-    var timerRunning by rememberSaveable { mutableStateOf(false) }
-    var timerEndEpochMs by rememberSaveable { mutableLongStateOf(0L) }
+    val remainingSeconds = state.pomodoroRemainingSeconds
+    val timerRunning = state.pomodoroTimerRunning
     var confirmDecrease by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(timerRunning, timerEndEpochMs) {
-        if (!timerRunning || timerEndEpochMs <= 0L) return@LaunchedEffect
-        while (timerRunning) {
-            val remaining = ((timerEndEpochMs - System.currentTimeMillis() + 999L) / 1000L).toInt()
-            if (remaining <= 0) {
-                remainingSeconds = sessionSeconds
-                timerRunning = false
-                timerEndEpochMs = 0L
-                recordPomodoro()
-                break
-            }
-            remainingSeconds = remaining.coerceAtMost(sessionSeconds)
-            delay(250)
-        }
-    }
     if (confirmDecrease) {
         PixelConfirmDialog(
             title = "减少一个番茄钟？",
@@ -4216,14 +4211,9 @@ private fun CompanionFocusCard(
             PixelButton(
                 onClick = {
                     if (timerRunning) {
-                        timerRunning = false
-                        timerEndEpochMs = 0L
+                        pausePomodoroTimer()
                     } else {
-                        if (remainingSeconds == sessionSeconds) {
-                            startDevicePomodoro()
-                        }
-                        timerEndEpochMs = System.currentTimeMillis() + remainingSeconds * 1000L
-                        timerRunning = true
+                        startPomodoroTimer()
                     }
                 },
                 modifier = Modifier.width(112.dp),
