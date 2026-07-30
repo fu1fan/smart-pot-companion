@@ -60,6 +60,8 @@ void app_ui_set_motion_debug_event(const char *event, const char *reaction);
 void app_ui_show_remote_content(const char *text, uint32_t duration_ms);
 void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms);
 bool app_ui_start_pomodoro(void);
+bool app_ui_pause_pomodoro(void);
+bool app_ui_resume_pomodoro(void);
 void app_ui_stop_pomodoro(void);
 void app_ui_show_schedule_page(void);
 void app_ui_add_schedule(const char *item, const char *deadline);

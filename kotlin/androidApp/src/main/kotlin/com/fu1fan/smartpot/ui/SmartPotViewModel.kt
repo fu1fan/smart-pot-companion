@@ -67,6 +67,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     private val storedUserId = sessionPreferences.getString(UserIdKey, null)?.trim().orEmpty()
     private val storedUserAvatar = sessionPreferences.getString(UserAvatarKey, null)?.takeIf(String::isNotBlank)
     private val storedPomodoroEndEpochMs = sessionPreferences.getLong(PomodoroEndEpochMsKey, 0L)
+    private var pomodoroSessionActive =
+        sessionPreferences.getBoolean(PomodoroActiveKey, false) ||
+            sessionPreferences.getBoolean(PomodoroRunningKey, false)
     private val restoredPomodoroRunning =
         sessionPreferences.getBoolean(PomodoroRunningKey, false) &&
             storedPomodoroEndEpochMs > System.currentTimeMillis()
@@ -389,11 +392,15 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         val current = mutableState.value
         if (current.pomodoroTimerRunning) return
         val remaining = current.pomodoroRemainingSeconds.coerceIn(1, PomodoroSessionSeconds)
-        if (remaining == PomodoroSessionSeconds) {
-            control(DeviceControlRequest(DeviceCommandType.START_POMODORO))
-        }
+        control(
+            DeviceControlRequest(
+                if (pomodoroSessionActive) DeviceCommandType.RESUME_POMODORO else DeviceCommandType.START_POMODORO,
+            ),
+        )
+        pomodoroSessionActive = true
         val endEpochMs = System.currentTimeMillis() + remaining * 1_000L
         sessionPreferences.edit()
+            .putBoolean(PomodoroActiveKey, true)
             .putBoolean(PomodoroRunningKey, true)
             .putLong(PomodoroEndEpochMsKey, endEpochMs)
             .putInt(PomodoroRemainingSecondsKey, remaining)
@@ -415,7 +422,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
             (current.pomodoroTimerEndEpochMs - System.currentTimeMillis() + 999L) / 1_000L
             ).toInt().coerceIn(1, PomodoroSessionSeconds)
         pomodoroTimerJob?.cancel()
+        control(DeviceControlRequest(DeviceCommandType.PAUSE_POMODORO))
         sessionPreferences.edit()
+            .putBoolean(PomodoroActiveKey, true)
             .putBoolean(PomodoroRunningKey, false)
             .remove(PomodoroEndEpochMsKey)
             .putInt(PomodoroRemainingSecondsKey, remaining)
@@ -427,6 +436,13 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                 pomodoroRemainingSeconds = remaining,
             )
         }
+    }
+
+    fun exitPomodoroTimer() {
+        if (pomodoroSessionActive || mutableState.value.pomodoroTimerRunning) {
+            control(DeviceControlRequest(DeviceCommandType.STOP_POMODORO))
+        }
+        resetPomodoroTimer()
     }
 
     fun addSchedule(title: String, dueAt: Instant) = withPot { id ->
@@ -659,6 +675,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                     (current.pomodoroTimerEndEpochMs - System.currentTimeMillis() + 999L) / 1_000L
                     ).toInt()
                 if (remaining <= 0) {
+                    control(DeviceControlRequest(DeviceCommandType.STOP_POMODORO))
                     resetPomodoroTimer()
                     recordPomodoro()
                     break
@@ -673,7 +690,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
 
     private fun resetPomodoroTimer() {
         pomodoroTimerJob?.cancel()
+        pomodoroSessionActive = false
         sessionPreferences.edit()
+            .putBoolean(PomodoroActiveKey, false)
             .putBoolean(PomodoroRunningKey, false)
             .remove(PomodoroEndEpochMsKey)
             .putInt(PomodoroRemainingSecondsKey, PomodoroSessionSeconds)
@@ -699,6 +718,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         private const val UserIdKey = "user_id"
         private const val UserAvatarKey = "user_avatar_data_url"
         private const val PomodoroRunningKey = "pomodoro_running"
+        private const val PomodoroActiveKey = "pomodoro_active"
         private const val PomodoroEndEpochMsKey = "pomodoro_end_epoch_ms"
         private const val PomodoroRemainingSecondsKey = "pomodoro_remaining_seconds"
         private const val PomodoroSessionSeconds = 25 * 60

@@ -120,6 +120,9 @@ enum class DeviceCommandType {
     SPEAK_TEXT,
     SET_LIGHT_STRIP_CONTROL,
     START_POMODORO,
+    PAUSE_POMODORO,
+    RESUME_POMODORO,
+    STOP_POMODORO,
 }
 
 @Serializable

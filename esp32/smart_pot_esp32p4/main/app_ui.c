@@ -58,6 +58,7 @@ typedef enum {
 typedef enum {
     POMODORO_IDLE = 0,
     POMODORO_FOCUS,
+    POMODORO_PAUSED,
     POMODORO_REST,
 } pomodoro_phase_t;
 
@@ -799,6 +800,9 @@ static void update_pomodoro_page(void)
     case POMODORO_FOCUS:
         lv_label_set_text(s_pomodoro_status_label, "Focus in progress");
         break;
+    case POMODORO_PAUSED:
+        lv_label_set_text(s_pomodoro_status_label, "Focus paused");
+        break;
     case POMODORO_REST:
         lv_label_set_text(s_pomodoro_status_label, remaining > 0 ? "Take a 5 min break" : "Break finished");
         break;
@@ -812,7 +816,7 @@ static void update_pomodoro_page(void)
 static void pomodoro_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    if (s_pomodoro_phase == POMODORO_IDLE) {
+    if (s_pomodoro_phase == POMODORO_IDLE || s_pomodoro_phase == POMODORO_PAUSED) {
         update_pomodoro_page();
         return;
     }
@@ -2054,6 +2058,44 @@ bool app_ui_start_pomodoro(void)
 
     bsp_display_unlock();
     return true;
+}
+
+bool app_ui_pause_pomodoro(void)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for pomodoro pause");
+        return false;
+    }
+    bool paused = s_pomodoro_phase == POMODORO_FOCUS;
+    if (paused) {
+        s_pomodoro_phase = POMODORO_PAUSED;
+        update_pomodoro_page();
+    }
+    bsp_display_unlock();
+    return paused;
+}
+
+bool app_ui_resume_pomodoro(void)
+{
+    if (bsp_display_lock(1000) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to lock display for pomodoro resume");
+        return false;
+    }
+    bool resumed = s_pomodoro_phase == POMODORO_PAUSED && s_pomodoro_remaining_sec > 0;
+    if (resumed) {
+        s_pomodoro_phase = POMODORO_FOCUS;
+        s_current_page = UI_PAGE_POMODORO;
+        set_page_visible(s_face_page, false);
+        set_page_visible(s_motion_page, false);
+        set_page_visible(s_schedule_page, false);
+        set_page_visible(s_pomodoro_page, true);
+        update_pomodoro_page();
+        if (s_pomodoro_timer != NULL) {
+            lv_timer_reset(s_pomodoro_timer);
+        }
+    }
+    bsp_display_unlock();
+    return resumed;
 }
 
 static void stop_pomodoro_unlocked(void)

@@ -440,6 +440,12 @@ static void handle_command(const char *json)
         publish_event("REMOTE_TOUCH");
     } else if (strcmp(type->valuestring, "START_POMODORO") == 0) {
         ok = app_ui_start_pomodoro();
+    } else if (strcmp(type->valuestring, "PAUSE_POMODORO") == 0) {
+        ok = app_ui_pause_pomodoro();
+    } else if (strcmp(type->valuestring, "RESUME_POMODORO") == 0) {
+        ok = app_ui_resume_pomodoro();
+    } else if (strcmp(type->valuestring, "STOP_POMODORO") == 0) {
+        app_ui_stop_pomodoro();
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");
         ok = cJSON_IsString(text);

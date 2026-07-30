@@ -160,7 +160,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                     state.loading && !state.potsLoaded -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     !state.potsLoaded -> ConnectionRetryScreen(state.error, viewModel::bootstrap)
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
-                    tab == 0 -> DashboardScreen(state, viewModel::updateSpecies)
+                    tab == 0 -> DashboardScreen(state, viewModel::updateSpecies, viewModel::refreshWeather)
                     tab == 1 -> CareScreen(
                         state,
                         viewModel::addCare,
@@ -168,7 +168,6 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::saveDiary,
                         viewModel::deleteDiary,
                         viewModel::speakDiary,
-                        viewModel::refreshWeather,
                     )
                     tab == 2 -> CompanionScreen(
                         state,
@@ -182,6 +181,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::removePomodoro,
                         viewModel::startPomodoroTimer,
                         viewModel::pausePomodoroTimer,
+                        viewModel::exitPomodoroTimer,
                     )
                     else -> ControlScreen(
                         state,
@@ -918,7 +918,22 @@ private fun PixelConfirmDialog(
 }
 
 @Composable
-private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> Unit) {
+private fun DashboardScreen(
+    state: SmartPotUiState,
+    updateSpecies: (String) -> Unit,
+    refreshWeather: (Double, Double) -> Unit,
+) {
+    val context = LocalContext.current
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) requestWeatherLocation(context, refreshWeather)
+    }
+    LaunchedEffect(state.selectedPotId) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            requestWeatherLocation(context, refreshWeather)
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
     val snap = state.snapshot
     val metrics = dashboardMetrics(state)
     var speciesDialog by rememberSaveable { mutableStateOf(false) }
@@ -986,7 +1001,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                     DashboardMetricCard(
                         iconKind = "sun",
                         iconColor = Sun,
-                        title = "环境光照",
+                        title = "室内光照",
                         value = snap?.telemetry?.lightLux?.let(::compactMetricValue) ?: "--",
                         unit = "lux",
                         status = lightLabel(snap?.evaluated?.lightStatus),
@@ -1003,6 +1018,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                     )
                 }
             }
+            item { TodayEnvironmentCard(state) }
             item { CompanionScoreCard(metrics) }
             item {
                 Row(
@@ -1018,6 +1034,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
                     )
                     DashboardAttentionCard(
                         snap,
+                        state.careOverview?.weather,
                         Modifier.weight(1f).fillMaxHeight(),
                         compact = true,
                     )
@@ -1025,11 +1042,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
             }
             item {
                 DashboardAdviceCard(
-                    listOfNotNull(
-                        snap?.evaluated?.soilAdvice,
-                        snap?.evaluated?.lightAdvice,
-                        snap?.pot?.species?.knowledge,
-                    ),
+                    speciesCareAdvice(snap),
                 )
             }
         }
@@ -1585,8 +1598,8 @@ private fun TrendLegend(color: Color, label: String) {
 @Composable
 private fun DashboardAdviceCard(lines: List<String>, modifier: Modifier = Modifier) {
     DashboardTextCard(
-        title = "位置与养护建议",
-        lines = lines.filter(String::isNotBlank).distinct().take(3).ifEmpty { listOf("正在等待实时数据生成养护建议") },
+        title = "养护建议",
+        lines = lines.filter(String::isNotBlank).distinct().take(3).ifEmpty { listOf("正在等待植物品种档案") },
         warning = false,
         modifier = modifier,
     )
@@ -1595,21 +1608,88 @@ private fun DashboardAdviceCard(lines: List<String>, modifier: Modifier = Modifi
 @Composable
 private fun DashboardAttentionCard(
     snapshot: PotSnapshot?,
+    weather: CareWeather?,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
 ) {
-    val attentionLines = buildList {
-        if (snapshot != null && !snapshot.online) add("设备当前离线，请检查网络连接")
-        addAll(snapshot?.activeAlerts.orEmpty().map { it.message })
-    }.distinct().take(4)
+    val attentionLines = currentAttentionLines(snapshot, weather)
     DashboardTextCard(
         title = "需要关注",
-        lines = attentionLines.ifEmpty { listOf("各项指标正常，继续保持今天的养护节奏") },
-        warning = attentionLines.isNotEmpty(),
+        lines = attentionLines,
+        warning = snapshot?.online == false ||
+            snapshot?.evaluated?.soilStatus in setOf(SoilStatus.TOO_DRY, SoilStatus.TOO_WET) ||
+            snapshot?.evaluated?.lightStatus in setOf(LightStatus.DARK, LightStatus.TOO_STRONG),
         modifier = modifier,
         compact = compact,
         fillContainer = compact,
     )
+}
+
+private fun speciesCareAdvice(snapshot: PotSnapshot?): List<String> {
+    val species = snapshot?.pot?.species ?: return emptyList()
+    val thresholds = species.thresholds
+    return listOf(
+        "${species.chineseName}适宜土壤湿度 ${thresholds.soilMinPercent}-${thresholds.soilMaxPercent}%，浇水前先确认表土干湿。",
+        "适宜室内光照 ${thresholds.lightMinLux}-${thresholds.lightMaxLux} lux，优先保持稳定的散射光环境。",
+        species.knowledge,
+    )
+}
+
+private fun currentAttentionLines(snapshot: PotSnapshot?, weather: CareWeather?): List<String> {
+    if (snapshot == null) return listOf("正在等待室内环境和室外天气数据")
+    if (!snapshot.online) return listOf("设备当前离线，暂时无法综合室内环境，请检查网络连接")
+
+    val telemetry = snapshot.telemetry ?: return listOf("正在等待室内光照和土壤湿度数据")
+    val evaluated = snapshot.evaluated ?: return listOf("正在分析当前室内环境")
+    val outdoor = weather?.let {
+        buildString {
+            append("室外")
+            append(it.condition)
+            it.temperatureC?.let { value -> append(" ${value.roundToInt()}°C") }
+            it.relativeHumidityPercent?.let { value -> append("、湿度 $value%") }
+        }
+    } ?: "室外天气待更新"
+    val indoorLight = when (evaluated.lightStatus) {
+        LightStatus.DARK -> "室内光照不足"
+        LightStatus.DIFFUSE -> "室内光照适宜"
+        LightStatus.TOO_STRONG -> "室内光照过强"
+        LightStatus.UNKNOWN -> "室内光照待确认"
+    }
+    val soil = when (evaluated.soilStatus) {
+        SoilStatus.TOO_DRY -> "土壤偏干"
+        SoilStatus.SUITABLE -> "土壤湿度适宜"
+        SoilStatus.TOO_WET -> "土壤偏湿"
+        SoilStatus.UNKNOWN -> "土壤湿度待确认"
+    }
+
+    return buildList {
+        add("$indoorLight（${compactMetricValue(telemetry.lightLux)} lux），$soil（${telemetry.soilPercent}%）；$outdoor。")
+        when {
+            evaluated.soilStatus == SoilStatus.TOO_WET &&
+                (weather?.relativeHumidityPercent ?: 0) >= 75 ->
+                add("室内盆土偏湿且室外湿度较高，先暂停浇水并加强通风。")
+            evaluated.soilStatus == SoilStatus.TOO_DRY &&
+                (weather?.temperatureC ?: 0.0) >= 28.0 ->
+                add("室内盆土偏干且室外温度较高，请及时检查并补水。")
+            evaluated.soilStatus == SoilStatus.TOO_DRY ->
+                add("当前盆土偏干，请结合盆土触感安排浇水。")
+            evaluated.soilStatus == SoilStatus.TOO_WET ->
+                add("当前盆土偏湿，暂缓浇水并避免积水。")
+        }
+        when {
+            evaluated.lightStatus == LightStatus.DARK &&
+                weather?.condition?.contains("雨") == true ->
+                add("室内缺光且室外有雨，优先使用补光灯，不建议移到露天。")
+            evaluated.lightStatus == LightStatus.DARK ->
+                add("当前室内光照不足，可移近明亮窗边或开启补光。")
+            evaluated.lightStatus == LightStatus.TOO_STRONG &&
+                (weather?.temperatureC ?: 0.0) >= 28.0 ->
+                add("室内光照过强且室外温度较高，请遮阴并远离暴晒窗边。")
+            evaluated.lightStatus == LightStatus.TOO_STRONG ->
+                add("当前室内光照过强，请调整到明亮散射光位置。")
+        }
+        if (size == 1) add("当前室内光照和土壤湿度均适宜，无需额外处理。")
+    }.distinct().take(3)
 }
 
 @Composable
@@ -1649,19 +1729,8 @@ private fun CareScreen(
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
-    refreshWeather: (Double, Double) -> Unit,
 ) {
     val context = LocalContext.current
-    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) requestWeatherLocation(context, refreshWeather)
-    }
-    LaunchedEffect(state.selectedPotId) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            requestWeatherLocation(context, refreshWeather)
-        } else {
-            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
-        }
-    }
     var note by rememberSaveable { mutableStateOf("") }
     var timelineExpanded by remember(state.selectedPotId) { mutableStateOf(false) }
     var diariesExpanded by rememberSaveable { mutableStateOf(false) }
@@ -1785,7 +1854,6 @@ private fun CareScreen(
                     speakDiary = speakDiary,
                 )
             }
-            item { TodayEnvironmentCard(state) }
         }
     }
 }
@@ -3402,6 +3470,7 @@ private fun CompanionScreen(
     removePomodoro: () -> Unit,
     startPomodoroTimer: () -> Unit,
     pausePomodoroTimer: () -> Unit,
+    exitPomodoroTimer: () -> Unit,
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var memory by rememberSaveable { mutableStateOf("") }
@@ -3548,6 +3617,7 @@ private fun CompanionScreen(
                     removePomodoro = removePomodoro,
                     startPomodoroTimer = startPomodoroTimer,
                     pausePomodoroTimer = pausePomodoroTimer,
+                    exitPomodoroTimer = exitPomodoroTimer,
                 )
             }
         }
@@ -4167,6 +4237,7 @@ private fun CompanionFocusCard(
     removePomodoro: () -> Unit,
     startPomodoroTimer: () -> Unit,
     pausePomodoroTimer: () -> Unit,
+    exitPomodoroTimer: () -> Unit,
 ) {
     val today = state.careOverview?.focus ?: state.focusDaily.lastOrNull()
     val count = today?.pomodoroCount ?: 0
@@ -4208,22 +4279,33 @@ private fun CompanionFocusCard(
                 statusText = if (timerRunning) "专注中..." else if (remainingSeconds < sessionSeconds) "已暂停" else "准备专注",
                 modifier = Modifier.size(168.dp),
             )
-            PixelButton(
-                onClick = {
-                    if (timerRunning) {
-                        pausePomodoroTimer()
-                    } else {
-                        startPomodoroTimer()
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                PixelButton(
+                    onClick = {
+                        if (timerRunning) {
+                            pausePomodoroTimer()
+                        } else {
+                            startPomodoroTimer()
+                        }
+                    },
+                    modifier = Modifier.width(112.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                ) {
+                    Text(
+                        if (timerRunning) "暂停" else if (remainingSeconds < sessionSeconds) "继续" else "开始",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (timerRunning || remainingSeconds < sessionSeconds) {
+                    PixelTextButton(
+                        onClick = exitPomodoroTimer,
+                        danger = true,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("退出", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     }
-                },
-                modifier = Modifier.width(112.dp),
-                contentPadding = PaddingValues(vertical = 8.dp),
-            ) {
-                Text(
-                    if (timerRunning) "暂停" else if (remainingSeconds < sessionSeconds) "继续" else "开始",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                }
             }
             HorizontalDivider(color = CardBorder)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
