@@ -8,6 +8,9 @@ val defaultServerUrl = providers.gradleProperty("SMART_POT_SERVER_URL").orElse("
 val demoToken = providers.gradleProperty("SMART_POT_DEMO_TOKEN")
     .orElse(providers.environmentVariable("SMART_POT_DEMO_TOKEN"))
     .orElse("smart-pot-demo-token")
+val debugDeviceIp = providers.gradleProperty("SMART_POT_DEBUG_DEVICE_IP")
+    .orElse(providers.environmentVariable("SMART_POT_DEBUG_DEVICE_IP"))
+    .orElse("")
 
 fun String.asBuildConfigString() = "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
@@ -35,6 +38,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_SERVER_URL", defaultServerUrl.get().trimEnd('/').asBuildConfigString())
         buildConfigField("String", "DEMO_TOKEN", demoToken.get().requireBearerToken68().asBuildConfigString())
+        buildConfigField("String", "DEBUG_DEVICE_IP", debugDeviceIp.get().trim().asBuildConfigString())
     }
 
     buildFeatures {

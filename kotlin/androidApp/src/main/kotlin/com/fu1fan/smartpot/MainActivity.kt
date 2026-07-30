@@ -17,7 +17,7 @@ import com.fu1fan.smartpot.ui.SmartPotViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-    private val viewModel by viewModels<SmartPotViewModel> { SmartPotViewModel.Factory }
+    private val viewModel by viewModels<SmartPotViewModel>()
     private val permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
     private val notified = mutableSetOf<String>()
 

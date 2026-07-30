@@ -1,7 +1,8 @@
 package com.fu1fan.smartpot.ui
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
+import android.app.Application
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fu1fan.smartpot.BuildConfig
 import com.fu1fan.smartpot.data.SmartPotApi
@@ -18,11 +19,18 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.net.NetworkInterface
+import java.util.Collections
 import kotlin.math.round
 import kotlin.math.roundToInt
 
 data class SmartPotUiState(
     val loading: Boolean = true,
+    val inviteRequired: Boolean = false,
+    val inviteSubmitting: Boolean = false,
+    val userName: String = "主人",
+    val userId: String = "",
+    val userAvatarDataUrl: String? = null,
     val potsLoaded: Boolean = false,
     val species: List<PlantSpecies> = emptyList(),
     val pots: List<PotProfile> = emptyList(),
@@ -45,17 +53,46 @@ data class SmartPotUiState(
     val error: String? = null,
 )
 
-class SmartPotViewModel : ViewModel() {
-    private var accessToken = BuildConfig.DEMO_TOKEN
+class SmartPotViewModel(application: Application) : AndroidViewModel(application) {
+    private val sessionPreferences = application.getSharedPreferences("smart_pot_session", Context.MODE_PRIVATE)
+    private val debugDeviceBypass =
+        BuildConfig.DEBUG_DEVICE_IP.isNotBlank() &&
+            hasLocalNetworkAddress(BuildConfig.DEBUG_DEVICE_IP)
+    private val storedSessionToken = sessionPreferences.getString(SessionTokenKey, null)
+    private val storedSessionExpiresAt = sessionPreferences.getString(SessionExpiresAtKey, null)
+    private val storedUserName = sessionPreferences.getString(UserNameKey, null)?.trim().orEmpty().ifBlank { "主人" }
+    private val storedUserId = sessionPreferences.getString(UserIdKey, null)?.trim().orEmpty()
+    private val storedUserAvatar = sessionPreferences.getString(UserAvatarKey, null)?.takeIf(String::isNotBlank)
+    private val storedSessionValid =
+        !storedSessionToken.isNullOrBlank() &&
+            storedSessionExpiresAt
+                ?.let { expiry -> runCatching { Instant.parse(expiry).isAfter(Instant.now()) }.getOrDefault(false) }
+                ?: false
+    private var accessToken =
+        if (debugDeviceBypass) BuildConfig.DEMO_TOKEN else storedSessionToken?.takeIf { storedSessionValid } ?: BuildConfig.DEMO_TOKEN
     private val api = SmartPotApi(BuildConfig.DEFAULT_SERVER_URL) { accessToken }
-    private val mutableState = MutableStateFlow(SmartPotUiState())
+    private val mutableState = MutableStateFlow(
+        SmartPotUiState(
+            loading = debugDeviceBypass || storedSessionValid,
+            inviteRequired = !debugDeviceBypass && !storedSessionValid,
+            userName = storedUserName,
+            userId = storedUserId,
+            userAvatarDataUrl = storedUserAvatar,
+        ),
+    )
     val state: StateFlow<SmartPotUiState> = mutableState.asStateFlow()
     private var realtimeJob: Job? = null
     private var weatherLocation: Pair<Double, Double>? = null
 
-    init { bootstrap() }
+    init {
+        if (storedSessionToken != null && !storedSessionValid) {
+            sessionPreferences.edit().remove(SessionTokenKey).remove(SessionExpiresAtKey).apply()
+        }
+        if (!mutableState.value.inviteRequired) bootstrap()
+    }
 
     fun bootstrap() {
+        if (mutableState.value.inviteRequired) return
         viewModelScope.launch {
             mutableState.update { it.copy(loading = true, error = null) }
             val pots = runCatching { api.pots() }.getOrElse { error ->
@@ -378,14 +415,35 @@ class SmartPotViewModel : ViewModel() {
 
     fun createShare() = withPot { id -> mutableState.update { it.copy(shareCode = api.share(id)) } }
 
-    fun redeemShare(code: String, actor: String) = launchAction {
-        val session = api.redeem(code.trim(), actor.trim())
-        accessToken = session.token
-        mutableState.value = SmartPotUiState(loading = true, selectedPotId = session.potId)
-        val species = api.species()
-        val pots = api.pots()
-        mutableState.update { it.copy(species = species, pots = pots, potsLoaded = true, loading = false) }
-        selectPot(session.potId)
+    fun redeemInvite(code: String) {
+        val normalized = code.trim()
+        if (normalized.length != 6) {
+            mutableState.update { it.copy(error = "请输入 6 位邀请码") }
+            return
+        }
+        redeemShareSession(normalized, mutableState.value.userName, showInviteProgress = true)
+    }
+
+    fun redeemShare(code: String, actor: String) =
+        redeemShareSession(code.trim(), actor.trim(), showInviteProgress = false)
+
+    fun saveUserProfile(name: String, userId: String, avatarDataUrl: String?) {
+        val normalizedName = name.trim().take(20).ifBlank { "主人" }
+        val normalizedUserId = userId.trim().take(32)
+        sessionPreferences.edit()
+            .putString(UserNameKey, normalizedName)
+            .putString(UserIdKey, normalizedUserId)
+            .apply {
+                if (avatarDataUrl.isNullOrBlank()) remove(UserAvatarKey) else putString(UserAvatarKey, avatarDataUrl)
+            }
+            .apply()
+        mutableState.update {
+            it.copy(
+                userName = normalizedName,
+                userId = normalizedUserId,
+                userAvatarDataUrl = avatarDataUrl?.takeIf(String::isNotBlank),
+            )
+        }
     }
 
     fun clearError() = mutableState.update { it.copy(error = null) }
@@ -397,6 +455,53 @@ class SmartPotViewModel : ViewModel() {
 
     private fun launchAction(action: suspend () -> Unit) = viewModelScope.launch {
         runCatching { action() }.onFailure(::fail)
+    }
+
+    private fun redeemShareSession(code: String, actor: String, showInviteProgress: Boolean) {
+        if (code.isBlank()) return
+        viewModelScope.launch {
+            if (showInviteProgress) {
+                mutableState.update { it.copy(inviteSubmitting = true, error = null) }
+            }
+            runCatching {
+                val session = api.redeem(code, actor.ifBlank { "共享伙伴" })
+                accessToken = session.token
+                sessionPreferences.edit()
+                    .putString(SessionTokenKey, session.token)
+                    .putString(SessionExpiresAtKey, session.expiresAt)
+                    .apply()
+                realtimeJob?.cancel()
+                mutableState.value = SmartPotUiState(
+                    loading = true,
+                    inviteRequired = false,
+                    inviteSubmitting = false,
+                    userName = mutableState.value.userName,
+                    userId = mutableState.value.userId,
+                    userAvatarDataUrl = mutableState.value.userAvatarDataUrl,
+                    selectedPotId = session.potId,
+                )
+                val species = api.species()
+                val pots = api.pots()
+                mutableState.update {
+                    it.copy(
+                        species = species,
+                        pots = pots,
+                        potsLoaded = true,
+                        loading = false,
+                        error = null,
+                    )
+                }
+                selectPot(session.potId)
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        loading = false,
+                        inviteSubmitting = false,
+                        error = error.message ?: "邀请码无效或已过期",
+                    )
+                }
+            }
+        }
     }
 
     private fun fail(error: Throwable) {
@@ -475,12 +580,21 @@ class SmartPotViewModel : ViewModel() {
     override fun onCleared() { api.close() }
 
     companion object {
-        val Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = SmartPotViewModel() as T
-        }
+        private const val SessionTokenKey = "share_session_token"
+        private const val SessionExpiresAtKey = "share_session_expires_at"
+        private const val UserNameKey = "user_name"
+        private const val UserIdKey = "user_id"
+        private const val UserAvatarKey = "user_avatar_data_url"
     }
 }
+
+private fun hasLocalNetworkAddress(expectedAddress: String): Boolean = runCatching {
+    Collections.list(NetworkInterface.getNetworkInterfaces()).any { networkInterface ->
+        Collections.list(networkInterface.inetAddresses).any { address ->
+            address.hostAddress?.substringBefore('%') == expectedAddress
+        }
+    }
+}.getOrDefault(false)
 
 internal fun scheduleDisplayTime(dueAt: Instant, timezone: String): String {
     val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))

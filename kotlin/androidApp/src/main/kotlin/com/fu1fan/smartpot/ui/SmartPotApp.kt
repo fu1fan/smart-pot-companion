@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -140,7 +142,9 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
             topBar = {
             },
             bottomBar = {
-                PixelBottomBar(tab) { tab = it }
+                if (!state.inviteRequired && state.potsLoaded && state.pots.isNotEmpty()) {
+                    PixelBottomBar(tab) { tab = it }
+                }
             },
             snackbarHost = {
                 state.error?.let { error -> Snackbar(action = { PixelTextButton(onClick = viewModel::clearError) { Text("知道了") } }) { Text(error) } }
@@ -148,6 +152,11 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when {
+                    state.inviteRequired -> InviteGateScreen(
+                        error = state.error,
+                        submitting = state.inviteSubmitting,
+                        onRedeem = viewModel::redeemInvite,
+                    )
                     state.loading && !state.potsLoaded -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                     !state.potsLoaded -> ConnectionRetryScreen(state.error, viewModel::bootstrap)
                     state.pots.isEmpty() -> SetupScreen(state.species, viewModel::createPot, viewModel::redeemShare)
@@ -171,8 +180,74 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::toggleSchedule,
                         viewModel::recordPomodoro,
                         viewModel::removePomodoro,
+                        { viewModel.control(DeviceControlRequest(DeviceCommandType.START_POMODORO)) },
                     )
-                    else -> ControlScreen(state, viewModel::control, viewModel::createShare, viewModel::redeemShare)
+                    else -> ControlScreen(
+                        state,
+                        viewModel::control,
+                        viewModel::createShare,
+                        viewModel::saveUserProfile,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InviteGateScreen(
+    error: String?,
+    submitting: Boolean,
+    onRedeem: (String) -> Unit,
+) {
+    var code by rememberSaveable { mutableStateOf("") }
+    Box(Modifier.fillMaxSize()) {
+        Image(
+            painter = painterResource(R.drawable.home_page_background),
+            contentDescription = null,
+            modifier = Modifier.matchParentSize(),
+            contentScale = ContentScale.Crop,
+        )
+        PixelPanel(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(horizontal = 28.dp)
+                .fillMaxWidth(),
+            fill = Color(0xFFFFFDF5),
+            edge = CardBorder,
+            showCornerBolts = false,
+            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 24.dp),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("加入共享盆栽", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text(
+                    "输入主人提供的 6 位邀请码后，即可和 ESP 一起照顾小麦。",
+                    color = Muted,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
+                PixelTextField(
+                    value = code,
+                    onValueChange = { value -> code = value.filter(Char::isDigit).take(6) },
+                    label = "邀请码",
+                    placeholder = "请输入 6 位邀请码",
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    enabled = !submitting,
+                )
+                error?.let {
+                    Text(it, color = PixelDanger, fontSize = 12.sp, textAlign = TextAlign.Center)
+                }
+                PixelButton(
+                    onClick = { onRedeem(code) },
+                    enabled = code.length == 6 && !submitting,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (submitting) "正在验证..." else "验证并加入")
                 }
             }
         }
@@ -879,6 +954,7 @@ private fun DashboardScreen(state: SmartPotUiState, updateSpecies: (String) -> U
             item {
                 DashboardHero(
                     pot = pot,
+                    userName = state.userName,
                     online = snap?.online == true,
                     metrics = metrics,
                     canEditSpecies = pot != null && state.species.isNotEmpty(),
@@ -993,6 +1069,7 @@ private fun HomeReferenceBackground(modifier: Modifier = Modifier) {
 @Composable
 private fun DashboardHero(
     pot: PotProfile?,
+    userName: String,
     online: Boolean,
     metrics: DashboardMetrics,
     canEditSpecies: Boolean,
@@ -1019,7 +1096,7 @@ private fun DashboardHero(
                 .padding(start = 8.dp, top = 6.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            PixelTitleSign("你好，主人", Modifier.width(194.dp), compact = true)
+            PixelTitleSign("你好，${userName.ifBlank { "主人" }}", Modifier.width(194.dp), compact = true)
             Column(
                 Modifier
                     .width(196.dp)
@@ -2613,18 +2690,112 @@ private fun EnvironmentStat(title: String, value: String, modifier: Modifier = M
 }
 
 @Composable
+private fun UserProfileDialog(
+    initialName: String,
+    initialUserId: String,
+    initialAvatarDataUrl: String?,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String?) -> Unit,
+) {
+    val context = LocalContext.current
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    var userId by remember(initialUserId) { mutableStateOf(initialUserId) }
+    var avatarDataUrl by remember(initialAvatarDataUrl) { mutableStateOf(initialAvatarDataUrl) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) encodeAvatarImage(context, uri)?.let { avatarDataUrl = it }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        PixelPanel(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 350.dp).wrapContentHeight(),
+            fill = Color(0xFFFFFBF0),
+            edge = CardBorder,
+            showCornerBolts = false,
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("用户资料", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    PixelTextButton(onClick = onDismiss) { Text("关闭") }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    CompanionChatAvatar(
+                        fromUser = true,
+                        avatarDataUrl = avatarDataUrl,
+                        modifier = Modifier.size(78.dp),
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        PixelOutlinedButton(
+                            onClick = { avatarPicker.launch("image/*") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(if (avatarDataUrl == null) "选择头像" else "更换头像")
+                        }
+                        if (avatarDataUrl != null) {
+                            PixelTextButton(
+                                onClick = { avatarDataUrl = null },
+                                modifier = Modifier.align(Alignment.End),
+                            ) {
+                                Text("移除头像", color = PixelDanger)
+                            }
+                        }
+                    }
+                }
+                PixelTextField(
+                    value = name,
+                    onValueChange = { name = it.take(12) },
+                    label = "昵称",
+                    placeholder = "请输入昵称",
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                PixelTextField(
+                    value = userId,
+                    onValueChange = { userId = it.take(32) },
+                    label = "用户 ID",
+                    placeholder = "设置便于识别的 ID",
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Text("昵称会用于首页问候；头像会显示在你与小麦的对话中。", color = Muted, fontSize = 10.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    PixelOutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                        Text("取消")
+                    }
+                    PixelButton(
+                        onClick = { onSave(name, userId, avatarDataUrl) },
+                        enabled = name.isNotBlank(),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("保存")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ControlScreen(
     state: SmartPotUiState,
     control: (DeviceControlRequest) -> Unit,
     createShare: () -> Unit,
-    redeem: (String, String) -> Unit,
+    saveUserProfile: (String, String, String?) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
     var projectionMode by rememberSaveable { mutableStateOf<String?>(null) }
     var lightExpanded by rememberSaveable { mutableStateOf(false) }
     var shareExpanded by rememberSaveable { mutableStateOf(false) }
     var settingsExpanded by rememberSaveable { mutableStateOf(false) }
-    var share by rememberSaveable { mutableStateOf("") }
+    var userProfileVisible by rememberSaveable { mutableStateOf(false) }
     val reportedBrightness = state.snapshot?.deviceState?.brightnessPercent ?: 70
     val reportedVolume = state.snapshot?.deviceState?.volumePercent ?: 60
     var brightness by remember(reportedBrightness) { mutableFloatStateOf(reportedBrightness.toFloat()) }
@@ -2638,6 +2809,18 @@ private fun ControlScreen(
     val offStartMinute = parseMinuteOfDay(offStartText)
     val offEndMinute = parseMinuteOfDay(offEndText)
     val offPeriodValid = offStartMinute != null && offEndMinute != null && offStartMinute != offEndMinute
+    if (userProfileVisible) {
+        UserProfileDialog(
+            initialName = state.userName,
+            initialUserId = state.userId,
+            initialAvatarDataUrl = state.userAvatarDataUrl,
+            onDismiss = { userProfileVisible = false },
+            onSave = { name, userId, avatar ->
+                saveUserProfile(name, userId, avatar)
+                userProfileVisible = false
+            },
+        )
+    }
 
     Box(Modifier.fillMaxSize()) {
         Image(
@@ -2667,16 +2850,17 @@ private fun ControlScreen(
                         text = ""
                     },
                     onSendEmoji = { emojiId -> control(DeviceControlRequest(DeviceCommandType.SHOW_CONTENT, emojiId = emojiId, durationSeconds = 2)) },
+                    onRemoteTouch = { control(DeviceControlRequest(DeviceCommandType.REMOTE_TOUCH)) },
                 )
             }
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.fillMaxWidth().aspectRatio(3.2f).clip(RoundedCornerShape(14.dp))) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(2.944f)) {
                         Image(
                             painter = painterResource(R.drawable.control_light_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.FillBounds,
                         )
                         Row(
                             Modifier
@@ -2688,7 +2872,7 @@ private fun ControlScreen(
                             Column(Modifier.weight(1f)) {
                                 Text("植物补光", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
                                 Text(
-                                    "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"} · 标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
+                                    "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"}\n标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
                                     color = Muted,
                                     fontSize = 9.sp,
                                     maxLines = 2,
@@ -2798,15 +2982,14 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(3.35f)
-                            .clip(RoundedCornerShape(14.dp))
+                            .aspectRatio(2.926f)
                             .clickable { shareExpanded = !shareExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_share_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.FillBounds,
                         )
                         Column(
                             Modifier
@@ -2827,8 +3010,6 @@ private fun ControlScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 PixelButton(onClick = createShare, modifier = Modifier.fillMaxWidth()) { Text("生成临时分享码") }
                                 state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", color = Leaf, fontWeight = FontWeight.SemiBold, fontSize = 11.sp) }
-                                PixelTextField(share, { share = it.take(12) }, label = "输入分享码", modifier = Modifier.fillMaxWidth(), singleLine = true)
-                                PixelOutlinedButton(onClick = { redeem(share, "共享伙伴") }, enabled = share.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("加入盆栽") }
                             }
                         }
                     }
@@ -2839,23 +3020,22 @@ private fun ControlScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(3.35f)
-                            .clip(RoundedCornerShape(14.dp))
+                            .aspectRatio(2.926f)
                             .clickable { settingsExpanded = !settingsExpanded },
                     ) {
                         Image(
                             painter = painterResource(R.drawable.control_settings_header),
                             contentDescription = null,
                             modifier = Modifier.matchParentSize(),
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.FillBounds,
                         )
                         Column(
                             Modifier
                                 .align(Alignment.CenterStart)
-                                .padding(start = 84.dp, end = 116.dp),
+                                .padding(start = 84.dp, end = 104.dp),
                         ) {
                             Text("更多设置", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
-                            Text("触摸互动、屏幕休眠、设备重启", color = Muted, fontSize = 10.sp)
+                            Text("用户资料、屏幕休眠、设备重启", color = Muted, fontSize = 9.sp, maxLines = 1)
                         }
                     }
                     if (settingsExpanded) {
@@ -2866,7 +3046,7 @@ private fun ControlScreen(
                             showCornerBolts = false,
                         ) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                PixelButton(onClick = { control(DeviceControlRequest(DeviceCommandType.REMOTE_TOUCH)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("隔空触摸", fontSize = 11.sp) }
+                                PixelButton(onClick = { userProfileVisible = true }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("用户", fontSize = 11.sp) }
                                 PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SET_STANDBY, standby = true)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("休眠屏幕", fontSize = 11.sp) }
                                 PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.RESTART)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("重启设备", fontSize = 11.sp) }
                             }
@@ -2915,7 +3095,9 @@ private fun ControlDeviceStatusCard(state: SmartPotUiState) {
         Image(
             painter = painterResource(R.drawable.control_status_background),
             contentDescription = null,
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier
+                .matchParentSize()
+                .scale(scaleX = 1.04f, scaleY = 1f),
             contentScale = ContentScale.Crop,
         )
         Column(
@@ -2941,6 +3123,7 @@ private fun ControlProjectionCard(
     onTextChange: (String) -> Unit,
     onSendText: () -> Unit,
     onSendEmoji: (String) -> Unit,
+    onRemoteTouch: () -> Unit,
 ) {
     val emojis = listOf("heart", "smile", "happy", "thirsty", "dark", "weak", "wave", "star", "flower", "water", "sun", "sleep")
     PixelPanel(
@@ -2950,9 +3133,16 @@ private fun ControlProjectionCard(
         showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("↗", color = BrightLeaf, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text("快捷投送", modifier = Modifier.padding(start = 7.dp), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Spacer(Modifier.weight(1f))
+                PixelOutlinedButton(
+                    onClick = onRemoteTouch,
+                    contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
+                ) {
+                    Text("隔空触摸", fontSize = 11.sp)
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ControlActionTile("text", "发送文字", "发送到 ESP 屏幕", mode == "text", Modifier.weight(1f)) { onModeChange("text") }
@@ -3209,6 +3399,7 @@ private fun CompanionScreen(
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
     recordPomodoro: () -> Unit,
     removePomodoro: () -> Unit,
+    startDevicePomodoro: () -> Unit,
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     var memory by rememberSaveable { mutableStateOf("") }
@@ -3348,7 +3539,7 @@ private fun CompanionScreen(
                     toggleSchedule = toggleSchedule,
                 )
             }
-            item { CompanionFocusCard(state, recordPomodoro, removePomodoro) }
+            item { CompanionFocusCard(state, recordPomodoro, removePomodoro, startDevicePomodoro) }
         }
     }
 }
@@ -3532,7 +3723,13 @@ private fun CompanionChatCard(
                         Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(messageScrollState),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        messages.forEach { message -> CompanionChatBubble(message, zone) }
+                        messages.forEach { message ->
+                            CompanionChatBubble(
+                                message = message,
+                                zone = zone,
+                                userAvatarDataUrl = state.userAvatarDataUrl,
+                            )
+                        }
                     }
                 }
             }
@@ -3551,7 +3748,11 @@ private fun CompanionChatCard(
 }
 
 @Composable
-private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
+private fun CompanionChatBubble(
+    message: ChatMessage,
+    zone: ZoneId,
+    userAvatarDataUrl: String?,
+) {
     val fromUser = message.role == ChatRole.USER
     val bubbleColor = if (fromUser) Color(0xFFDDECCB) else Color(0xFFFFFDF4)
     val bubbleEdge = if (fromUser) Color(0xFFC5DCA9) else CardBorder
@@ -3561,7 +3762,7 @@ private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
         verticalAlignment = Alignment.Top,
     ) {
         if (!fromUser) {
-            CompanionChatAvatar(fromUser = false, Modifier.size(42.dp))
+            CompanionChatAvatar(fromUser = false, modifier = Modifier.size(42.dp))
             Spacer(Modifier.width(5.dp))
             ChatBubbleTail(fromUser = false, fill = bubbleColor, edge = bubbleEdge)
         }
@@ -3584,7 +3785,11 @@ private fun CompanionChatBubble(message: ChatMessage, zone: ZoneId) {
         if (fromUser) {
             ChatBubbleTail(fromUser = true, fill = bubbleColor, edge = bubbleEdge)
             Spacer(Modifier.width(5.dp))
-            CompanionChatAvatar(fromUser = true, Modifier.size(42.dp))
+            CompanionChatAvatar(
+                fromUser = true,
+                avatarDataUrl = userAvatarDataUrl,
+                modifier = Modifier.size(42.dp),
+            )
         }
     }
 }
@@ -3620,7 +3825,11 @@ private fun CompanionHeaderSproutIcon(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CompanionChatAvatar(fromUser: Boolean, modifier: Modifier = Modifier) {
+private fun CompanionChatAvatar(
+    fromUser: Boolean,
+    avatarDataUrl: String? = null,
+    modifier: Modifier = Modifier,
+) {
     if (!fromUser) {
         Box(modifier, contentAlignment = Alignment.Center) {
             Canvas(Modifier.matchParentSize()) {
@@ -3635,6 +3844,20 @@ private fun CompanionChatAvatar(fromUser: Boolean, modifier: Modifier = Modifier
                 alignment = Alignment.Center,
             )
         }
+        return
+    }
+    val avatarBitmap = remember(avatarDataUrl) {
+        avatarDataUrl?.takeIf(String::isNotBlank)?.let(::decodeDiaryPhoto)
+    }
+    if (avatarBitmap != null) {
+        Image(
+            bitmap = avatarBitmap.asImageBitmap(),
+            contentDescription = "用户头像",
+            modifier = modifier
+                .clip(CircleShape)
+                .border(1.dp, CardBorder, CircleShape),
+            contentScale = ContentScale.Crop,
+        )
         return
     }
     Canvas(modifier) {
@@ -3928,7 +4151,12 @@ private fun scheduleSelectionText(dueAt: Instant?, timezone: String): String {
 }
 
 @Composable
-private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Unit, removePomodoro: () -> Unit) {
+private fun CompanionFocusCard(
+    state: SmartPotUiState,
+    recordPomodoro: () -> Unit,
+    removePomodoro: () -> Unit,
+    startDevicePomodoro: () -> Unit,
+) {
     val today = state.careOverview?.focus ?: state.focusDaily.lastOrNull()
     val count = today?.pomodoroCount ?: 0
     val minutes = today?.focusMinutes ?: 0
@@ -3991,6 +4219,9 @@ private fun CompanionFocusCard(state: SmartPotUiState, recordPomodoro: () -> Uni
                         timerRunning = false
                         timerEndEpochMs = 0L
                     } else {
+                        if (remainingSeconds == sessionSeconds) {
+                            startDevicePomodoro()
+                        }
                         timerEndEpochMs = System.currentTimeMillis() + remainingSeconds * 1000L
                         timerRunning = true
                     }
@@ -4151,6 +4382,34 @@ private fun encodeDiaryPhoto(context: Context, uri: Uri): String? = runCatching 
     }
     if (outputBitmap !== decoded) outputBitmap.recycle()
     decoded.recycle()
+    "data:image/jpeg;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
+}.getOrNull()
+
+private fun encodeAvatarImage(context: Context, uri: Uri): String? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > 640 || bounds.outHeight / sampleSize > 640) sampleSize *= 2
+    val decoded = context.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sampleSize })
+    } ?: return@runCatching null
+    val side = minOf(decoded.width, decoded.height)
+    val cropped = Bitmap.createBitmap(
+        decoded,
+        (decoded.width - side) / 2,
+        (decoded.height - side) / 2,
+        side,
+        side,
+    )
+    val scaled = Bitmap.createScaledBitmap(cropped, 320, 320, true)
+    val bytes = ByteArrayOutputStream().use { output ->
+        scaled.compress(Bitmap.CompressFormat.JPEG, 82, output)
+        output.toByteArray()
+    }
+    listOf(scaled, cropped, decoded)
+        .distinctBy { System.identityHashCode(it) }
+        .forEach { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
     "data:image/jpeg;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
 }.getOrNull()
 

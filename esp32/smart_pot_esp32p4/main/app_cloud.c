@@ -438,6 +438,8 @@ static void handle_command(const char *json)
     } else if (strcmp(type->valuestring, "REMOTE_TOUCH") == 0) {
         app_ui_play_remote_touch_reaction();
         publish_event("REMOTE_TOUCH");
+    } else if (strcmp(type->valuestring, "START_POMODORO") == 0) {
+        ok = app_ui_start_pomodoro();
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");
         ok = cJSON_IsString(text);

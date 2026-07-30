@@ -119,6 +119,7 @@ enum class DeviceCommandType {
     SYNC_SCHEDULE,
     SPEAK_TEXT,
     SET_LIGHT_STRIP_CONTROL,
+    START_POMODORO,
 }
 
 @Serializable
