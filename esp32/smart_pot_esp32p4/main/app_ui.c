@@ -935,14 +935,14 @@ static lv_obj_t *make_metric_card(lv_obj_t *parent, int32_t x, int32_t y, const 
         make_leaf(icon, 9, 53, 8, 8, accent);
         make_leaf(icon, 55, 53, 8, 8, accent);
     } else {
-        make_leaf(icon, 13, 14, 26, 26, accent);
-        make_leaf(icon, 34, 14, 26, 26, accent);
-        make_leaf(icon, 20, 28, 34, 32, accent);
-        lv_obj_t *heart_face = lv_label_create(icon);
-        lv_label_set_text(heart_face, "^");
-        lv_obj_set_style_text_font(heart_face, &lv_font_montserrat_18, LV_PART_MAIN);
-        lv_obj_set_style_text_color(heart_face, lv_color_hex(0x5b1f2a), LV_PART_MAIN);
-        lv_obj_align(heart_face, LV_ALIGN_CENTER, 0, 8);
+        /* Cover the heart baked into the static background, then draw a cloud. */
+        lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(icon, lv_color_hex(0x050706), LV_PART_MAIN);
+        make_leaf(icon, 8, 29, 56, 25, accent);
+        make_leaf(icon, 12, 20, 25, 25, accent);
+        make_leaf(icon, 29, 11, 31, 34, accent);
+        make_leaf(icon, 47, 23, 19, 22, accent);
+        lv_obj_clear_flag(icon, LV_OBJ_FLAG_HIDDEN);
     }
 
     lv_obj_t *title_label = lv_label_create(card);
@@ -2361,13 +2361,22 @@ void app_ui_init(void)
 
     make_cat_art(s_face_page);
 
+    lv_obj_t *mood_heart = lv_obj_create(s_face_page);
+    lv_obj_remove_style_all(mood_heart);
+    lv_obj_set_size(mood_heart, 24, 22);
+    lv_obj_align(mood_heart, LV_ALIGN_TOP_LEFT, 16, 80);
+    lv_obj_clear_flag(mood_heart, LV_OBJ_FLAG_SCROLLABLE);
+    make_leaf(mood_heart, 2, 2, 11, 11, lv_color_hex(0xff7f9d));
+    make_leaf(mood_heart, 11, 2, 11, 11, lv_color_hex(0xff7f9d));
+    make_leaf(mood_heart, 6, 8, 12, 12, lv_color_hex(0xff7f9d));
+
     s_face_mood_label = lv_label_create(s_face_page);
     lv_label_set_text(s_face_mood_label, "Mood: happy");
-    lv_obj_set_width(s_face_mood_label, 150);
+    lv_obj_set_width(s_face_mood_label, 130);
     lv_label_set_long_mode(s_face_mood_label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(s_face_mood_label, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_face_mood_label, lv_color_hex(0xffd0c8), LV_PART_MAIN);
-    lv_obj_align(s_face_mood_label, LV_ALIGN_TOP_LEFT, 16, 82);
+    lv_obj_align(s_face_mood_label, LV_ALIGN_TOP_LEFT, 43, 82);
 
     lv_obj_t *humidity_card = make_metric_card(s_face_page, 340, 104, "Humidity",
                                                lv_color_hex(0x86dfff), 0, &s_soil_label);
@@ -2388,11 +2397,11 @@ void app_ui_init(void)
 
     make_metric_card(s_face_page, 340, 288, "Air Quality",
                      lv_color_hex(0x9de2b3), 2, &s_mood_label);
-    lv_label_set_text(s_mood_label, "TVOC: -- ppb\nCO2:  -- ppm");
-    lv_obj_set_width(s_mood_label, 250);
-    lv_obj_set_style_text_font(s_mood_label, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_line_space(s_mood_label, 1, LV_PART_MAIN);
-    lv_obj_align(s_mood_label, LV_ALIGN_TOP_LEFT, 112, 31);
+    lv_label_set_text(s_mood_label, "TVOC: --  CO2: --");
+    lv_obj_set_width(s_mood_label, 260);
+    lv_label_set_long_mode(s_mood_label, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(s_mood_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_align(s_mood_label, LV_ALIGN_TOP_LEFT, 112, 37);
 
     s_voice_label = lv_label_create(s_face_page);
     lv_label_set_text(s_voice_label, "Wake: XiaoMai");
@@ -2835,10 +2844,10 @@ void app_ui_update(const app_plant_state_t *state)
     }
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
     if (state->air_quality_valid) {
-        snprintf(text, sizeof(text), "TVOC: %u ppb\nCO2:  %u ppm",
+        snprintf(text, sizeof(text), "TVOC: %u  CO2: %u",
                  state->tvoc_ppb, state->eco2_ppm);
     } else {
-        snprintf(text, sizeof(text), "TVOC: -- ppb\nCO2:  -- ppm");
+        snprintf(text, sizeof(text), "TVOC: --  CO2: --");
     }
     lv_label_set_text(s_mood_label, text);
     bsp_display_unlock();
