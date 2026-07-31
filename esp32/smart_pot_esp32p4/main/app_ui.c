@@ -73,7 +73,6 @@ static lv_obj_t *s_pomodoro_time_label;
 static lv_obj_t *s_pomodoro_status_label;
 static lv_obj_t *s_soil_bar;
 static lv_obj_t *s_light_bar;
-static lv_obj_t *s_mood_bar;
 static lv_obj_t *s_soil_label;
 static lv_obj_t *s_light_label;
 static lv_obj_t *s_light_unit_label;
@@ -848,36 +847,6 @@ static const char *mood_to_text(app_mood_t mood)
         return "Mood: weak";
     default:
         return "Mood: happy";
-    }
-}
-
-static const char *mood_to_word(app_mood_t mood)
-{
-    switch (mood) {
-    case APP_MOOD_THIRSTY:
-        return "thirsty";
-    case APP_MOOD_DARK:
-        return "dim";
-    case APP_MOOD_WEAK:
-        return "weak";
-    case APP_MOOD_HAPPY:
-    default:
-        return "happy";
-    }
-}
-
-static uint8_t mood_to_percent(app_mood_t mood)
-{
-    switch (mood) {
-    case APP_MOOD_HAPPY:
-        return 92;
-    case APP_MOOD_DARK:
-        return 42;
-    case APP_MOOD_WEAK:
-        return 16;
-    case APP_MOOD_THIRSTY:
-    default:
-        return 28;
     }
 }
 
@@ -2393,8 +2362,12 @@ void app_ui_init(void)
     make_cat_art(s_face_page);
 
     s_face_mood_label = lv_label_create(s_face_page);
-    lv_label_set_text(s_face_mood_label, "");
-    lv_obj_add_flag(s_face_mood_label, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_face_mood_label, "Mood: happy");
+    lv_obj_set_width(s_face_mood_label, 150);
+    lv_label_set_long_mode(s_face_mood_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(s_face_mood_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_face_mood_label, lv_color_hex(0xffd0c8), LV_PART_MAIN);
+    lv_obj_align(s_face_mood_label, LV_ALIGN_TOP_LEFT, 16, 82);
 
     lv_obj_t *humidity_card = make_metric_card(s_face_page, 340, 104, "Humidity",
                                                lv_color_hex(0x86dfff), 0, &s_soil_label);
@@ -2413,11 +2386,13 @@ void app_ui_init(void)
     s_light_bar = make_bar(light_card, 46, lv_color_hex(0xffe46e));
     lv_obj_align(s_light_bar, LV_ALIGN_TOP_LEFT, 218, 46);
 
-    lv_obj_t *mood_card = make_metric_card(s_face_page, 340, 288, "Mood",
-                                           lv_color_hex(0xff9baa), 2, &s_mood_label);
-    lv_label_set_text(s_mood_label, "happy");
-    s_mood_bar = make_bar(mood_card, 46, lv_color_hex(0xff9baa));
-    lv_obj_align(s_mood_bar, LV_ALIGN_TOP_LEFT, 218, 46);
+    make_metric_card(s_face_page, 340, 288, "Air Quality",
+                     lv_color_hex(0x9de2b3), 2, &s_mood_label);
+    lv_label_set_text(s_mood_label, "TVOC: -- ppb\nCO2:  -- ppm");
+    lv_obj_set_width(s_mood_label, 250);
+    lv_obj_set_style_text_font(s_mood_label, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_line_space(s_mood_label, 1, LV_PART_MAIN);
+    lv_obj_align(s_mood_label, LV_ALIGN_TOP_LEFT, 112, 31);
 
     s_voice_label = lv_label_create(s_face_page);
     lv_label_set_text(s_voice_label, "Wake: XiaoMai");
@@ -2859,10 +2834,13 @@ void app_ui_update(const app_plant_state_t *state)
         }
     }
     lv_bar_set_value(s_light_bar, state->light_percent, LV_ANIM_ON);
-    lv_label_set_text(s_mood_label, mood_to_word(state->mood));
-    if (s_mood_bar != NULL) {
-        lv_bar_set_value(s_mood_bar, mood_to_percent(state->mood), LV_ANIM_ON);
+    if (state->air_quality_valid) {
+        snprintf(text, sizeof(text), "TVOC: %u ppb\nCO2:  %u ppm",
+                 state->tvoc_ppb, state->eco2_ppm);
+    } else {
+        snprintf(text, sizeof(text), "TVOC: -- ppb\nCO2:  -- ppm");
     }
+    lv_label_set_text(s_mood_label, text);
     bsp_display_unlock();
 }
 

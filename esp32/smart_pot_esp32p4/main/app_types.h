@@ -19,5 +19,8 @@ typedef struct {
     uint32_t soil_frequency_hz;
     uint32_t soil_adc_raw;
     bool soil_digital_dry;
+    uint16_t tvoc_ppb;
+    uint16_t eco2_ppm;
+    bool air_quality_valid;
     app_mood_t mood;
 } app_plant_state_t;

@@ -29,6 +29,8 @@ data class DeviceTelemetry(
     val soilDigitalDry: Boolean = false,
     val lightLux: Long,
     val lightPercent: Int,
+    val tvocPpb: Int? = null,
+    val eco2Ppm: Int? = null,
     val touchCount: Long,
     val touchActive: Boolean = false,
     val motion: MotionState? = null,

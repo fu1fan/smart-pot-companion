@@ -19,6 +19,7 @@
 
 #include "app_time.h"
 #include "app_tts.h"
+#include "app_ui.h"
 #include "app_board_config.h"
 
 #ifndef CONFIG_SMART_POT_SENSOR_HARDWARE_ENABLE
@@ -55,6 +56,10 @@
 
 #ifndef CONFIG_SMART_POT_BH1750_MAX_LUX
 #define CONFIG_SMART_POT_BH1750_MAX_LUX 1200
+#endif
+
+#ifndef CONFIG_SMART_POT_SGP30_ENABLE
+#define CONFIG_SMART_POT_SGP30_ENABLE 1
 #endif
 
 #ifndef CONFIG_SMART_POT_LIGHT_STRIP_ENABLE
@@ -133,6 +138,13 @@
 #define BH1750_RECOVER_DELAY_MS 5
 #define BH1750_RETRY_LOOPS 15
 #define BH1750_ONLY_I2C_TEST 0
+#define SGP30_I2C_ADDRESS 0x58
+#define SGP30_CMD_INIT_AIR_QUALITY 0x2003
+#define SGP30_CMD_MEASURE_AIR_QUALITY 0x2008
+#define SGP30_INIT_DELAY_MS 10
+#define SGP30_MEASURE_DELAY_MS 12
+#define SGP30_RETRY_LOOPS 15
+#define SGP30_MAX_CONSECUTIVE_FAILURES 5
 #define SOIL_LOW_PERCENT 20
 #define SOIL_HIGH_PERCENT 60
 #define LIGHT_LOW_PERCENT 25
@@ -202,10 +214,13 @@ static light_strip_control_t s_light_ctrl = {
 typedef struct {
     bool hardware_enabled;
     bool bh1750_ready;
+    bool sgp30_ready;
+    bool sgp30_has_sample;
     bool touch_ready;
     bool soil_ready;
     i2c_master_bus_handle_t sensor_bus;
     i2c_master_dev_handle_t bh1750;
+    i2c_master_dev_handle_t sgp30;
     adc_oneshot_unit_handle_t soil_adc_unit;
     adc_unit_t soil_adc_unit_id;
     adc_channel_t soil_adc_channel;
@@ -224,11 +239,16 @@ typedef struct {
     uint8_t last_soil_percent;
     bool last_soil_dry;
     uint32_t last_lux;
+    uint16_t last_tvoc_ppb;
+    uint16_t last_eco2_ppm;
     uint32_t bh1750_fail_count;
+    uint32_t sgp30_fail_count;
     uint32_t soil_fail_count;
     uint32_t bh1750_retry_count;
+    uint32_t sgp30_retry_count;
     int64_t last_touch_speak_us;
     env_alert_state_t env_alert_state;
+    env_alert_state_t last_reminded_state;
     int64_t env_state_since_us;
     int64_t last_abnormal_reminder_us;
     int reminder_day_id;
@@ -237,8 +257,9 @@ typedef struct {
 } sensor_hw_t;
 
 static bool read_touch_active(sensor_hw_t *hw);
+static light_strip_control_t light_ctrl_snapshot(void);
 
-static sensor_level_t classify_level(uint8_t value, uint8_t low, uint8_t high)
+static sensor_level_t classify_percent_level(uint8_t value, uint8_t low, uint8_t high)
 {
     if (value < low) {
         return SENSOR_LEVEL_LOW;
@@ -249,10 +270,22 @@ static sensor_level_t classify_level(uint8_t value, uint8_t low, uint8_t high)
     return SENSOR_LEVEL_NORMAL;
 }
 
-static env_alert_state_t classify_environment(uint8_t soil_percent, uint8_t light_percent)
+static sensor_level_t classify_lux_level(uint32_t value, uint32_t low, uint32_t high)
 {
-    sensor_level_t soil = classify_level(soil_percent, SOIL_LOW_PERCENT, SOIL_HIGH_PERCENT);
-    sensor_level_t light = classify_level(light_percent, LIGHT_LOW_PERCENT, LIGHT_HIGH_PERCENT);
+    if (value < low) {
+        return SENSOR_LEVEL_LOW;
+    }
+    if (value > high) {
+        return SENSOR_LEVEL_HIGH;
+    }
+    return SENSOR_LEVEL_NORMAL;
+}
+
+static env_alert_state_t classify_environment(uint8_t soil_percent, uint32_t light_lux)
+{
+    light_strip_control_t ctrl = light_ctrl_snapshot();
+    sensor_level_t soil = classify_percent_level(soil_percent, ctrl.soil_min_percent, ctrl.soil_max_percent);
+    sensor_level_t light = classify_lux_level(light_lux, ctrl.light_min_lux, ctrl.light_max_lux);
     return (env_alert_state_t)(ENV_ALERT_LOW_LOW + soil * 3 + light);
 }
 
@@ -345,21 +378,21 @@ static int reminder_day_id(const struct tm *local_time)
 }
 
 static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_percent,
-                                              uint8_t light_percent, bool soil_ok, bool light_ok)
+                                              uint32_t light_lux, bool soil_ok, bool light_ok)
 {
     if (hw == NULL || !soil_ok || !light_ok) {
         return;
     }
 
     int64_t now_us = esp_timer_get_time();
-    env_alert_state_t next_state = classify_environment(soil_percent, light_percent);
+    env_alert_state_t next_state = classify_environment(soil_percent, light_lux);
     if (next_state != hw->env_alert_state) {
         env_alert_state_t previous_state = hw->env_alert_state;
         hw->env_alert_state = next_state;
         hw->env_state_since_us = now_us;
         hw->state_change_pending = true;
-        ESP_LOGI(TAG, "Environment reminder state changed: %d -> %d (soil=%u%% light=%u%%)",
-                 previous_state, next_state, soil_percent, light_percent);
+        ESP_LOGI(TAG, "Environment reminder state changed: %d -> %d (soil=%u%% light=%ulux)",
+                 previous_state, next_state, soil_percent, (unsigned int)light_lux);
         return;
     }
 
@@ -379,25 +412,30 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
     }
 
     bool all_normal = next_state == ENV_ALERT_NORMAL_NORMAL;
+    bool same_abnormal_recent = !all_normal &&
+                                hw->last_reminded_state == next_state &&
+                                hw->last_abnormal_reminder_us != 0 &&
+                                now_us - hw->last_abnormal_reminder_us < ENV_ABNORMAL_REMINDER_US;
     bool should_speak = false;
     if (all_normal) {
         should_speak = hw->state_change_pending || !hw->normal_announced_today;
     } else {
-        should_speak = hw->last_abnormal_reminder_us == 0 ||
-                       now_us - hw->last_abnormal_reminder_us >= ENV_ABNORMAL_REMINDER_US;
+        should_speak = !same_abnormal_recent;
     }
 
     if (should_speak) {
         const char *text = environment_prompt(next_state);
         if (app_tts_speak_text_with_tone(text, environment_tone(next_state))) {
+            app_ui_show_remote_content(text, 3500);
             hw->state_change_pending = false;
+            hw->last_reminded_state = next_state;
             if (all_normal) {
                 hw->normal_announced_today = true;
             } else {
                 hw->last_abnormal_reminder_us = now_us;
             }
-            ESP_LOGI(TAG, "Environment reminder queued: state=%d soil=%u%% light=%u%%",
-                     next_state, soil_percent, light_percent);
+            ESP_LOGI(TAG, "Environment reminder queued: state=%d soil=%u%% light=%ulux",
+                     next_state, soil_percent, (unsigned int)light_lux);
         } else {
             ESP_LOGI(TAG, "Environment reminder deferred because TTS is busy");
         }
@@ -873,6 +911,133 @@ static esp_err_t read_bh1750(sensor_hw_t *hw, uint32_t *lux)
     return ESP_OK;
 }
 
+static uint8_t sgp30_crc8(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0xff;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+static esp_err_t sgp30_send_command(i2c_master_dev_handle_t dev, uint16_t command)
+{
+    uint8_t data[2] = {
+        (uint8_t)(command >> 8),
+        (uint8_t)(command & 0xff),
+    };
+    return i2c_master_transmit(dev, data, sizeof(data), 100);
+}
+
+static void sgp30_mark_unavailable(sensor_hw_t *hw)
+{
+    if (hw->sgp30 != NULL) {
+        i2c_master_bus_rm_device(hw->sgp30);
+        hw->sgp30 = NULL;
+    }
+    hw->sgp30_ready = false;
+    hw->sgp30_has_sample = false;
+}
+
+static esp_err_t init_sgp30(sensor_hw_t *hw)
+{
+    if (!CONFIG_SMART_POT_SGP30_ENABLE) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    if (hw->sensor_bus == NULL) {
+        esp_err_t err = bsp_i2c_init();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "BSP I2C init failed for SGP30: %s", esp_err_to_name(err));
+            return err;
+        }
+        hw->sensor_bus = bsp_i2c_get_handle();
+        if (hw->sensor_bus == NULL) {
+            ESP_LOGW(TAG, "BSP I2C bus handle is NULL for SGP30");
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    esp_err_t err = i2c_master_probe(hw->sensor_bus, SGP30_I2C_ADDRESS, 200);
+    if (err != ESP_OK) {
+        hw->sgp30_retry_count++;
+        if ((hw->sgp30_retry_count % 3) == 1) {
+            ESP_LOGW(TAG, "SGP30 not found at I2C address 0x%02x", SGP30_I2C_ADDRESS);
+        }
+        return err;
+    }
+
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = SGP30_I2C_ADDRESS,
+        .scl_speed_hz = 100000,
+        .scl_wait_us = 20000,
+    };
+    i2c_master_dev_handle_t dev = NULL;
+    err = i2c_master_bus_add_device(hw->sensor_bus, &dev_cfg, &dev);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SGP30 add device failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = sgp30_send_command(dev, SGP30_CMD_INIT_AIR_QUALITY);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SGP30 air-quality init failed: %s", esp_err_to_name(err));
+        i2c_master_bus_rm_device(dev);
+        return err;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(SGP30_INIT_DELAY_MS));
+    hw->sgp30 = dev;
+    hw->sgp30_ready = true;
+    hw->sgp30_has_sample = false;
+    hw->sgp30_fail_count = 0;
+    hw->sgp30_retry_count = 0;
+    ESP_LOGI(TAG, "SGP30 ready at I2C address 0x%02x", SGP30_I2C_ADDRESS);
+    return ESP_OK;
+}
+
+static esp_err_t read_sgp30(sensor_hw_t *hw, uint16_t *tvoc_ppb, uint16_t *eco2_ppm)
+{
+    if (!hw->sgp30_ready || hw->sgp30 == NULL || tvoc_ppb == NULL || eco2_ppm == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = sgp30_send_command(hw->sgp30, SGP30_CMD_MEASURE_AIR_QUALITY);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(SGP30_MEASURE_DELAY_MS));
+        uint8_t data[6] = { 0 };
+        err = i2c_master_receive(hw->sgp30, data, sizeof(data), 100);
+        if (err == ESP_OK &&
+            (sgp30_crc8(&data[0], 2) != data[2] || sgp30_crc8(&data[3], 2) != data[5])) {
+            err = ESP_ERR_INVALID_CRC;
+        }
+        if (err == ESP_OK) {
+            *eco2_ppm = (uint16_t)(((uint16_t)data[0] << 8) | data[1]);
+            *tvoc_ppb = (uint16_t)(((uint16_t)data[3] << 8) | data[4]);
+            hw->sgp30_fail_count = 0;
+            hw->sgp30_has_sample = true;
+            return ESP_OK;
+        }
+    }
+
+    hw->sgp30_fail_count++;
+    if (hw->sgp30_fail_count == 1 ||
+        hw->sgp30_fail_count >= SGP30_MAX_CONSECUTIVE_FAILURES) {
+        ESP_LOGW(TAG, "SGP30 measurement failed (%lu/%u): %s",
+                 (unsigned long)hw->sgp30_fail_count,
+                 SGP30_MAX_CONSECUTIVE_FAILURES,
+                 esp_err_to_name(err));
+    }
+    if (hw->sgp30_fail_count >= SGP30_MAX_CONSECUTIVE_FAILURES) {
+        sgp30_mark_unavailable(hw);
+    }
+    return err;
+}
+
 static void init_light_strip(sensor_hw_t *hw)
 {
     light_ctrl_ensure_loaded();
@@ -1049,14 +1214,16 @@ static void init_hardware(sensor_hw_t *hw)
     }
 
     init_bh1750(hw);
+    init_sgp30(hw);
 #if !BH1750_ONLY_I2C_TEST
     init_light_strip(hw);
     init_touch(hw);
     init_soil_module(hw);
 #endif
 
-    ESP_LOGI(TAG, "Sensor hardware summary: BH1750=%d light_strip=%d TTP223=%d soil_module=%d",
-             hw->bh1750_ready, hw->light_strip_ready, hw->touch_ready, hw->soil_ready);
+    ESP_LOGI(TAG, "Sensor hardware summary: BH1750=%d SGP30=%d light_strip=%d TTP223=%d soil_module=%d",
+             hw->bh1750_ready, hw->sgp30_ready,
+             hw->light_strip_ready, hw->touch_ready, hw->soil_ready);
 }
 
 static void update_touch(sensor_hw_t *hw)
@@ -1093,6 +1260,15 @@ static void sensor_task(void *arg)
     uint32_t loop_count = 0;
 
     init_hardware(&hw);
+    uint32_t update_ms = CONFIG_SMART_POT_SENSOR_UPDATE_MS;
+    if (CONFIG_SMART_POT_SGP30_ENABLE && update_ms > 1000) {
+        update_ms = 1000;
+    }
+    if (update_ms < 250) {
+        update_ms = 250;
+    }
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t update_period = pdMS_TO_TICKS(update_ms);
     while (true) {
 #if !BH1750_ONLY_I2C_TEST
         update_touch(&hw);
@@ -1102,12 +1278,19 @@ static void sensor_task(void *arg)
             loop_count > 0 && (loop_count % BH1750_RETRY_LOOPS) == 0) {
             init_bh1750(&hw);
         }
+        if (hw.hardware_enabled && CONFIG_SMART_POT_SGP30_ENABLE && !hw.sgp30_ready &&
+            loop_count > 0 && (loop_count % SGP30_RETRY_LOOPS) == 0) {
+            init_sgp30(&hw);
+        }
 
         uint32_t lux = 0;
+        uint16_t tvoc_ppb = 0;
+        uint16_t eco2_ppm = 0;
         uint32_t soil_raw = 0;
         uint8_t soil_percent = 0;
         bool soil_dry = false;
         bool light_ok = read_bh1750(&hw, &lux) == ESP_OK;
+        bool air_ok = read_sgp30(&hw, &tvoc_ppb, &eco2_ppm) == ESP_OK;
 #if BH1750_ONLY_I2C_TEST
         bool soil_ok = false;
 #else
@@ -1116,6 +1299,10 @@ static void sensor_task(void *arg)
 
         if (light_ok) {
             hw.last_lux = lux;
+        }
+        if (air_ok) {
+            hw.last_tvoc_ppb = tvoc_ppb;
+            hw.last_eco2_ppm = eco2_ppm;
         }
         if (soil_ok) {
             hw.last_soil_raw = soil_raw;
@@ -1132,17 +1319,23 @@ static void sensor_task(void *arg)
             .soil_frequency_hz = 0,
             .soil_adc_raw = soil_ok ? soil_raw : 0,
             .soil_digital_dry = soil_ok ? soil_dry : false,
+            .tvoc_ppb = hw.last_tvoc_ppb,
+            .eco2_ppm = hw.last_eco2_ppm,
+            .air_quality_valid = hw.sgp30_has_sample,
         };
         state.mood = calculate_mood(state.soil_percent, state.light_percent);
         update_light_strip(&hw, state.light_lux, light_ok);
-        update_environment_voice_reminder(&hw, state.soil_percent, state.light_percent,
+        update_environment_voice_reminder(&hw, state.soil_percent, state.light_lux,
                                           soil_ok, light_ok);
 
         if ((loop_count++ % 5) == 0) {
-            ESP_LOGI(TAG, "Sensor state: soil=%u%% (raw=%u dry=%d%s) light=%u%% (%ulux%s) touch=%u active=%d",
+            ESP_LOGI(TAG, "Sensor state: soil=%u%% (raw=%u dry=%d%s) light=%u%% (%ulux%s) "
+                     "TVOC=%uppb eCO2=%uppm%s touch=%u active=%d",
                      state.soil_percent, (unsigned int)hw.last_soil_raw, hw.last_soil_dry,
                      soil_ok ? "" : ", sim",
                      state.light_percent, (unsigned int)hw.last_lux, light_ok ? "" : ", sim",
+                     state.tvoc_ppb, state.eco2_ppm,
+                     state.air_quality_valid ? "" : " (unavailable)",
                      (unsigned int)state.touch_count, state.touch_active);
         }
 
@@ -1150,7 +1343,7 @@ static void sensor_task(void *arg)
             ctx->cb(&state, ctx->user_ctx);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_SMART_POT_SENSOR_UPDATE_MS));
+        vTaskDelayUntil(&last_wake, update_period);
     }
 }
 

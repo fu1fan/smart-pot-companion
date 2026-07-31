@@ -938,6 +938,7 @@ private fun DashboardScreen(
     val metrics = dashboardMetrics(state)
     var speciesDialog by rememberSaveable { mutableStateOf(false) }
     var healthDetailsVisible by rememberSaveable { mutableStateOf(false) }
+    var showEco2 by rememberSaveable { mutableStateOf(false) }
     val pot = snap?.pot
     if (speciesDialog && pot != null) {
         SpeciesPickerDialog(
@@ -1008,13 +1009,19 @@ private fun DashboardScreen(
                         modifier = Modifier.weight(1f),
                     )
                     DashboardMetricCard(
-                        iconKind = "spark",
-                        iconColor = Violet,
-                        title = "互动次数",
-                        value = metrics.dailyInteractions.toString(),
-                        unit = "次",
-                        status = interactionStatus(metrics.dailyInteractions),
-                        modifier = Modifier.weight(1f),
+                        iconKind = "air",
+                        iconColor = BrightLeaf,
+                        title = if (showEco2) "CO₂浓度" else "TVOC",
+                        value = if (showEco2) {
+                            snap?.telemetry?.eco2Ppm?.toString() ?: "--"
+                        } else {
+                            snap?.telemetry?.tvocPpb?.toString() ?: "--"
+                        },
+                        unit = if (showEco2) "ppm" else "ppb",
+                        status = if (showEco2) "点击查看 TVOC" else "点击查看 CO₂",
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { showEco2 = !showEco2 },
                     )
                 }
             }
@@ -1408,7 +1415,13 @@ private fun DashboardMetricCard(
                     modifier = Modifier.padding(bottom = 3.dp),
                 )
             }
-            Text(status, color = metricStatusColor(status), fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(
+                status,
+                color = metricStatusColor(status),
+                fontSize = if (status.length > 6) 11.sp else 14.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1455,6 +1468,31 @@ private fun PixelMetricGlyph(kind: String, color: Color, modifier: Modifier = Mo
                             cap = StrokeCap.Round,
                         )
                     }
+                }
+            }
+            "air" -> {
+                repeat(3) { index ->
+                    val y = size.height * (0.28f + index * 0.23f)
+                    val path = Path().apply {
+                        moveTo(1.dp.toPx(), y)
+                        cubicTo(
+                            size.width * 0.28f,
+                            y - 3.dp.toPx(),
+                            size.width * 0.42f,
+                            y + 3.dp.toPx(),
+                            size.width * 0.62f,
+                            y,
+                        )
+                        cubicTo(
+                            size.width * 0.77f,
+                            y - 2.dp.toPx(),
+                            size.width * 0.88f,
+                            y - 2.dp.toPx(),
+                            size.width - 1.dp.toPx(),
+                            y,
+                        )
+                    }
+                    drawPath(path, color, style = Stroke(width = stroke, cap = StrokeCap.Round))
                 }
             }
             else -> {
@@ -1639,57 +1677,50 @@ private fun currentAttentionLines(snapshot: PotSnapshot?, weather: CareWeather?)
     if (snapshot == null) return listOf("正在等待室内环境和室外天气数据")
     if (!snapshot.online) return listOf("设备当前离线，暂时无法综合室内环境，请检查网络连接")
 
-    val telemetry = snapshot.telemetry ?: return listOf("正在等待室内光照和土壤湿度数据")
+    if (snapshot.telemetry == null) return listOf("正在等待室内光照和土壤湿度数据")
     val evaluated = snapshot.evaluated ?: return listOf("正在分析当前室内环境")
-    val outdoor = weather?.let {
-        buildString {
-            append("室外")
-            append(it.condition)
-            it.temperatureC?.let { value -> append(" ${value.roundToInt()}°C") }
-            it.relativeHumidityPercent?.let { value -> append("、湿度 $value%") }
-        }
-    } ?: "室外天气待更新"
-    val indoorLight = when (evaluated.lightStatus) {
-        LightStatus.DARK -> "室内光照不足"
-        LightStatus.DIFFUSE -> "室内光照适宜"
-        LightStatus.TOO_STRONG -> "室内光照过强"
-        LightStatus.UNKNOWN -> "室内光照待确认"
-    }
-    val soil = when (evaluated.soilStatus) {
-        SoilStatus.TOO_DRY -> "土壤偏干"
-        SoilStatus.SUITABLE -> "土壤湿度适宜"
-        SoilStatus.TOO_WET -> "土壤偏湿"
-        SoilStatus.UNKNOWN -> "土壤湿度待确认"
-    }
+    val weatherCondition = weather?.condition.orEmpty()
+    val rainy = listOf("雨", "雪", "雷", "雾").any(weatherCondition::contains)
+    val cloudy = rainy || weatherCondition.contains("阴") || weatherCondition.contains("云")
+    val sunny = weatherCondition.contains("晴")
+    val hot = (weather?.temperatureC ?: 0.0) >= 28.0
+    val humid = (weather?.relativeHumidityPercent ?: 0) >= 75
 
     return buildList {
-        add("$indoorLight（${compactMetricValue(telemetry.lightLux)} lux），$soil（${telemetry.soilPercent}%）；$outdoor。")
         when {
-            evaluated.soilStatus == SoilStatus.TOO_WET &&
-                (weather?.relativeHumidityPercent ?: 0) >= 75 ->
-                add("室内盆土偏湿且室外湿度较高，先暂停浇水并加强通风。")
-            evaluated.soilStatus == SoilStatus.TOO_DRY &&
-                (weather?.temperatureC ?: 0.0) >= 28.0 ->
-                add("室内盆土偏干且室外温度较高，请及时检查并补水。")
+            evaluated.soilStatus == SoilStatus.TOO_WET && (rainy || humid) ->
+                add("阴雨潮湿且盆土偏湿，建议停水通风。")
+            evaluated.soilStatus == SoilStatus.TOO_DRY && (rainy || humid) ->
+                add("室外潮湿但盆土偏干，建议少量补水。")
+            evaluated.soilStatus == SoilStatus.TOO_DRY && hot ->
+                add("天气较热且盆土偏干，建议早晚补水。")
+            evaluated.soilStatus == SoilStatus.TOO_DRY && sunny ->
+                add("天气晴朗且盆土偏干，建议适量补水。")
             evaluated.soilStatus == SoilStatus.TOO_DRY ->
-                add("当前盆土偏干，请结合盆土触感安排浇水。")
+                add("盆土偏干，建议检查后适量补水。")
             evaluated.soilStatus == SoilStatus.TOO_WET ->
-                add("当前盆土偏湿，暂缓浇水并避免积水。")
+                add("盆土偏湿，今天先停水并保持通风。")
         }
         when {
-            evaluated.lightStatus == LightStatus.DARK &&
-                weather?.condition?.contains("雨") == true ->
-                add("室内缺光且室外有雨，优先使用补光灯，不建议移到露天。")
+            evaluated.lightStatus == LightStatus.DARK && cloudy ->
+                add("阴天室内缺光，建议开启补光灯。")
+            evaluated.lightStatus == LightStatus.DARK && sunny ->
+                add("室外晴朗但室内缺光，建议移近窗边。")
             evaluated.lightStatus == LightStatus.DARK ->
-                add("当前室内光照不足，可移近明亮窗边或开启补光。")
-            evaluated.lightStatus == LightStatus.TOO_STRONG &&
-                (weather?.temperatureC ?: 0.0) >= 28.0 ->
-                add("室内光照过强且室外温度较高，请遮阴并远离暴晒窗边。")
+                add("室内缺光，建议移近窗边或开启补光。")
+            evaluated.lightStatus == LightStatus.TOO_STRONG && (hot || sunny) ->
+                add("天气晴热且室内光强，建议及时遮阴。")
             evaluated.lightStatus == LightStatus.TOO_STRONG ->
-                add("当前室内光照过强，请调整到明亮散射光位置。")
+                add("室内光照过强，建议移到散射光处。")
         }
-        if (size == 1) add("当前室内光照和土壤湿度均适宜，无需额外处理。")
-    }.distinct().take(3)
+        if (isEmpty()) {
+            when {
+                rainy || humid -> add("天气较潮湿，建议保持通风并少浇水。")
+                hot -> add("天气较热，建议留意盆土干燥变化。")
+                else -> add("当前环境适宜，继续保持即可。")
+            }
+        }
+    }.distinct().take(2)
 }
 
 @Composable

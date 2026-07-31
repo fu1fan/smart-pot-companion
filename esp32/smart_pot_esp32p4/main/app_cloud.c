@@ -537,6 +537,10 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
     cJSON_AddBoolToObject(root, "soilDigitalDry", state->soil_digital_dry);
     cJSON_AddNumberToObject(root, "lightLux", state->light_lux);
     cJSON_AddNumberToObject(root, "lightPercent", state->light_percent);
+    if (state->air_quality_valid) {
+        cJSON_AddNumberToObject(root, "tvocPpb", state->tvoc_ppb);
+        cJSON_AddNumberToObject(root, "eco2Ppm", state->eco2_ppm);
+    }
     cJSON_AddNumberToObject(root, "touchCount", state->touch_count);
     cJSON_AddBoolToObject(root, "touchActive", state->touch_active);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE

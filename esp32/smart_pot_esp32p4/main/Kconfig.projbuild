@@ -221,6 +221,15 @@ menu "Smart Pot"
                 automatic light-strip decisions use BH1750 sensor-position lux from
                 the synced plant profile.
 
+        config SMART_POT_SGP30_ENABLE
+            bool "Enable SGP30 air quality sensor"
+            default y
+            depends on SMART_POT_SENSOR_HARDWARE_ENABLE
+            help
+                Read TVOC in ppb and equivalent CO2 in ppm from an SGP30 at
+                the fixed 7-bit I2C address 0x58. The sensor shares the
+                Waveshare BSP I2C bus with BH1750 and MPU-6050.
+
         config SMART_POT_LIGHT_STRIP_ENABLE
             bool "Enable light strip breaker output"
             default y
