@@ -94,12 +94,13 @@ class MqttGateway(
     private suspend fun consume(topic: String, payload: String) {
         val (deviceId, kind) = parseDeviceTopic(topic)
         val pot = potService.ensureForDevice(deviceId)
+        val observedAt = Instant.now().toString()
         when (kind) {
             "telemetry" -> {
                 val telemetry = appJson.decodeFromString<DeviceTelemetry>(payload)
                 require(telemetry.deviceId == deviceId)
                 store.saveTelemetry(pot.id, telemetry)
-                store.setOnline(deviceId, true, telemetry.recordedAt)
+                store.setOnline(deviceId, true, observedAt)
                 alertService.evaluate(pot, telemetry)
                 val recordedAt = runCatching { Instant.parse(telemetry.recordedAt) }.getOrDefault(Instant.now())
                 val zone = runCatching { ZoneId.of(pot.timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
@@ -122,6 +123,7 @@ class MqttGateway(
                 val reported = appJson.decodeFromString<DeviceReportedState>(payload)
                 require(reported.deviceId == deviceId)
                 store.saveReportedState(reported)
+                store.setOnline(deviceId, true, observedAt)
                 resyncProfileIfNeeded(pot, reported)
                 val scheduleChanged = mergeDeviceScheduleItems(
                     store,
@@ -161,13 +163,14 @@ class MqttGateway(
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
                 require(online.deviceId == deviceId)
-                store.setOnline(deviceId, online.online, online.changedAt)
+                val observedOnline = online.copy(changedAt = observedAt)
+                store.setOnline(deviceId, observedOnline.online, observedOnline.changedAt)
                 if (online.online) {
                     runCatching { commandService?.syncProfile(pot) }
                         .onFailure { System.err.println("Profile MQTT resync on online skipped: ${it.message}") }
                     resyncScheduleIfNeeded(pot, null, "online")
                 }
-                realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(online)))
+                realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(observedOnline)))
             }
         }
     }

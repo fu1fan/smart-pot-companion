@@ -576,6 +576,20 @@ class ApplicationTest {
     }
 
     @Test
+    fun `server observation time allows fixed epoch will to mark device offline`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        val connectedAt = "2026-08-01T08:00:30Z"
+        val willObservedAt = "2026-08-01T08:01:00Z"
+
+        store.setOnline("device-1", true, connectedAt)
+        store.setOnline("device-1", false, willObservedAt)
+
+        val state = store.deviceState("device-1")
+        assertFalse(state.online)
+        assertEquals(willObservedAt, state.lastSeenAt)
+    }
+
+    @Test
     fun `affinity applies category and daily point caps`() = runBlocking {
         val store = InMemorySmartPotStore()
         store.seedSpecies(SpeciesCatalog.all)
