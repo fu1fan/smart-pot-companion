@@ -131,11 +131,45 @@ private data class HourlyTelemetryPoint(
     val lightLux: Float?,
 )
 
+private data class PlantCoreStatus(
+    val title: String,
+    val message: String,
+    val color: Color,
+)
+
+private enum class EnvironmentReminderType(val preferenceKey: String) {
+    THIRSTY("environment_reminder_thirsty_confirmed_at"),
+    DARK("environment_reminder_dark_confirmed_at"),
+}
+
+private const val EnvironmentReminderIntervalMs = 60L * 60L * 1000L
+
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun SmartPotApp(viewModel: SmartPotViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val reminderPreferences = remember(context) {
+        context.getSharedPreferences("smart_pot_environment_reminders", Context.MODE_PRIVATE)
+    }
+    val reminderType = when {
+        state.snapshot?.online != true || state.snapshot?.telemetry == null -> null
+        state.snapshot?.evaluated?.soilStatus == SoilStatus.TOO_DRY -> EnvironmentReminderType.THIRSTY
+        state.snapshot?.evaluated?.lightStatus == LightStatus.DARK -> EnvironmentReminderType.DARK
+        else -> null
+    }
+    var visibleReminder by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(reminderType, state.snapshot?.telemetry?.recordedAt) {
+        if (reminderType == null) {
+            visibleReminder = null
+        } else {
+            val lastConfirmedAt = reminderPreferences.getLong(reminderType.preferenceKey, 0L)
+            if (System.currentTimeMillis() - lastConfirmedAt >= EnvironmentReminderIntervalMs) {
+                visibleReminder = reminderType.name
+            }
+        }
+    }
     MaterialTheme(colorScheme = lightColorScheme(primary = Leaf, secondary = Color(0xFF7D9763), background = Sand, surface = Color.White)) {
         Scaffold(
             containerColor = Sand,
@@ -177,8 +211,6 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::selectChatDay,
                         viewModel::addSchedule,
                         viewModel::toggleSchedule,
-                        viewModel::recordPomodoro,
-                        viewModel::removePomodoro,
                         viewModel::startPomodoroTimer,
                         viewModel::pausePomodoroTimer,
                         viewModel::exitPomodoroTimer,
@@ -190,6 +222,21 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::saveUserProfile,
                     )
                 }
+            }
+        }
+        visibleReminder?.let { reminderName ->
+            val activeReminder = runCatching { EnvironmentReminderType.valueOf(reminderName) }.getOrNull()
+            if (activeReminder != null) {
+                EnvironmentReminderDialog(
+                    type = activeReminder,
+                    plantName = state.snapshot?.pot?.displayName ?: "小麦",
+                    onConfirm = {
+                        reminderPreferences.edit()
+                            .putLong(activeReminder.preferenceKey, System.currentTimeMillis())
+                            .apply()
+                        visibleReminder = null
+                    },
+                )
             }
         }
     }
@@ -918,6 +965,63 @@ private fun PixelConfirmDialog(
 }
 
 @Composable
+private fun EnvironmentReminderDialog(
+    type: EnvironmentReminderType,
+    plantName: String,
+    onConfirm: () -> Unit,
+) {
+    val thirsty = type == EnvironmentReminderType.THIRSTY
+    Dialog(onDismissRequest = {}) {
+        PixelPanel(
+            Modifier.fillMaxWidth(0.86f).widthIn(max = 320.dp).wrapContentHeight(),
+            fill = PixelCream,
+            edge = if (thirsty) Color(0xFF78AFC9) else Color(0xFFE3B45F),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
+            showCornerBolts = false,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(66.dp)
+                        .background(if (thirsty) Color(0xFFE7F6FF) else Color(0xFFFFF3D4), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PixelMetricGlyph(
+                        kind = if (thirsty) "water" else "sun",
+                        color = if (thirsty) Sky else Sun,
+                        modifier = Modifier.size(42.dp),
+                    )
+                }
+                Text(
+                    if (thirsty) "${plantName}有点口渴" else "${plantName}想晒晒太阳",
+                    color = Ink,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    if (thirsty) "主人记得喂我喝水哦！" else "室内光线有点暗，主人帮我补充一些温柔的光吧！",
+                    color = Muted,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                )
+                PixelButton(
+                    onClick = onConfirm,
+                    modifier = Modifier.width(132.dp),
+                    contentPadding = PaddingValues(vertical = 9.dp),
+                ) {
+                    Text("我知道了", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DashboardScreen(
     state: SmartPotUiState,
     updateSpecies: (String) -> Unit,
@@ -982,6 +1086,9 @@ private fun DashboardScreen(
                 PlantHealthCard(
                     metrics = metrics,
                     online = snap?.online == true,
+                    plantName = pot?.displayName ?: "小麦",
+                    soilStatus = snap?.evaluated?.soilStatus,
+                    lightStatus = snap?.evaluated?.lightStatus,
                     thresholds = pot?.species?.thresholds,
                     affinity = snap?.affinity,
                     detailsVisible = healthDetailsVisible,
@@ -1290,11 +1397,15 @@ private fun clearConnectedDarkBackground(bitmap: Bitmap) {
 private fun PlantHealthCard(
     metrics: DashboardMetrics,
     online: Boolean,
+    plantName: String,
+    soilStatus: SoilStatus?,
+    lightStatus: LightStatus?,
     thresholds: PlantThresholds?,
     affinity: AffinityState?,
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
 ) {
+    val coreStatus = plantCoreStatus(plantName, online, soilStatus, lightStatus)
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
@@ -1306,8 +1417,8 @@ private fun PlantHealthCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 HealthGauge(metrics.healthPercent, Modifier.size(118.dp))
                 Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(healthStatus(metrics.healthPercent, online), fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color(0xFF087D3C))
-                    Text(healthHint(metrics.healthPercent, online), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(coreStatus.title, fontSize = 21.sp, fontWeight = FontWeight.Black, color = coreStatus.color)
+                    Text(coreStatus.message, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 20.sp)
                     PixelTextButton(onClick = onToggleDetails, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) {
                         Text(if (detailsVisible) "收起详情 ︿" else "健康详情 ›", fontSize = 14.sp, color = Color(0xFF087D3C), fontWeight = FontWeight.Bold)
                     }
@@ -3500,8 +3611,6 @@ private fun CompanionScreen(
     selectDay: (String) -> Unit,
     addSchedule: (String, Instant) -> Unit,
     toggleSchedule: (ScheduleItem, Boolean) -> Unit,
-    recordPomodoro: () -> Unit,
-    removePomodoro: () -> Unit,
     startPomodoroTimer: () -> Unit,
     pausePomodoroTimer: () -> Unit,
     exitPomodoroTimer: () -> Unit,
@@ -3647,8 +3756,6 @@ private fun CompanionScreen(
             item {
                 CompanionFocusCard(
                     state = state,
-                    recordPomodoro = recordPomodoro,
-                    removePomodoro = removePomodoro,
                     startPomodoroTimer = startPomodoroTimer,
                     pausePomodoroTimer = pausePomodoroTimer,
                     exitPomodoroTimer = exitPomodoroTimer,
@@ -4267,8 +4374,6 @@ private fun scheduleSelectionText(dueAt: Instant?, timezone: String): String {
 @Composable
 private fun CompanionFocusCard(
     state: SmartPotUiState,
-    recordPomodoro: () -> Unit,
-    removePomodoro: () -> Unit,
     startPomodoroTimer: () -> Unit,
     pausePomodoroTimer: () -> Unit,
     exitPomodoroTimer: () -> Unit,
@@ -4281,20 +4386,6 @@ private fun CompanionFocusCard(
     val sessionSeconds = 25 * 60
     val remainingSeconds = state.pomodoroRemainingSeconds
     val timerRunning = state.pomodoroTimerRunning
-    var confirmDecrease by rememberSaveable { mutableStateOf(false) }
-    if (confirmDecrease) {
-        PixelConfirmDialog(
-            title = "减少一个番茄钟？",
-            text = "将删除今天最近一次记录的 25 分钟专注。",
-            confirmText = "确认减少",
-            onConfirm = {
-                removePomodoro()
-                confirmDecrease = false
-            },
-            onDismiss = { confirmDecrease = false },
-            danger = true,
-        )
-    }
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
@@ -4342,17 +4433,9 @@ private fun CompanionFocusCard(
                 }
             }
             HorizontalDivider(color = CardBorder)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                PixelTextButton(onClick = { confirmDecrease = true }, enabled = count > 0, contentPadding = PaddingValues(horizontal = 8.dp), danger = true) {
-                    Text("－", fontSize = 16.sp)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$count 个 · $minutes min", color = BrightLeaf, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("目标 $target 个番茄钟", color = Muted, fontSize = 10.sp)
-                }
-                PixelTextButton(onClick = recordPomodoro, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text("＋", fontSize = 16.sp)
-                }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("$count 个 · $minutes min", color = BrightLeaf, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("目标 $target 个番茄钟", color = Muted, fontSize = 10.sp)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("日程完成度", fontWeight = FontWeight.Bold, color = Ink)
@@ -4705,22 +4788,47 @@ private fun metricStatusColor(value: String): Color = when (value) {
     else -> Color(0xFFD17B2F)
 }
 
-private fun healthStatus(value: Int?, online: Boolean): String = when {
-    !online -> "等待设备上线"
-    value == null -> "正在计算"
-    value >= 85 -> "状态良好"
-    value >= 70 -> "状态不错"
-    value >= 50 -> "需要留意"
-    else -> "需要照顾"
-}
-
-private fun healthHint(value: Int?, online: Boolean): String = when {
-    !online -> "连接后会恢复实时评估"
-    value == null -> "收到环境数据后自动更新"
-    value >= 85 -> "继续保持哦！"
-    value >= 70 -> "再陪陪它会更开心"
-    value >= 50 -> "看看下方的养护建议"
-    else -> "请优先处理需要关注的项目"
+private fun plantCoreStatus(
+    plantName: String,
+    online: Boolean,
+    soilStatus: SoilStatus?,
+    lightStatus: LightStatus?,
+): PlantCoreStatus = when {
+    !online -> PlantCoreStatus(
+        title = "${plantName}在等你",
+        message = "设备连接后，我会马上告诉主人现在的感受。",
+        color = Muted,
+    )
+    soilStatus == SoilStatus.TOO_DRY -> PlantCoreStatus(
+        title = "${plantName}有点口渴",
+        message = "主人记得喂我喝水哦！",
+        color = Color(0xFF3789B5),
+    )
+    lightStatus == LightStatus.DARK -> PlantCoreStatus(
+        title = "${plantName}想晒太阳",
+        message = "这里有点暗，主人帮我补充一些温柔的光吧！",
+        color = Color(0xFFD28A20),
+    )
+    soilStatus == SoilStatus.TOO_WET -> PlantCoreStatus(
+        title = "${plantName}喝得有点多",
+        message = "先让我休息一下，等土壤透透气吧。",
+        color = Color(0xFF4B7F91),
+    )
+    lightStatus == LightStatus.TOO_STRONG -> PlantCoreStatus(
+        title = "${plantName}有点晒",
+        message = "主人帮我挪到柔和的散射光里吧！",
+        color = Color(0xFFD07C28),
+    )
+    soilStatus == SoilStatus.SUITABLE && lightStatus == LightStatus.DIFFUSE -> PlantCoreStatus(
+        title = "${plantName}现在很开心！",
+        message = "水分和光照都刚刚好，谢谢主人照顾我。",
+        color = Color(0xFF087D3C),
+    )
+    else -> PlantCoreStatus(
+        title = "${plantName}正在感受环境",
+        message = "数据稳定后，我会告诉主人现在的心情。",
+        color = Leaf,
+    )
 }
 
 private fun telemetryWithLatest(history: List<DeviceTelemetry>, latest: DeviceTelemetry?): List<DeviceTelemetry> {
