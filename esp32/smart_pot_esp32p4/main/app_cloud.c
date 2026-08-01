@@ -2,9 +2,11 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "bsp/display.h"
 #include "cJSON.h"
@@ -38,6 +40,7 @@
 #define TELEMETRY_PUBLISH_INTERVAL_US (5LL * 1000LL * 1000LL)
 #define MQTT_HARD_RECOVERY_INTERVAL_US (60LL * 1000LL * 1000LL)
 #define MQTT_WATCHDOG_INTERVAL_MS 2000
+#define COMMAND_QUEUE_LENGTH 8
 
 static const char *TAG = "smart_pot_cloud";
 static esp_mqtt_client_handle_t s_client;
@@ -56,6 +59,8 @@ static char s_topic_prefix[128];
 static char s_lwt_topic[160];
 static char s_command_buffer[4096];
 static size_t s_command_len;
+static bool s_command_overflow;
+static QueueHandle_t s_command_queue;
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
 static app_motion_state_t s_motion;
 #endif
@@ -196,7 +201,7 @@ static void publish_reported(void)
         cJSON_AddItemToArray(schedule_json, item);
     }
     cJSON_AddItemToObject(root, "scheduleItems", schedule_json);
-    cJSON_AddStringToObject(root, "firmwareVersion", "0.2.0");
+    cJSON_AddStringToObject(root, "firmwareVersion", "0.2.1");
     publish_json("reported", root, true);
     cJSON_Delete(root);
 }
@@ -464,6 +469,7 @@ static void handle_command(const char *json)
     if (!cJSON_IsString(id) || !cJSON_IsString(type) || !cJSON_IsObject(payload)) {
         cJSON_Delete(root); return;
     }
+    ESP_LOGI(TAG, "Executing cloud command: id=%s type=%s", id->valuestring, type->valuestring);
     bool ok = true;
     if (strcmp(type->valuestring, "PING") == 0) {
         ok = true;
@@ -522,7 +528,42 @@ static void handle_command(const char *json)
     }
     publish_ack(id->valuestring, ok ? "COMPLETED" : "FAILED", ok ? NULL : "invalid payload");
     if (ok) publish_reported();
+    ESP_LOGI(TAG, "Cloud command finished: id=%s type=%s ok=%d", id->valuestring, type->valuestring, ok);
     cJSON_Delete(root);
+}
+
+static void command_worker_task(void *arg)
+{
+    (void)arg;
+    char *json = NULL;
+    while (true) {
+        if (xQueueReceive(s_command_queue, &json, portMAX_DELAY) != pdPASS) {
+            continue;
+        }
+        handle_command(json);
+        free(json);
+        json = NULL;
+    }
+}
+
+static bool enqueue_command(const char *json, size_t length)
+{
+    if (s_command_queue == NULL || json == NULL || length == 0) {
+        return false;
+    }
+    char *copy = malloc(length + 1);
+    if (copy == NULL) {
+        ESP_LOGE(TAG, "Unable to allocate %u bytes for cloud command", (unsigned)(length + 1));
+        return false;
+    }
+    memcpy(copy, json, length);
+    copy[length] = '\0';
+    if (xQueueSend(s_command_queue, &copy, 0) != pdPASS) {
+        ESP_LOGW(TAG, "Cloud command queue is full; dropping command");
+        free(copy);
+        return false;
+    }
+    return true;
 }
 
 static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void *data)
@@ -549,14 +590,25 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     } else if (event_id == MQTT_EVENT_ERROR) {
         ESP_LOGW(TAG, "MQTT transport error");
     } else if (event_id == MQTT_EVENT_DATA) {
-        if (event->current_data_offset == 0) s_command_len = 0;
-        if (s_command_len + event->data_len < sizeof(s_command_buffer)) {
+        if (event->current_data_offset == 0) {
+            s_command_len = 0;
+            s_command_overflow = false;
+        }
+        if (!s_command_overflow && s_command_len + event->data_len < sizeof(s_command_buffer)) {
             memcpy(s_command_buffer + s_command_len, event->data, event->data_len);
             s_command_len += event->data_len;
+        } else {
+            s_command_overflow = true;
         }
         if (event->current_data_offset + event->data_len == event->total_data_len) {
-            s_command_buffer[s_command_len] = '\0';
-            handle_command(s_command_buffer);
+            if (s_command_overflow) {
+                ESP_LOGW(TAG, "Cloud command exceeds %u-byte buffer; dropping command", (unsigned)sizeof(s_command_buffer));
+            } else {
+                s_command_buffer[s_command_len] = '\0';
+                enqueue_command(s_command_buffer, s_command_len);
+            }
+            s_command_len = 0;
+            s_command_overflow = false;
         }
     }
 }
@@ -564,6 +616,17 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
 void app_cloud_start(void)
 {
     if (!CONFIG_SMART_POT_CLOUD_ENABLE) { ESP_LOGI(TAG, "MQTT cloud disabled"); return; }
+    s_command_queue = xQueueCreate(COMMAND_QUEUE_LENGTH, sizeof(char *));
+    if (s_command_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create cloud command queue");
+        return;
+    }
+    if (xTaskCreate(command_worker_task, "cloud_commands", 8192, NULL, 6, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create cloud command worker task");
+        vQueueDelete(s_command_queue);
+        s_command_queue = NULL;
+        return;
+    }
     app_ui_set_schedule_event_callback(publish_schedule_event);
     snprintf(s_topic_prefix, sizeof(s_topic_prefix), "smartpot/v1/devices/%s", CONFIG_SMART_POT_DEVICE_ID);
     snprintf(s_lwt_topic, sizeof(s_lwt_topic), "%s/online", s_topic_prefix);
