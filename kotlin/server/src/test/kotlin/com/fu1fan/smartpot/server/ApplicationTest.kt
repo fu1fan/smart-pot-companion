@@ -46,6 +46,7 @@ import com.fu1fan.smartpot.server.service.reportedProfileMatches
 import com.fu1fan.smartpot.server.service.weatherCodeLabel
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
 import com.fu1fan.smartpot.server.store.StoredDeviceState
+import com.fu1fan.smartpot.server.store.postgresInstantString
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
@@ -73,6 +74,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneId
 
 class ApplicationTest {
@@ -629,6 +631,15 @@ class ApplicationTest {
                 now,
             ),
         )
+    }
+
+    @Test
+    fun `postgres timestamps are normalized before presence evaluation`() {
+        val expected = "2026-08-01T14:53:01Z"
+
+        assertEquals(expected, postgresInstantString(java.sql.Timestamp.from(Instant.parse(expected))))
+        assertEquals(expected, postgresInstantString(OffsetDateTime.parse(expected)))
+        assertEquals(expected, postgresInstantString(Instant.parse(expected)))
     }
 
     @Test

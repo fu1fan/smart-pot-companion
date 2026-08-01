@@ -12,7 +12,9 @@ import kotlinx.serialization.decodeFromString
 import org.flywaydb.core.Flyway
 import java.sql.Connection
 import java.sql.ResultSet
+import java.sql.Timestamp
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
 
 class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
@@ -151,8 +153,8 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
                     reported = rs.getString("reported")?.let { decode(it) },
                     desired = rs.getString("desired")?.let { decode(it) },
                     online = rs.getBoolean("online"),
-                    lastSeenAt = rs.getObject("last_seen_at")?.toString(),
-                    lastAckAt = rs.getObject("last_ack_at")?.toString(),
+                    lastSeenAt = postgresInstantString(rs.getObject("last_seen_at")),
+                    lastAckAt = postgresInstantString(rs.getObject("last_ack_at")),
                 )
             }
         }
@@ -361,4 +363,12 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
     }
 
     override fun close() = dataSource.close()
+}
+
+internal fun postgresInstantString(value: Any?): String? = when (value) {
+    null -> null
+    is Instant -> value.toString()
+    is OffsetDateTime -> value.toInstant().toString()
+    is Timestamp -> value.toInstant().toString()
+    else -> runCatching { Instant.parse(value.toString()).toString() }.getOrNull()
 }
