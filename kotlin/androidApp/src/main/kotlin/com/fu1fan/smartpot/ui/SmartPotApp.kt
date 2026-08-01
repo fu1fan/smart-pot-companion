@@ -3271,8 +3271,8 @@ private fun ControlScreen(
             state.lastCommand?.let { command ->
                 item {
                     Text(
-                        if (command.acknowledged) "设备已确认：${command.ack?.status}" else "命令已发送，等待设备确认",
-                        color = if (command.acknowledged) Leaf else Color(0xFFA56A00),
+                        if (command.acknowledged) "设备已确认：${command.ack?.status}" else "设备未响应，当前已标记离线",
+                        color = if (command.acknowledged) Leaf else Color(0xFFE05252),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )

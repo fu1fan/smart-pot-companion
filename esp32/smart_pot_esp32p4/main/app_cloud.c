@@ -34,15 +34,17 @@
 #define CONFIG_SMART_POT_MQTT_PASSWORD ""
 #endif
 
-#define ONLINE_HEARTBEAT_INTERVAL_US (15LL * 1000LL * 1000LL)
-#define MQTT_RECONNECT_INTERVAL_US (15LL * 1000LL * 1000LL)
-#define MQTT_WATCHDOG_INTERVAL_MS 5000
+#define ONLINE_HEARTBEAT_INTERVAL_US (10LL * 1000LL * 1000LL)
+#define TELEMETRY_PUBLISH_INTERVAL_US (5LL * 1000LL * 1000LL)
+#define MQTT_HARD_RECOVERY_INTERVAL_US (60LL * 1000LL * 1000LL)
+#define MQTT_WATCHDOG_INTERVAL_MS 2000
 
 static const char *TAG = "smart_pot_cloud";
 static esp_mqtt_client_handle_t s_client;
 static volatile bool s_connected;
 static int64_t s_last_online_heartbeat_us;
-static int64_t s_last_reconnect_attempt_us;
+static int64_t s_disconnected_since_us;
+static int64_t s_last_telemetry_publish_us;
 static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
 static bool s_touch_count_initialized;
@@ -76,27 +78,32 @@ static const char *mood_name(app_mood_t mood)
     }
 }
 
-static void publish_json(const char *suffix, cJSON *root, bool retain)
+static bool publish_json(const char *suffix, cJSON *root, bool retain)
 {
-    if (!s_connected || s_client == NULL || root == NULL) return;
+    if (!s_connected || s_client == NULL || root == NULL) return false;
     char topic[176];
     snprintf(topic, sizeof(topic), "%s/%s", s_topic_prefix, suffix);
     char *json = cJSON_PrintUnformatted(root);
-    if (json != NULL) {
-        esp_mqtt_client_publish(s_client, topic, json, 0, 1, retain ? 1 : 0);
-        cJSON_free(json);
+    if (json == NULL) return false;
+    int message_id = esp_mqtt_client_enqueue(s_client, topic, json, 0, 1, retain ? 1 : 0, false);
+    cJSON_free(json);
+    if (message_id < 0) {
+        ESP_LOGW(TAG, "MQTT enqueue failed for %s: %d", suffix, message_id);
+        return false;
     }
+    return true;
 }
 
-static void publish_online(bool online)
+static bool publish_online(bool online)
 {
     char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "deviceId", CONFIG_SMART_POT_DEVICE_ID);
     cJSON_AddBoolToObject(root, "online", online);
     cJSON_AddStringToObject(root, "changedAt", timestamp);
-    publish_json("online", root, true);
+    bool queued = publish_json("online", root, true);
     cJSON_Delete(root);
+    return queued;
 }
 
 static void mqtt_watchdog_task(void *arg)
@@ -112,19 +119,28 @@ static void mqtt_watchdog_task(void *arg)
         if (s_connected) {
             if (s_last_online_heartbeat_us == 0 ||
                 now_us - s_last_online_heartbeat_us >= ONLINE_HEARTBEAT_INTERVAL_US) {
-                publish_online(true);
-                s_last_online_heartbeat_us = now_us;
+                if (publish_online(true)) {
+                    s_last_online_heartbeat_us = now_us;
+                }
             }
             continue;
         }
 
-        if (s_last_reconnect_attempt_us == 0 ||
-            now_us - s_last_reconnect_attempt_us >= MQTT_RECONNECT_INTERVAL_US) {
-            s_last_reconnect_attempt_us = now_us;
-            esp_err_t err = esp_mqtt_client_reconnect(s_client);
-            if (err != ESP_OK && err != ESP_FAIL) {
-                ESP_LOGW(TAG, "MQTT reconnect request failed: %s", esp_err_to_name(err));
+        if (s_disconnected_since_us == 0) {
+            s_disconnected_since_us = now_us;
+        }
+        if (now_us - s_disconnected_since_us >= MQTT_HARD_RECOVERY_INTERVAL_US) {
+            ESP_LOGW(TAG, "MQTT reconnect stalled; restarting client");
+            esp_err_t stop_err = esp_mqtt_client_stop(s_client);
+            if (stop_err != ESP_OK && stop_err != ESP_ERR_INVALID_STATE) {
+                ESP_LOGW(TAG, "MQTT stop failed: %s", esp_err_to_name(stop_err));
             }
+            vTaskDelay(pdMS_TO_TICKS(250));
+            esp_err_t start_err = esp_mqtt_client_start(s_client);
+            if (start_err != ESP_OK) {
+                ESP_LOGW(TAG, "MQTT restart failed: %s", esp_err_to_name(start_err));
+            }
+            s_disconnected_since_us = esp_timer_get_time();
         }
     }
 }
@@ -513,7 +529,7 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     esp_mqtt_event_handle_t event = data;
     if (event_id == MQTT_EVENT_CONNECTED) {
         s_connected = true;
-        s_last_reconnect_attempt_us = 0;
+        s_disconnected_since_us = 0;
         char topic[176];
         snprintf(topic, sizeof(topic), "%s/commands", s_topic_prefix);
         esp_mqtt_client_subscribe(s_client, topic, 1);
@@ -524,8 +540,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     } else if (event_id == MQTT_EVENT_DISCONNECTED) {
         s_connected = false;
         s_last_online_heartbeat_us = 0;
-        s_last_reconnect_attempt_us = esp_timer_get_time();
-        ESP_LOGW(TAG, "Disconnected from MQTT cloud; reconnect watchdog armed");
+        if (s_disconnected_since_us == 0) {
+            s_disconnected_since_us = esp_timer_get_time();
+        }
+        ESP_LOGW(TAG, "Disconnected from MQTT cloud; automatic reconnect active");
     } else if (event_id == MQTT_EVENT_ERROR) {
         ESP_LOGW(TAG, "MQTT transport error");
     } else if (event_id == MQTT_EVENT_DATA) {
@@ -558,9 +576,10 @@ void app_cloud_start(void)
         .session.last_will.msg = lwt_payload,
         .session.last_will.qos = 1,
         .session.last_will.retain = true,
-        .session.keepalive = 30,
+        .session.keepalive = 20,
         .network.reconnect_timeout_ms = 5000,
         .network.timeout_ms = 10000,
+        .outbox.limit = 16384,
     };
     s_client = esp_mqtt_client_init(&config);
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event, NULL);
@@ -573,39 +592,45 @@ void app_cloud_start(void)
 void app_cloud_update_plant_state(const app_plant_state_t *state)
 {
     if (!s_connected || state == NULL) return;
-    char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
-    wifi_ap_record_t ap = {0};
-    int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "schemaVersion", 1);
-    cJSON_AddStringToObject(root, "deviceId", CONFIG_SMART_POT_DEVICE_ID);
-    cJSON_AddNumberToObject(root, "sequence", ++s_sequence);
-    cJSON_AddStringToObject(root, "recordedAt", timestamp);
-    cJSON_AddNumberToObject(root, "soilPercent", state->soil_percent);
-    cJSON_AddNumberToObject(root, "soilAdcRaw", state->soil_adc_raw);
-    cJSON_AddBoolToObject(root, "soilDigitalDry", state->soil_digital_dry);
-    cJSON_AddNumberToObject(root, "lightLux", state->light_lux);
-    cJSON_AddNumberToObject(root, "lightPercent", state->light_percent);
-    if (state->air_quality_valid) {
-        cJSON_AddNumberToObject(root, "tvocPpb", state->tvoc_ppb);
-        cJSON_AddNumberToObject(root, "eco2Ppm", state->eco2_ppm);
-    }
-    cJSON_AddNumberToObject(root, "touchCount", state->touch_count);
-    cJSON_AddBoolToObject(root, "touchActive", state->touch_active);
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_telemetry_publish_us == 0 ||
+        now_us - s_last_telemetry_publish_us >= TELEMETRY_PUBLISH_INTERVAL_US) {
+        char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
+        wifi_ap_record_t ap = {0};
+        int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddNumberToObject(root, "schemaVersion", 1);
+        cJSON_AddStringToObject(root, "deviceId", CONFIG_SMART_POT_DEVICE_ID);
+        cJSON_AddNumberToObject(root, "sequence", ++s_sequence);
+        cJSON_AddStringToObject(root, "recordedAt", timestamp);
+        cJSON_AddNumberToObject(root, "soilPercent", state->soil_percent);
+        cJSON_AddNumberToObject(root, "soilAdcRaw", state->soil_adc_raw);
+        cJSON_AddBoolToObject(root, "soilDigitalDry", state->soil_digital_dry);
+        cJSON_AddNumberToObject(root, "lightLux", state->light_lux);
+        cJSON_AddNumberToObject(root, "lightPercent", state->light_percent);
+        if (state->air_quality_valid) {
+            cJSON_AddNumberToObject(root, "tvocPpb", state->tvoc_ppb);
+            cJSON_AddNumberToObject(root, "eco2Ppm", state->eco2_ppm);
+        }
+        cJSON_AddNumberToObject(root, "touchCount", state->touch_count);
+        cJSON_AddBoolToObject(root, "touchActive", state->touch_active);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
-    cJSON *motion = cJSON_CreateObject();
-    cJSON_AddNumberToObject(motion, "rollDeg", s_motion.roll_deg);
-    cJSON_AddNumberToObject(motion, "pitchDeg", s_motion.pitch_deg);
-    cJSON_AddNumberToObject(motion, "tiltDeltaDeg", s_motion.tilt_delta_deg);
-    cJSON_AddNumberToObject(motion, "tiltLevel", s_motion.tilt_level);
-    cJSON_AddBoolToObject(motion, "fallen", s_motion.tilt_level > 0);
-    cJSON_AddItemToObject(root, "motion", motion);
+        cJSON *motion = cJSON_CreateObject();
+        cJSON_AddNumberToObject(motion, "rollDeg", s_motion.roll_deg);
+        cJSON_AddNumberToObject(motion, "pitchDeg", s_motion.pitch_deg);
+        cJSON_AddNumberToObject(motion, "tiltDeltaDeg", s_motion.tilt_delta_deg);
+        cJSON_AddNumberToObject(motion, "tiltLevel", s_motion.tilt_level);
+        cJSON_AddBoolToObject(motion, "fallen", s_motion.tilt_level > 0);
+        cJSON_AddItemToObject(root, "motion", motion);
 #endif
-    cJSON_AddStringToObject(root, "mood", mood_name(state->mood));
-    cJSON_AddNumberToObject(root, "wifiRssi", rssi);
-    cJSON_AddNumberToObject(root, "uptimeSeconds", esp_timer_get_time() / 1000000ULL);
-    publish_json("telemetry", root, false);
-    cJSON_Delete(root);
+        cJSON_AddStringToObject(root, "mood", mood_name(state->mood));
+        cJSON_AddNumberToObject(root, "wifiRssi", rssi);
+        cJSON_AddNumberToObject(root, "uptimeSeconds", now_us / 1000000ULL);
+        if (publish_json("telemetry", root, false)) {
+            s_last_telemetry_publish_us = now_us;
+        }
+        cJSON_Delete(root);
+    }
     if (!s_touch_count_initialized) {
         s_last_touch_count = state->touch_count;
         s_touch_count_initialized = true;

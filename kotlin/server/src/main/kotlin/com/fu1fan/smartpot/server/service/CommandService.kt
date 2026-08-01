@@ -59,11 +59,21 @@ class CommandService(
                 }
             },
         )
+        if (!mqtt.isConnected() || !deviceIsRecentlyOnline(store.deviceState(pot.deviceId), Instant.now())) {
+            markOffline(pot)
+            return CommandSubmission(command, acknowledged = false)
+        }
         val waiter = CompletableDeferred<DeviceCommandAck>()
         pending[command.commandId] = waiter
-        mqtt.publishCommand(command)
+        val published = runCatching { mqtt.publishCommand(command) }.isSuccess
+        if (!published) {
+            pending.remove(command.commandId)
+            markOffline(pot)
+            return CommandSubmission(command, acknowledged = false)
+        }
         val ack = withTimeoutOrNull(5_000) { waiter.await() }
         pending.remove(command.commandId)
+        if (ack == null) markOffline(pot)
         return CommandSubmission(command, ack != null, ack)
     }
 
@@ -76,6 +86,18 @@ class CommandService(
     fun acceptAck(potId: String, ack: DeviceCommandAck) {
         pending[ack.commandId]?.complete(ack)
         realtime.publish(RealtimeEvent(RealtimeEventType.COMMAND_ACK, potId, appJson.encodeToJsonElement(ack)))
+    }
+
+    private suspend fun markOffline(pot: PotProfile) {
+        val changedAt = Instant.now().toString()
+        store.setOnline(pot.deviceId, false, changedAt)
+        realtime.publish(
+            RealtimeEvent(
+                RealtimeEventType.ONLINE,
+                pot.id,
+                appJson.encodeToJsonElement(DeviceOnlineState(pot.deviceId, online = false, changedAt = changedAt)),
+            ),
+        )
     }
 
     private fun validate(request: DeviceControlRequest) {

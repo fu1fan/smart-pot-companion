@@ -207,7 +207,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         realtimeJob = viewModelScope.launch {
             launch {
                 while (isActive) {
-                    delay(10_000)
+                    delay(5_000)
                     refreshSnapshot(id)
                 }
             }
@@ -502,6 +502,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     fun control(request: DeviceControlRequest) = withPot { id ->
         val result = api.control(id, request)
         mutableState.update { it.copy(lastCommand = result) }
+        refreshSnapshot(id)
     }
 
     fun createShare() = withPot { id -> mutableState.update { it.copy(shareCode = api.share(id)) } }

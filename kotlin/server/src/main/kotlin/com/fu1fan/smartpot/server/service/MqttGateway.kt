@@ -31,6 +31,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.ZoneId
+import java.util.concurrent.TimeUnit
 import java.util.UUID
 
 class MqttGateway(
@@ -43,6 +44,7 @@ class MqttGateway(
     private val realtime: RealtimeHub,
     private val conversationMemories: ConversationMemoryService,
 ) : AutoCloseable {
+    private val deviceTopicKinds = listOf("telemetry", "reported", "acks", "events", "online")
     private var client: Mqtt5AsyncClient? = null
     var commandService: CommandService? = null
 
@@ -53,7 +55,25 @@ class MqttGateway(
             .serverHost(config.mqttHost)
             .serverPort(config.mqttPort)
         if (config.mqttTls) builder.sslWithDefaultConfig()
-        val mqtt = builder.buildAsync()
+        builder.automaticReconnect()
+            .initialDelay(1, TimeUnit.SECONDS)
+            .maxDelay(15, TimeUnit.SECONDS)
+            .applyAutomaticReconnect()
+        lateinit var mqtt: Mqtt5AsyncClient
+        builder.addConnectedListener {
+            subscribeDeviceTopics(mqtt)
+            println("MQTT server gateway connected and subscriptions refreshed")
+        }
+        builder.addDisconnectedListener { context ->
+            System.err.println("MQTT server gateway disconnected; automatic reconnect active: ${context.cause.message}")
+        }
+        mqtt = builder.buildAsync()
+        client = mqtt
+        mqtt.publishes(MqttGlobalPublishFilter.ALL) { publish ->
+            val topic = publish.topic.toString()
+            val payload = StandardCharsets.UTF_8.decode(publish.payload.orElse(ByteBuffer.allocate(0))).toString()
+            scope.launch { runCatching { consume(topic, payload, publish.isRetain) }.onFailure { System.err.println("MQTT message rejected: $topic: ${it.message}") } }
+        }
         val connect = mqtt.connectWith().cleanStart(false).keepAlive(30)
         if (!config.mqttUsername.isNullOrBlank()) {
             connect.simpleAuth()
@@ -62,16 +82,9 @@ class MqttGateway(
                 .applySimpleAuth()
         }
         connect.send().join()
-        mqtt.publishes(MqttGlobalPublishFilter.ALL) { publish ->
-            val topic = publish.topic.toString()
-            val payload = StandardCharsets.UTF_8.decode(publish.payload.orElse(ByteBuffer.allocate(0))).toString()
-            scope.launch { runCatching { consume(topic, payload, publish.isRetain) }.onFailure { System.err.println("MQTT message rejected: $topic: ${it.message}") } }
-        }
-        listOf("telemetry", "reported", "acks", "events", "online").forEach { suffix ->
-            mqtt.subscribeWith().topicFilter("smartpot/v1/devices/+/$suffix").qos(MqttQos.AT_LEAST_ONCE).send().join()
-        }
-        client = mqtt
     }
+
+    fun isConnected(): Boolean = client?.state?.isConnected == true
 
     suspend fun publishCommand(command: DeviceCommand) = publish(
         "smartpot/v1/devices/${command.deviceId}/commands",
@@ -135,10 +148,15 @@ class MqttGateway(
                 else resyncScheduleIfNeeded(pot, reported.scheduleRevision, "reported")
                 potService.publishSnapshot(pot.id)
             }
-            "acks" -> commandService?.acceptAck(pot.id, appJson.decodeFromString(payload))
+            "acks" -> {
+                val ack = appJson.decodeFromString<DeviceCommandAck>(payload)
+                store.setOnline(deviceId, true, observedAt)
+                commandService?.acceptAck(pot.id, ack)
+            }
             "events" -> {
                 val event = appJson.decodeFromString<DeviceEvent>(payload)
                 require(event.deviceId == deviceId)
+                store.setOnline(deviceId, true, observedAt)
                 if (event.type in setOf(DeviceEventType.PHYSICAL_TOUCH, DeviceEventType.REMOTE_TOUCH)) {
                     affinityService.award(pot.id, "device-event:${event.eventId}", 1, Instant.parse(event.occurredAt))
                 }
@@ -173,6 +191,20 @@ class MqttGateway(
                 }
                 realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(observedOnline)))
             }
+        }
+    }
+
+    private fun subscribeDeviceTopics(mqtt: Mqtt5AsyncClient) {
+        deviceTopicKinds.forEach { suffix ->
+            mqtt.subscribeWith()
+                .topicFilter("smartpot/v1/devices/+/$suffix")
+                .qos(MqttQos.AT_LEAST_ONCE)
+                .send()
+                .whenComplete { _, error ->
+                    if (error != null) {
+                        System.err.println("MQTT subscription failed for $suffix: ${error.message}")
+                    }
+                }
         }
     }
 
