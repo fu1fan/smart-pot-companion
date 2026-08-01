@@ -25,6 +25,7 @@ static const char *TAG = "app_ui";
 
 LV_IMAGE_DECLARE(cat_planter_img);
 LV_IMAGE_DECLARE(home_static_bg_img);
+LV_IMAGE_DECLARE(metric_heart_small_img);
 LV_IMAGE_DECLARE(schedule_static_bg_img);
 LV_IMAGE_DECLARE(emoji_heart_img);
 LV_IMAGE_DECLARE(emoji_smile_img);
@@ -938,10 +939,17 @@ static lv_obj_t *make_metric_card(lv_obj_t *parent, int32_t x, int32_t y, const 
         /* Cover the heart baked into the static background, then draw a cloud. */
         lv_obj_set_style_bg_opa(icon, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(icon, lv_color_hex(0x050706), LV_PART_MAIN);
-        make_leaf(icon, 8, 29, 56, 25, accent);
-        make_leaf(icon, 12, 20, 25, 25, accent);
-        make_leaf(icon, 29, 11, 31, 34, accent);
-        make_leaf(icon, 47, 23, 19, 22, accent);
+        make_leaf(icon, 9, 30, 54, 23, accent);
+        make_leaf(icon, 12, 22, 24, 24, accent);
+        make_leaf(icon, 27, 13, 31, 33, accent);
+        make_leaf(icon, 46, 23, 18, 23, accent);
+        lv_obj_t *cloud_base = lv_obj_create(icon);
+        lv_obj_remove_style_all(cloud_base);
+        lv_obj_set_size(cloud_base, 51, 10);
+        lv_obj_align(cloud_base, LV_ALIGN_TOP_LEFT, 11, 42);
+        lv_obj_set_style_bg_opa(cloud_base, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(cloud_base, accent, LV_PART_MAIN);
+        lv_obj_set_style_radius(cloud_base, 2, LV_PART_MAIN);
         lv_obj_clear_flag(icon, LV_OBJ_FLAG_HIDDEN);
     }
 
@@ -2361,14 +2369,10 @@ void app_ui_init(void)
 
     make_cat_art(s_face_page);
 
-    lv_obj_t *mood_heart = lv_obj_create(s_face_page);
-    lv_obj_remove_style_all(mood_heart);
-    lv_obj_set_size(mood_heart, 24, 22);
-    lv_obj_align(mood_heart, LV_ALIGN_TOP_LEFT, 16, 80);
+    lv_obj_t *mood_heart = lv_image_create(s_face_page);
+    lv_image_set_src(mood_heart, &metric_heart_small_img);
+    lv_obj_align(mood_heart, LV_ALIGN_TOP_LEFT, 14, 77);
     lv_obj_clear_flag(mood_heart, LV_OBJ_FLAG_SCROLLABLE);
-    make_leaf(mood_heart, 2, 2, 11, 11, lv_color_hex(0xff7f9d));
-    make_leaf(mood_heart, 11, 2, 11, 11, lv_color_hex(0xff7f9d));
-    make_leaf(mood_heart, 6, 8, 12, 12, lv_color_hex(0xff7f9d));
 
     s_face_mood_label = lv_label_create(s_face_page);
     lv_label_set_text(s_face_mood_label, "Mood: happy");

@@ -1018,7 +1018,10 @@ private fun DashboardScreen(
                             snap?.telemetry?.tvocPpb?.toString() ?: "--"
                         },
                         unit = if (showEco2) "ppm" else "ppb",
-                        status = if (showEco2) "点击查看 TVOC" else "点击查看 CO₂",
+                        status = airQualityLabel(
+                            showEco2 = showEco2,
+                            value = if (showEco2) snap?.telemetry?.eco2Ppm else snap?.telemetry?.tvocPpb,
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .clickable { showEco2 = !showEco2 },
@@ -4413,6 +4416,15 @@ private fun chatTimeText(createdAt: String, zone: ZoneId): String = runCatching 
 
 private fun soilLabel(value: SoilStatus?) = when (value) { SoilStatus.TOO_DRY -> "缺水"; SoilStatus.SUITABLE -> "适宜"; SoilStatus.TOO_WET -> "积水风险"; else -> "等待数据" }
 private fun lightLabel(value: LightStatus?) = when (value) { LightStatus.DARK -> "阴暗"; LightStatus.DIFFUSE -> "散射光"; LightStatus.TOO_STRONG -> "强光"; else -> "等待数据" }
+private fun airQualityLabel(showEco2: Boolean, value: Int?): String = when {
+    value == null -> "等待数据"
+    showEco2 && value <= 800 -> "空气清新"
+    showEco2 && value <= 1200 -> "轻度偏高"
+    showEco2 -> "通风不足"
+    value <= 220 -> "空气清新"
+    value <= 660 -> "轻度偏高"
+    else -> "空气较差"
+}
 private fun minuteOfDayText(value: Int): String = "%02d:%02d".format((value / 60).coerceIn(0, 23), (value % 60).coerceIn(0, 59))
 private fun parseMinuteOfDay(value: String): Int? {
     val parts = value.trim().split(":")
@@ -4688,7 +4700,7 @@ private fun interactionStatus(value: Int): String = when {
 }
 
 private fun metricStatusColor(value: String): Color = when (value) {
-    "适宜", "常伴", "不错", "散射光" -> BrightLeaf
+    "适宜", "常伴", "不错", "散射光", "空气清新" -> BrightLeaf
     "等待数据", "等待互动" -> Muted
     else -> Color(0xFFD17B2F)
 }

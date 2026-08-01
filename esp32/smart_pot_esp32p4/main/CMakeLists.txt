@@ -2,6 +2,7 @@ set(SMART_POT_SRCS
         app_main.c
         app_ui.c
         cat_planter_img.c
+        metric_heart_small_img.c
         home_static_bg_img.c
         schedule_static_bg_img.c
         emoji_stickers_img.c
