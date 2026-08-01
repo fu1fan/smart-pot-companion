@@ -35,6 +35,7 @@ import com.fu1fan.smartpot.protocol.UpdateScheduleItemRequest
 import com.fu1fan.smartpot.protocol.UserMemory
 import com.fu1fan.smartpot.server.catalog.SpeciesCatalog
 import com.fu1fan.smartpot.server.service.conversationMessagesFromEvent
+import com.fu1fan.smartpot.server.service.deviceIsRecentlyOnline
 import com.fu1fan.smartpot.server.service.AffinityService
 import com.fu1fan.smartpot.server.service.ConversationMemoryService
 import com.fu1fan.smartpot.server.service.RealtimeHub
@@ -44,6 +45,7 @@ import com.fu1fan.smartpot.server.service.parseMemoryCandidates
 import com.fu1fan.smartpot.server.service.reportedProfileMatches
 import com.fu1fan.smartpot.server.service.weatherCodeLabel
 import com.fu1fan.smartpot.server.store.InMemorySmartPotStore
+import com.fu1fan.smartpot.server.store.StoredDeviceState
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.bearerAuth
@@ -587,6 +589,15 @@ class ApplicationTest {
         val state = store.deviceState("device-1")
         assertFalse(state.online)
         assertEquals(willObservedAt, state.lastSeenAt)
+    }
+
+    @Test
+    fun `device snapshot expires online state when telemetry stops`() {
+        val now = Instant.parse("2026-08-01T08:01:00Z")
+
+        assertTrue(deviceIsRecentlyOnline(StoredDeviceState(online = true, lastSeenAt = now.minusSeconds(30).toString()), now))
+        assertFalse(deviceIsRecentlyOnline(StoredDeviceState(online = true, lastSeenAt = now.minusSeconds(46).toString()), now))
+        assertFalse(deviceIsRecentlyOnline(StoredDeviceState(online = false, lastSeenAt = now.toString()), now))
     }
 
     @Test

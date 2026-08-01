@@ -4,6 +4,7 @@ import com.fu1fan.smartpot.protocol.*
 import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import kotlinx.serialization.json.encodeToJsonElement
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
@@ -65,7 +66,7 @@ class PotService(
             pot = pot,
             telemetry = telemetry,
             deviceState = state.reported,
-            online = state.online,
+            online = deviceIsRecentlyOnline(state, Instant.now()),
             lastSeenAt = state.lastSeenAt,
             evaluated = telemetry?.let { PlantRules.evaluate(it, pot.species.thresholds) },
             activeAlerts = store.listAlerts(id, activeOnly = true),
@@ -83,4 +84,12 @@ class PotService(
         if (latest == pot.species) return pot
         return store.savePot(pot.copy(species = latest))
     }
+}
+
+private const val DEVICE_ONLINE_TIMEOUT_SECONDS = 45L
+
+internal fun deviceIsRecentlyOnline(state: com.fu1fan.smartpot.server.store.StoredDeviceState, now: Instant): Boolean {
+    if (!state.online) return false
+    val lastSeenAt = state.lastSeenAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
+    return Duration.between(lastSeenAt, now).seconds <= DEVICE_ONLINE_TIMEOUT_SECONDS
 }

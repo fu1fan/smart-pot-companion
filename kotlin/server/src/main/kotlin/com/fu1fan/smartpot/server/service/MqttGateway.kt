@@ -65,7 +65,7 @@ class MqttGateway(
         mqtt.publishes(MqttGlobalPublishFilter.ALL) { publish ->
             val topic = publish.topic.toString()
             val payload = StandardCharsets.UTF_8.decode(publish.payload.orElse(ByteBuffer.allocate(0))).toString()
-            scope.launch { runCatching { consume(topic, payload) }.onFailure { System.err.println("MQTT message rejected: $topic: ${it.message}") } }
+            scope.launch { runCatching { consume(topic, payload, publish.isRetain) }.onFailure { System.err.println("MQTT message rejected: $topic: ${it.message}") } }
         }
         listOf("telemetry", "reported", "acks", "events", "online").forEach { suffix ->
             mqtt.subscribeWith().topicFilter("smartpot/v1/devices/+/$suffix").qos(MqttQos.AT_LEAST_ONCE).send().join()
@@ -91,7 +91,7 @@ class MqttGateway(
             .payload(StandardCharsets.UTF_8.encode(body)).send().join()
     }
 
-    private suspend fun consume(topic: String, payload: String) {
+    private suspend fun consume(topic: String, payload: String, retained: Boolean) {
         val (deviceId, kind) = parseDeviceTopic(topic)
         val pot = potService.ensureForDevice(deviceId)
         val observedAt = Instant.now().toString()
@@ -163,7 +163,8 @@ class MqttGateway(
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
                 require(online.deviceId == deviceId)
-                val observedOnline = online.copy(changedAt = observedAt)
+                val changedAt = if (online.online && retained) online.changedAt else observedAt
+                val observedOnline = online.copy(changedAt = changedAt)
                 store.setOnline(deviceId, observedOnline.online, observedOnline.changedAt)
                 if (online.online) {
                     runCatching { commandService?.syncProfile(pot) }
