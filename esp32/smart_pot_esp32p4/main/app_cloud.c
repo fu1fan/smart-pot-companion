@@ -16,6 +16,7 @@
 #include "app_tts.h"
 #include "app_ui.h"
 #include "app_sensors.h"
+#include "app_wifi.h"
 
 #ifndef CONFIG_SMART_POT_CLOUD_ENABLE
 #define CONFIG_SMART_POT_CLOUD_ENABLE 0
@@ -33,12 +34,15 @@
 #define CONFIG_SMART_POT_MQTT_PASSWORD ""
 #endif
 
-#define ONLINE_HEARTBEAT_INTERVAL_US (30LL * 1000LL * 1000LL)
+#define ONLINE_HEARTBEAT_INTERVAL_US (15LL * 1000LL * 1000LL)
+#define MQTT_RECONNECT_INTERVAL_US (15LL * 1000LL * 1000LL)
+#define MQTT_WATCHDOG_INTERVAL_MS 5000
 
 static const char *TAG = "smart_pot_cloud";
 static esp_mqtt_client_handle_t s_client;
-static bool s_connected;
+static volatile bool s_connected;
 static int64_t s_last_online_heartbeat_us;
+static int64_t s_last_reconnect_attempt_us;
 static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
 static bool s_touch_count_initialized;
@@ -93,6 +97,36 @@ static void publish_online(bool online)
     cJSON_AddStringToObject(root, "changedAt", timestamp);
     publish_json("online", root, true);
     cJSON_Delete(root);
+}
+
+static void mqtt_watchdog_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(MQTT_WATCHDOG_INTERVAL_MS));
+        if (s_client == NULL || !app_wifi_is_connected()) {
+            continue;
+        }
+
+        const int64_t now_us = esp_timer_get_time();
+        if (s_connected) {
+            if (s_last_online_heartbeat_us == 0 ||
+                now_us - s_last_online_heartbeat_us >= ONLINE_HEARTBEAT_INTERVAL_US) {
+                publish_online(true);
+                s_last_online_heartbeat_us = now_us;
+            }
+            continue;
+        }
+
+        if (s_last_reconnect_attempt_us == 0 ||
+            now_us - s_last_reconnect_attempt_us >= MQTT_RECONNECT_INTERVAL_US) {
+            s_last_reconnect_attempt_us = now_us;
+            esp_err_t err = esp_mqtt_client_reconnect(s_client);
+            if (err != ESP_OK && err != ESP_FAIL) {
+                ESP_LOGW(TAG, "MQTT reconnect request failed: %s", esp_err_to_name(err));
+            }
+        }
+    }
 }
 
 static void publish_reported(void)
@@ -479,6 +513,7 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     esp_mqtt_event_handle_t event = data;
     if (event_id == MQTT_EVENT_CONNECTED) {
         s_connected = true;
+        s_last_reconnect_attempt_us = 0;
         char topic[176];
         snprintf(topic, sizeof(topic), "%s/commands", s_topic_prefix);
         esp_mqtt_client_subscribe(s_client, topic, 1);
@@ -489,6 +524,10 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
     } else if (event_id == MQTT_EVENT_DISCONNECTED) {
         s_connected = false;
         s_last_online_heartbeat_us = 0;
+        s_last_reconnect_attempt_us = esp_timer_get_time();
+        ESP_LOGW(TAG, "Disconnected from MQTT cloud; reconnect watchdog armed");
+    } else if (event_id == MQTT_EVENT_ERROR) {
+        ESP_LOGW(TAG, "MQTT transport error");
     } else if (event_id == MQTT_EVENT_DATA) {
         if (event->current_data_offset == 0) s_command_len = 0;
         if (s_command_len + event->data_len < sizeof(s_command_buffer)) {
@@ -519,22 +558,21 @@ void app_cloud_start(void)
         .session.last_will.msg = lwt_payload,
         .session.last_will.qos = 1,
         .session.last_will.retain = true,
+        .session.keepalive = 30,
         .network.reconnect_timeout_ms = 5000,
+        .network.timeout_ms = 10000,
     };
     s_client = esp_mqtt_client_init(&config);
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event, NULL);
     esp_mqtt_client_start(s_client);
+    if (xTaskCreate(mqtt_watchdog_task, "mqtt_watchdog", 4096, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create MQTT watchdog task");
+    }
 }
 
 void app_cloud_update_plant_state(const app_plant_state_t *state)
 {
     if (!s_connected || state == NULL) return;
-    const int64_t now_us = esp_timer_get_time();
-    if (s_last_online_heartbeat_us == 0 ||
-        now_us - s_last_online_heartbeat_us >= ONLINE_HEARTBEAT_INTERVAL_US) {
-        publish_online(true);
-        s_last_online_heartbeat_us = now_us;
-    }
     char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
     wifi_ap_record_t ap = {0};
     int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
