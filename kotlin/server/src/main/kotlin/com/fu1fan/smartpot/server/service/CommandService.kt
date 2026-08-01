@@ -73,7 +73,6 @@ class CommandService(
         }
         val ack = withTimeoutOrNull(5_000) { waiter.await() }
         pending.remove(command.commandId)
-        if (ack == null) markOffline(pot)
         return CommandSubmission(command, ack != null, ack)
     }
 

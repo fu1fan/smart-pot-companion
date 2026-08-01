@@ -3270,9 +3270,14 @@ private fun ControlScreen(
             }
             state.lastCommand?.let { command ->
                 item {
+                    val commandMessage = when {
+                        command.acknowledged -> "设备已确认：${command.ack?.status}"
+                        state.snapshot?.online == true -> "设备在线，本次命令尚未确认，请重试"
+                        else -> "设备当前离线，命令未发送"
+                    }
                     Text(
-                        if (command.acknowledged) "设备已确认：${command.ack?.status}" else "设备未响应，当前已标记离线",
-                        color = if (command.acknowledged) Leaf else Color(0xFFE05252),
+                        commandMessage,
+                        color = if (command.acknowledged) Leaf else Color(0xFFA56A00),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )

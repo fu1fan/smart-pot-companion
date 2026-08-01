@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fu1fan.smartpot.BuildConfig
 import com.fu1fan.smartpot.data.SmartPotApi
+import com.fu1fan.smartpot.data.mobileJson
 import com.fu1fan.smartpot.protocol.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -217,7 +219,17 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                         when (event.type) {
                             RealtimeEventType.FOCUS, RealtimeEventType.DIARY, RealtimeEventType.SCHEDULE, RealtimeEventType.MEMORY -> refreshAll(id)
                             RealtimeEventType.CHAT -> refreshChat(id)
-                            RealtimeEventType.COMMAND_ACK -> Unit
+                            RealtimeEventType.COMMAND_ACK -> {
+                                val ack = mobileJson.decodeFromJsonElement<DeviceCommandAck>(event.payload)
+                                mutableState.update { current ->
+                                    val submission = current.lastCommand
+                                    if (submission?.command?.commandId == ack.commandId) {
+                                        current.copy(lastCommand = submission.copy(acknowledged = true, ack = ack))
+                                    } else {
+                                        current
+                                    }
+                                }
+                            }
                             else -> refreshSnapshot(id)
                         }
                     }
