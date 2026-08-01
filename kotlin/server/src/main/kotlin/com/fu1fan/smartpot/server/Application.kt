@@ -79,7 +79,10 @@ fun Application.module(
     val mqtt = MqttGateway(config, scope, store, pots, alerts, affinity, realtime, conversationMemories)
     val commands = CommandService(store, mqtt, realtime)
     mqtt.commandService = commands
-    if (startMqtt) mqtt.start()
+    if (startMqtt) {
+        mqtt.start()
+        commands.startPresenceProbes(scope)
+    }
     val scheduleMaintenance = ScheduleMaintenanceService(store, commands, realtime)
     diary.start(scope)
     maintenance.start(scope)

@@ -5,6 +5,10 @@ import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.potGrowthDays
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.*
 import java.time.Instant
@@ -18,6 +22,17 @@ class CommandService(
     private val realtime: RealtimeHub,
 ) {
     private val pending = ConcurrentHashMap<String, CompletableDeferred<DeviceCommandAck>>()
+
+    fun startPresenceProbes(scope: CoroutineScope) {
+        scope.launch {
+            while (isActive) {
+                runCatching { store.listPots() }
+                    .getOrDefault(emptyList())
+                    .forEach { pot -> launch { probe(pot) } }
+                delay(PRESENCE_PROBE_INTERVAL_MS)
+            }
+        }
+    }
 
     suspend fun submit(pot: PotProfile, request: DeviceControlRequest): CommandSubmission {
         validate(request)
@@ -87,6 +102,45 @@ class CommandService(
         realtime.publish(RealtimeEvent(RealtimeEventType.COMMAND_ACK, potId, appJson.encodeToJsonElement(ack)))
     }
 
+    private suspend fun probe(pot: PotProfile) {
+        if (!mqtt.isConnected()) {
+            publishPresence(pot)
+            return
+        }
+        val now = Instant.now()
+        val command = DeviceCommand(
+            commandId = "presence-${UUID.randomUUID()}",
+            deviceId = pot.deviceId,
+            type = DeviceCommandType.PING,
+            issuedAt = now.toString(),
+            expiresAt = now.plusSeconds(15).toString(),
+        )
+        val waiter = CompletableDeferred<DeviceCommandAck>()
+        pending[command.commandId] = waiter
+        val published = runCatching { mqtt.publishCommand(command) }.isSuccess
+        if (published) withTimeoutOrNull(PRESENCE_PROBE_TIMEOUT_MS) { waiter.await() }
+        pending.remove(command.commandId)
+        publishPresence(pot)
+    }
+
+    private suspend fun publishPresence(pot: PotProfile) {
+        val state = store.deviceState(pot.deviceId)
+        val observedAt = Instant.now()
+        realtime.publish(
+            RealtimeEvent(
+                RealtimeEventType.ONLINE,
+                pot.id,
+                appJson.encodeToJsonElement(
+                    DeviceOnlineState(
+                        deviceId = pot.deviceId,
+                        online = mqtt.isConnected() && deviceIsRecentlyOnline(state, observedAt),
+                        changedAt = observedAt.toString(),
+                    ),
+                ),
+            ),
+        )
+    }
+
     private suspend fun markOffline(pot: PotProfile) {
         val changedAt = Instant.now().toString()
         store.setOnline(pot.deviceId, false, changedAt)
@@ -135,6 +189,8 @@ class CommandService(
     }
 
     companion object {
+        private const val PRESENCE_PROBE_INTERVAL_MS = 15_000L
+        private const val PRESENCE_PROBE_TIMEOUT_MS = 4_000L
         val EMOJI_IDS = setOf("heart", "smile", "happy", "thirsty", "dark", "weak", "wave", "star", "flower", "water", "sun", "sleep")
     }
 }

@@ -111,6 +111,7 @@ data class DeviceDesiredState(
 
 @Serializable
 enum class DeviceCommandType {
+    PING,
     SET_BRIGHTNESS,
     SET_VOLUME,
     SET_STANDBY,

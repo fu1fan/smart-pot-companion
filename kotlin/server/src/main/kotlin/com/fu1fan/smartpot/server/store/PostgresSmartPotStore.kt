@@ -134,8 +134,17 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         }; Unit
     }
 
+    override suspend fun recordCommandAck(deviceId: String, acknowledgedAt: String) = db { c ->
+        c.prepareStatement(
+            "INSERT INTO device_state(device_id,online,last_seen_at,last_ack_at) VALUES (?,TRUE,?::timestamptz,?::timestamptz) " +
+                "ON CONFLICT(device_id) DO UPDATE SET online=TRUE,last_seen_at=EXCLUDED.last_seen_at,last_ack_at=EXCLUDED.last_ack_at",
+        ).use { s ->
+            s.setString(1, deviceId); s.setString(2, acknowledgedAt); s.setString(3, acknowledgedAt); s.executeUpdate()
+        }; Unit
+    }
+
     override suspend fun deviceState(deviceId: String): StoredDeviceState = db { c ->
-        c.prepareStatement("SELECT reported,desired,online,last_seen_at FROM device_state WHERE device_id=?").use { s ->
+        c.prepareStatement("SELECT reported,desired,online,last_seen_at,last_ack_at FROM device_state WHERE device_id=?").use { s ->
             s.setString(1, deviceId)
             s.executeQuery().use { rs ->
                 if (!rs.next()) StoredDeviceState() else StoredDeviceState(
@@ -143,6 +152,7 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
                     desired = rs.getString("desired")?.let { decode(it) },
                     online = rs.getBoolean("online"),
                     lastSeenAt = rs.getObject("last_seen_at")?.toString(),
+                    lastAckAt = rs.getObject("last_ack_at")?.toString(),
                 )
             }
         }

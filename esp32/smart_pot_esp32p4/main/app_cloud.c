@@ -465,7 +465,9 @@ static void handle_command(const char *json)
         cJSON_Delete(root); return;
     }
     bool ok = true;
-    if (strcmp(type->valuestring, "SET_BRIGHTNESS") == 0) {
+    if (strcmp(type->valuestring, "PING") == 0) {
+        ok = true;
+    } else if (strcmp(type->valuestring, "SET_BRIGHTNESS") == 0) {
         cJSON *value = cJSON_GetObjectItem(payload, "brightnessPercent");
         ok = cJSON_IsNumber(value) && value->valueint >= 0 && value->valueint <= 100;
         if (ok) { s_brightness = value->valueint; s_standby = value->valueint == 0; bsp_display_brightness_set(value->valueint); }

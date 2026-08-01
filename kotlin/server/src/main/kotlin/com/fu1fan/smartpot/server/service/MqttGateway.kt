@@ -66,6 +66,7 @@ class MqttGateway(
         }
         builder.addDisconnectedListener { context ->
             System.err.println("MQTT server gateway disconnected; automatic reconnect active: ${context.cause.message}")
+            scope.launch { markAllDevicesGatewayOffline() }
         }
         mqtt = builder.buildAsync()
         client = mqtt
@@ -150,7 +151,8 @@ class MqttGateway(
             }
             "acks" -> {
                 val ack = appJson.decodeFromString<DeviceCommandAck>(payload)
-                store.setOnline(deviceId, true, observedAt)
+                require(ack.deviceId == deviceId)
+                store.recordCommandAck(deviceId, observedAt)
                 commandService?.acceptAck(pot.id, ack)
             }
             "events" -> {
@@ -205,6 +207,20 @@ class MqttGateway(
                         System.err.println("MQTT subscription failed for $suffix: ${error.message}")
                     }
                 }
+        }
+    }
+
+    private suspend fun markAllDevicesGatewayOffline() {
+        val changedAt = Instant.now().toString()
+        store.listPots().forEach { pot ->
+            store.setOnline(pot.deviceId, false, changedAt)
+            realtime.publish(
+                RealtimeEvent(
+                    RealtimeEventType.ONLINE,
+                    pot.id,
+                    appJson.encodeToJsonElement(DeviceOnlineState(pot.deviceId, false, changedAt)),
+                ),
+            )
         }
     }
 

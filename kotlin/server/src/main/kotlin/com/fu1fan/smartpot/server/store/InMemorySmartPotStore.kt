@@ -69,6 +69,13 @@ class InMemorySmartPotStore : SmartPotStore {
         }
     }
 
+    override suspend fun recordCommandAck(deviceId: String, acknowledgedAt: String) {
+        states.compute(deviceId) { _, old ->
+            val current = old ?: StoredDeviceState()
+            current.copy(online = true, lastSeenAt = acknowledgedAt, lastAckAt = acknowledgedAt)
+        }
+    }
+
     override suspend fun deviceState(deviceId: String) = states[deviceId] ?: StoredDeviceState()
 
     override suspend fun listAlerts(potId: String, activeOnly: Boolean): List<PlantAlert> =

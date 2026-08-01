@@ -7,6 +7,7 @@ data class StoredDeviceState(
     val desired: DeviceDesiredState? = null,
     val online: Boolean = false,
     val lastSeenAt: String? = null,
+    val lastAckAt: String? = null,
 )
 
 interface SmartPotStore : AutoCloseable {
@@ -27,6 +28,7 @@ interface SmartPotStore : AutoCloseable {
     suspend fun saveReportedState(state: DeviceReportedState)
     suspend fun saveDesiredState(state: DeviceDesiredState)
     suspend fun setOnline(deviceId: String, online: Boolean, changedAt: String)
+    suspend fun recordCommandAck(deviceId: String, acknowledgedAt: String)
     suspend fun deviceState(deviceId: String): StoredDeviceState
 
     suspend fun listAlerts(potId: String, activeOnly: Boolean = false): List<PlantAlert>

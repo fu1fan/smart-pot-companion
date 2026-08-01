@@ -592,9 +592,43 @@ class ApplicationTest {
     fun `device snapshot expires online state when telemetry stops`() {
         val now = Instant.parse("2026-08-01T08:01:00Z")
 
-        assertTrue(deviceIsRecentlyOnline(StoredDeviceState(online = true, lastSeenAt = now.minusSeconds(30).toString()), now))
-        assertFalse(deviceIsRecentlyOnline(StoredDeviceState(online = true, lastSeenAt = now.minusSeconds(46).toString()), now))
-        assertFalse(deviceIsRecentlyOnline(StoredDeviceState(online = false, lastSeenAt = now.toString()), now))
+        assertTrue(
+            deviceIsRecentlyOnline(
+                StoredDeviceState(
+                    online = true,
+                    lastSeenAt = now.minusSeconds(30).toString(),
+                    lastAckAt = now.minusSeconds(20).toString(),
+                ),
+                now,
+            ),
+        )
+        assertFalse(
+            deviceIsRecentlyOnline(
+                StoredDeviceState(
+                    online = true,
+                    lastSeenAt = now.minusSeconds(46).toString(),
+                    lastAckAt = now.minusSeconds(20).toString(),
+                ),
+                now,
+            ),
+        )
+        assertFalse(
+            deviceIsRecentlyOnline(
+                StoredDeviceState(
+                    online = true,
+                    lastSeenAt = now.minusSeconds(20).toString(),
+                    lastAckAt = now.minusSeconds(46).toString(),
+                ),
+                now,
+            ),
+        )
+        assertFalse(deviceIsRecentlyOnline(StoredDeviceState(online = true, lastSeenAt = now.toString()), now))
+        assertFalse(
+            deviceIsRecentlyOnline(
+                StoredDeviceState(online = false, lastSeenAt = now.toString(), lastAckAt = now.toString()),
+                now,
+            ),
+        )
     }
 
     @Test

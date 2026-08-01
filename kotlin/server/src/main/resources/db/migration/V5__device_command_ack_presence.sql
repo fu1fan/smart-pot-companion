@@ -1,0 +1,2 @@
+ALTER TABLE device_state
+    ADD COLUMN IF NOT EXISTS last_ack_at TIMESTAMPTZ;
