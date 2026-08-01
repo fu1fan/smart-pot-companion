@@ -122,7 +122,7 @@ class MqttGateway(
             "reported" -> {
                 val reported = appJson.decodeFromString<DeviceReportedState>(payload)
                 require(reported.deviceId == deviceId)
-                store.saveReportedState(reported)
+                store.saveReportedState(reported.copy(reportedAt = observedAt))
                 store.setOnline(deviceId, true, observedAt)
                 resyncProfileIfNeeded(pot, reported)
                 val scheduleChanged = mergeDeviceScheduleItems(

@@ -564,17 +564,14 @@ class ApplicationTest {
     }
 
     @Test
-    fun `stale offline event cannot overwrite newer online state`() = runBlocking {
+    fun `latest server observation overrides device clock drift`() = runBlocking {
         val store = InMemorySmartPotStore()
         store.setOnline("device-1", true, "2026-08-01T08:00:30Z")
         store.setOnline("device-1", false, "1970-01-01T00:00:00Z")
 
-        val afterStaleEvent = store.deviceState("device-1")
-        assertTrue(afterStaleEvent.online)
-        assertEquals("2026-08-01T08:00:30Z", afterStaleEvent.lastSeenAt)
-
-        store.setOnline("device-1", false, "2026-08-01T08:01:00Z")
-        assertFalse(store.deviceState("device-1").online)
+        val latestObservation = store.deviceState("device-1")
+        assertFalse(latestObservation.online)
+        assertEquals("1970-01-01T00:00:00Z", latestObservation.lastSeenAt)
     }
 
     @Test

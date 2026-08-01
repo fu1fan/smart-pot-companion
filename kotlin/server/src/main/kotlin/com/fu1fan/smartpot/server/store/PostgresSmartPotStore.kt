@@ -128,8 +128,7 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
     override suspend fun setOnline(deviceId: String, online: Boolean, changedAt: String) = db { c ->
         c.prepareStatement(
             "INSERT INTO device_state(device_id,online,last_seen_at) VALUES (?,?,?::timestamptz) " +
-                "ON CONFLICT(device_id) DO UPDATE SET online=EXCLUDED.online,last_seen_at=EXCLUDED.last_seen_at " +
-                "WHERE device_state.last_seen_at IS NULL OR EXCLUDED.last_seen_at >= device_state.last_seen_at",
+                "ON CONFLICT(device_id) DO UPDATE SET online=EXCLUDED.online,last_seen_at=EXCLUDED.last_seen_at",
         ).use { s ->
             s.setString(1, deviceId); s.setBoolean(2, online); s.setString(3, changedAt); s.executeUpdate()
         }; Unit
