@@ -33,9 +33,12 @@
 #define CONFIG_SMART_POT_MQTT_PASSWORD ""
 #endif
 
+#define ONLINE_HEARTBEAT_INTERVAL_US (30LL * 1000LL * 1000LL)
+
 static const char *TAG = "smart_pot_cloud";
 static esp_mqtt_client_handle_t s_client;
 static bool s_connected;
+static int64_t s_last_online_heartbeat_us;
 static uint64_t s_sequence;
 static uint32_t s_last_touch_count;
 static bool s_touch_count_initialized;
@@ -480,10 +483,12 @@ static void mqtt_event(void *args, esp_event_base_t base, int32_t event_id, void
         snprintf(topic, sizeof(topic), "%s/commands", s_topic_prefix);
         esp_mqtt_client_subscribe(s_client, topic, 1);
         publish_online(true);
+        s_last_online_heartbeat_us = esp_timer_get_time();
         publish_reported();
         ESP_LOGI(TAG, "Connected to MQTT cloud as %s", CONFIG_SMART_POT_DEVICE_ID);
     } else if (event_id == MQTT_EVENT_DISCONNECTED) {
         s_connected = false;
+        s_last_online_heartbeat_us = 0;
     } else if (event_id == MQTT_EVENT_DATA) {
         if (event->current_data_offset == 0) s_command_len = 0;
         if (s_command_len + event->data_len < sizeof(s_command_buffer)) {
@@ -524,6 +529,12 @@ void app_cloud_start(void)
 void app_cloud_update_plant_state(const app_plant_state_t *state)
 {
     if (!s_connected || state == NULL) return;
+    const int64_t now_us = esp_timer_get_time();
+    if (s_last_online_heartbeat_us == 0 ||
+        now_us - s_last_online_heartbeat_us >= ONLINE_HEARTBEAT_INTERVAL_US) {
+        publish_online(true);
+        s_last_online_heartbeat_us = now_us;
+    }
     char timestamp[32]; timestamp_now(timestamp, sizeof(timestamp));
     wifi_ap_record_t ap = {0};
     int rssi = esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;

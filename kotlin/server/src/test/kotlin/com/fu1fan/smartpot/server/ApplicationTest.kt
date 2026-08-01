@@ -67,6 +67,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -558,6 +559,20 @@ class ApplicationTest {
 
         assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
         assertEquals(2, store.countAffinityEvents("pot", "device-event:", since))
+    }
+
+    @Test
+    fun `stale offline event cannot overwrite newer online state`() = runBlocking {
+        val store = InMemorySmartPotStore()
+        store.setOnline("device-1", true, "2026-08-01T08:00:30Z")
+        store.setOnline("device-1", false, "1970-01-01T00:00:00Z")
+
+        val afterStaleEvent = store.deviceState("device-1")
+        assertTrue(afterStaleEvent.online)
+        assertEquals("2026-08-01T08:00:30Z", afterStaleEvent.lastSeenAt)
+
+        store.setOnline("device-1", false, "2026-08-01T08:01:00Z")
+        assertFalse(store.deviceState("device-1").online)
     }
 
     @Test

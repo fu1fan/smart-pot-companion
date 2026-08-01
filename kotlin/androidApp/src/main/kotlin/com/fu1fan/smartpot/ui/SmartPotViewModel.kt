@@ -205,6 +205,12 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
 
     private fun startRealtime(id: String) {
         realtimeJob = viewModelScope.launch {
+            launch {
+                while (isActive) {
+                    delay(10_000)
+                    refreshSnapshot(id)
+                }
+            }
             while (isActive) {
                 runCatching {
                     api.realtime(id).collect { event ->

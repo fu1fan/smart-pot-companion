@@ -63,7 +63,16 @@ class InMemorySmartPotStore : SmartPotStore {
     }
 
     override suspend fun setOnline(deviceId: String, online: Boolean, changedAt: String) {
-        states.compute(deviceId) { _, old -> (old ?: StoredDeviceState()).copy(online = online, lastSeenAt = changedAt) }
+        states.compute(deviceId) { _, old ->
+            val current = old ?: StoredDeviceState()
+            val currentAt = current.lastSeenAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
+            val incomingAt = runCatching { Instant.parse(changedAt) }.getOrNull()
+            if (currentAt != null && incomingAt != null && incomingAt < currentAt) {
+                current
+            } else {
+                current.copy(online = online, lastSeenAt = changedAt)
+            }
+        }
     }
 
     override suspend fun deviceState(deviceId: String) = states[deviceId] ?: StoredDeviceState()
