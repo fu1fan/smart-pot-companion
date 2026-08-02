@@ -43,6 +43,7 @@ class MqttGateway(
     private val affinityService: AffinityService,
     private val realtime: RealtimeHub,
     private val conversationMemories: ConversationMemoryService,
+    private val careService: CareService,
 ) : AutoCloseable {
     private val deviceTopicKinds = listOf("telemetry", "reported", "acks", "events", "online")
     private var client: Mqtt5AsyncClient? = null
@@ -115,6 +116,7 @@ class MqttGateway(
                 require(telemetry.deviceId == deviceId)
                 store.saveTelemetry(pot.id, telemetry)
                 store.setOnline(deviceId, true, observedAt)
+                careService.observeTelemetry(pot, telemetry, Instant.parse(observedAt))
                 alertService.evaluate(pot, telemetry)
                 val recordedAt = runCatching { Instant.parse(telemetry.recordedAt) }.getOrDefault(Instant.now())
                 val zone = runCatching { ZoneId.of(pot.timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))

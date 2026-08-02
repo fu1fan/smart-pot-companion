@@ -70,13 +70,13 @@ fun Application.module(
     val pots = PotService(store, realtime)
     val affinity = AffinityService(store, realtime)
     val alerts = AlertService(store, realtime, affinity)
-    val care = CareService(store, affinity)
+    val care = CareService(store, affinity, realtime)
     val conversationMemories = ConversationMemoryService(config, store, realtime, scope)
     val ai = CloudAiService(config, store, affinity, conversationMemories)
     val weather = WeatherService()
     val diary = DiaryService(store, ai, realtime, affinity)
     val maintenance = MaintenanceService(store)
-    val mqtt = MqttGateway(config, scope, store, pots, alerts, affinity, realtime, conversationMemories)
+    val mqtt = MqttGateway(config, scope, store, pots, alerts, affinity, realtime, conversationMemories, care)
     val commands = CommandService(store, mqtt, realtime)
     mqtt.commandService = commands
     if (startMqtt) {

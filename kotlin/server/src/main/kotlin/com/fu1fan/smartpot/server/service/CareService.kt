@@ -1,15 +1,22 @@
 ﻿package com.fu1fan.smartpot.server.service
 
 import com.fu1fan.smartpot.protocol.*
+import com.fu1fan.smartpot.server.appJson
 import com.fu1fan.smartpot.server.store.SmartPotStore
 import java.time.Instant
+import java.time.Duration
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
 
 class CareService(
     private val store: SmartPotStore,
     private val affinity: AffinityService,
+    private val realtime: RealtimeHub,
 ) {
+    private val wateringDetector = WateringDetector()
+
     suspend fun add(pot: PotProfile, request: CreateCareLogRequest, actorName: String): CareLog {
         require(request.note.length <= 500) { "备注不能超过 500 个字符" }
         request.imageDataUrl?.let { image ->
@@ -54,14 +61,40 @@ class CareService(
             else -> 0
         }
         if (points > 0) affinity.award(pot.id, "care:${log.id}", points, occurred)
+        publishCareChanged(pot.id, appJson.encodeToJsonElement(log))
         return log
+    }
+
+    suspend fun observeTelemetry(pot: PotProfile, telemetry: DeviceTelemetry, observedAt: Instant): CareLog? {
+        if (!wateringDetector.observe(pot.id, telemetry, observedAt)) return null
+        val duplicateWindowStart = observedAt.minus(Duration.ofMinutes(30))
+        val alreadyRecorded = store.listCareLogs(pot.id).any { log ->
+            log.type == CareType.WATER &&
+                runCatching { Instant.parse(log.occurredAt) }.getOrNull()?.isBefore(duplicateWindowStart) == false
+        }
+        if (alreadyRecorded) return null
+        return add(
+            pot,
+            CreateCareLogRequest(
+                type = CareType.WATER,
+                occurredAt = observedAt.toString(),
+                note = "检测到土壤湿度明显上升，已自动记录浇水",
+            ),
+            actorName = "自动检测",
+        )
     }
 
     suspend fun delete(potId: String, careLogId: String): Boolean {
         val exists = store.listCareLogs(potId).any { it.id == careLogId }
         if (!exists || !store.deleteCareLog(potId, careLogId)) return false
         affinity.revoke(potId, "care:$careLogId")
+        publishCareChanged(potId, JsonPrimitive(careLogId))
         return true
+    }
+
+    private fun publishCareChanged(potId: String, payload: kotlinx.serialization.json.JsonElement) {
+        // DIARY is intentionally reused so already-installed clients refresh the full care page.
+        realtime.publish(RealtimeEvent(RealtimeEventType.DIARY, potId, payload))
     }
 
     private fun nextTitle(type: CareType) = when (type) {
