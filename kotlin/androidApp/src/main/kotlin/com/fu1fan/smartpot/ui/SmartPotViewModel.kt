@@ -152,9 +152,10 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun updateSpecies(speciesId: String) = withPot { id ->
-        api.updatePot(id, UpdatePotRequest(speciesId = speciesId))
-        val pots = api.pots()
-        mutableState.update { it.copy(pots = pots) }
+        val updated = api.updatePot(id, UpdatePotRequest(speciesId = speciesId))
+        mutableState.update { current ->
+            current.copy(pots = current.pots.map { pot -> if (pot.id == updated.id) updated else pot })
+        }
         refreshAll(id)
     }
 

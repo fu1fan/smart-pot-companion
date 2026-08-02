@@ -135,7 +135,7 @@ class ApplicationTest {
     }
 
     @Test
-    fun `owner can bind and share while guest cannot edit`() = testApplication {
+    fun `owner can bind and share while guest can change species but not rename`() = testApplication {
         application { module(config, InMemorySmartPotStore(), startMqtt = false) }
         val api = createClient { install(ContentNegotiation) { json(appJson) } }
 
@@ -163,13 +163,21 @@ class ApplicationTest {
         assertEquals(pot.id, session.potId)
 
         assertEquals(HttpStatusCode.OK, api.get("/api/v1/pots/${pot.id}") { bearerAuth(session.token) }.status)
-        val edit = api.patch("/api/v1/pots/${pot.id}") {
+        val rename = api.patch("/api/v1/pots/${pot.id}") {
             bearerAuth(session.token)
             contentType(ContentType.Application.Json)
             setBody(UpdatePotRequest(displayName = "被修改"))
         }
-        assertEquals(HttpStatusCode.BadRequest, edit.status)
-        assertTrue(edit.body<String>().contains("仅主人"))
+        assertEquals(HttpStatusCode.BadRequest, rename.status)
+        assertTrue(rename.body<String>().contains("仅主人"))
+
+        val speciesUpdate = api.patch("/api/v1/pots/${pot.id}") {
+            bearerAuth(session.token)
+            contentType(ContentType.Application.Json)
+            setBody(UpdatePotRequest(speciesId = "cactus"))
+        }
+        assertEquals(HttpStatusCode.OK, speciesUpdate.status)
+        assertEquals("cactus", speciesUpdate.body<PotProfile>().species.id)
     }
 
     @Test
