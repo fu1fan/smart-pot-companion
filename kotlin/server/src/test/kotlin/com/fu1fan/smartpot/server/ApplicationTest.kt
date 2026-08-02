@@ -110,12 +110,16 @@ class ApplicationTest {
         val pinkAnthurium = species.first { it.id == "pink-anthurium" }
         assertEquals(1_000, cactus.thresholds.lightMinLux)
         assertEquals(10_000, cactus.thresholds.lightMaxLux)
+        assertEquals(60_000, cactus.thresholds.dailyLightTargetLuxHours)
         assertEquals(1_000, basil.thresholds.lightMinLux)
+        assertEquals(60_000, basil.thresholds.dailyLightTargetLuxHours)
         assertEquals("粉掌（花烛）", pinkAnthurium.chineseName)
         assertEquals(40, pinkAnthurium.thresholds.soilMinPercent)
         assertEquals(70, pinkAnthurium.thresholds.soilMaxPercent)
         assertEquals(250, pinkAnthurium.thresholds.lightMinLux)
         assertEquals(2_700, pinkAnthurium.thresholds.lightMaxLux)
+        assertEquals(25_000, pinkAnthurium.thresholds.dailyLightTargetLuxHours)
+        assertTrue(species.all { (it.thresholds.dailyLightTargetLuxHours ?: 0) in setOf(25_000, 40_000, 60_000, 80_000) })
     }
 
     @Test

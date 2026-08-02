@@ -1148,7 +1148,6 @@ private fun DashboardScreen(
                     latest = snap?.telemetry,
                     timezone = pot?.timezone,
                     thresholds = pot?.species?.thresholds,
-                    lightStripOn = snap?.deviceState?.lightStrip?.on == true,
                 )
             }
             item {
@@ -1670,19 +1669,12 @@ private fun TodayLightIntegralCard(
     latest: DeviceTelemetry?,
     timezone: String?,
     thresholds: PlantThresholds?,
-    lightStripOn: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val integral = remember(values, latest, timezone, thresholds) {
         calculateDailyLightIntegral(values, latest, timezone, thresholds)
     }
     val completion = integral.completionPercent.coerceIn(0, 100)
-    val summary = when {
-        integral.completionPercent >= 100 -> "今日光照目标已完成"
-        lightStripOn -> "自然光不足，当前正在补光"
-        integral.recommendedSupplementMinutes > 0 -> "今日光照仍不足，建议按需补光"
-        else -> "正在积累今日光照数据"
-    }
     PixelPanel(
         modifier.fillMaxWidth(),
         fill = PixelPanelFill,
@@ -1719,74 +1711,67 @@ private fun TodayLightIntegralCard(
                 }
             }
 
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFF8F8F6), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                LightIntegralRow("今日累计有效光照时长", formatLightDuration(integral.effectiveMinutes), Ink)
-                LightIntegralRow("今日光照累积量", "${integral.totalLuxHours} lux·h", Color(0xFFF08A24))
-                LightIntegralRow(
-                    "自动补光建议时长",
-                    if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需 ${formatLightDuration(integral.recommendedSupplementMinutes)}",
-                    BrightLeaf,
-                )
-                LightIntegralRow("今日光照完成度", "$completion%", Color(0xFFF08A24))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    repeat(24) { index ->
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .height(9.dp)
-                                .background(
-                                    if ((index + 1) * 100 <= completion * 24) Color(0xFFFFA63A) else Color(0xFFFFE4B8),
-                                    RoundedCornerShape(2.dp),
-                                ),
-                        )
-                    }
-                }
-            }
-
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
-                    Canvas(Modifier.matchParentSize()) {
-                        val stroke = 13.dp.toPx()
-                        val diameter = size.minDimension - stroke
-                        val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
-                        val arcSize = Size(diameter, diameter)
-                        val ambientSweep = (integral.ambientLuxHours.toFloat() / integral.targetLuxHours * 360f).coerceIn(0f, 360f)
-                        val supplementSweep = (integral.supplementalLuxHours.toFloat() / integral.targetLuxHours * 360f)
-                            .coerceIn(0f, 360f - ambientSweep)
-                        drawArc(Color(0xFFE7E3D8), -90f, 360f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
-                        if (ambientSweep > 0f) {
-                            drawArc(Color(0xFF55B8EA), -90f, ambientSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                Column(Modifier.width(126.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(118.dp), contentAlignment = Alignment.Center) {
+                        Canvas(Modifier.matchParentSize()) {
+                            val stroke = 12.dp.toPx()
+                            val diameter = size.minDimension - stroke
+                            val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                            val arcSize = Size(diameter, diameter)
+                            val ambientSweep = (integral.ambientLuxHours.toFloat() / integral.targetLuxHours * 360f).coerceIn(0f, 360f)
+                            val supplementSweep = (integral.supplementalLuxHours.toFloat() / integral.targetLuxHours * 360f)
+                                .coerceIn(0f, 360f - ambientSweep)
+                            drawArc(Color(0xFFE7E3D8), -90f, 360f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                            if (ambientSweep > 0f) {
+                                drawArc(Color(0xFF55B8EA), -90f, ambientSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                            }
+                            if (supplementSweep > 0f) {
+                                drawArc(Color(0xFFFFB347), -90f + ambientSweep, supplementSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                            }
                         }
-                        if (supplementSweep > 0f) {
-                            drawArc(Color(0xFFFFB347), -90f + ambientSweep, supplementSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("$completion%", color = Color(0xFFF08A24), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                            Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = 9.sp)
                         }
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("$completion%", color = Color(0xFFF08A24), fontSize = 27.sp, fontWeight = FontWeight.Black)
-                        Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = 10.sp)
+                    Spacer(Modifier.height(7.dp))
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        LightCompositionLegend(Color(0xFF55B8EA), "环境光实测")
+                        LightCompositionLegend(Color(0xFFFFB347), "补光估算")
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("光照构成", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    LightCompositionLegend(Color(0xFF55B8EA), "环境光实测", "${integral.ambientLuxHours} lux·h")
-                    LightCompositionLegend(Color(0xFFFFB347), "补光估算", "${integral.supplementalLuxHours} lux·h")
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFFFF3D7), RoundedCornerShape(5.dp))
-                            .padding(horizontal = 9.dp, vertical = 7.dp),
-                    ) {
-                        Text(summary, color = Color(0xFFD77A22), fontSize = 11.sp, maxLines = 2)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .background(Color(0xFFF8F8F6), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 11.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    LightIntegralRow("有效光照时长", formatLightDuration(integral.effectiveMinutes), Ink)
+                    LightIntegralRow("光照累积量", "${integral.totalLuxHours} lux·h", Color(0xFFF08A24))
+                    LightIntegralRow(
+                        "补光建议时长",
+                        if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需 ${formatLightDuration(integral.recommendedSupplementMinutes)}",
+                        BrightLeaf,
+                    )
+                    LightIntegralRow("光照完成度", "$completion%", Color(0xFFF08A24))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        repeat(16) { index ->
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(8.dp)
+                                    .background(
+                                        if ((index + 1) * 100 <= completion * 16) Color(0xFFFFA63A) else Color(0xFFFFE4B8),
+                                        RoundedCornerShape(2.dp),
+                                    ),
+                            )
+                        }
                     }
                 }
             }
@@ -1804,13 +1789,11 @@ private fun LightIntegralRow(label: String, value: String, valueColor: Color) {
 }
 
 @Composable
-private fun LightCompositionLegend(color: Color, label: String, value: String) {
+private fun LightCompositionLegend(color: Color, label: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(12.dp).background(color, RoundedCornerShape(2.dp)))
         Spacer(Modifier.width(7.dp))
         Text(label, color = Muted, fontSize = 11.sp)
-        Spacer(Modifier.weight(1f))
-        Text(value, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -4815,8 +4798,9 @@ private fun calculateDailyLightIntegral(
         .sortedBy { it.first }
 
     val lightMinLux = thresholds?.lightMinLux?.coerceAtLeast(1) ?: 400
-    val effectiveThresholdLux = (lightMinLux / 10).coerceAtLeast(50)
-    val targetLuxHours = (lightMinLux * 6).coerceAtLeast(1)
+    val effectiveThresholdLux = lightMinLux
+    val targetLuxHours = thresholds?.dailyLightTargetLuxHours?.coerceAtLeast(1)
+        ?: dailyLightTargetFromSensorLux(lightMinLux)
     val lampEquivalentLux = 500.0
     var effectiveSeconds = 0.0
     var totalLuxHours = 0.0
@@ -4848,6 +4832,13 @@ private fun calculateDailyLightIntegral(
         targetLuxHours = targetLuxHours,
         completionPercent = (totalLuxHours / targetLuxHours * 100.0).roundToInt().coerceAtLeast(0),
     )
+}
+
+private fun dailyLightTargetFromSensorLux(lightMinLux: Int): Int = when {
+    lightMinLux <= 300 -> 25_000
+    lightMinLux <= 700 -> 40_000
+    lightMinLux <= 1_700 -> 60_000
+    else -> 80_000
 }
 
 private fun formatLightDuration(totalMinutes: Int): String {

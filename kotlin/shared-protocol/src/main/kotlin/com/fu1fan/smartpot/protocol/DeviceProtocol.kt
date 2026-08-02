@@ -79,6 +79,7 @@ data class PlantThresholds(
     val lightMaxLux: Int,
     val temperatureMinC: Double? = null,
     val temperatureMaxC: Double? = null,
+    val dailyLightTargetLuxHours: Int? = null,
 )
 
 @Serializable

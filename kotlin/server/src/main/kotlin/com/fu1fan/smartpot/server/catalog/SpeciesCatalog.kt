@@ -85,6 +85,7 @@ object SpeciesCatalog {
                 lightMaxLux = sensorLightRange.last,
                 temperatureMinC = 15.0,
                 temperatureMaxC = 30.0,
+                dailyLightTargetLuxHours = seed.light.toDailySensorLuxHours(),
             ),
             wateringIntervalDays = seed.waterDays,
             fertilizingIntervalDays = seed.fertilizerDays,
@@ -104,5 +105,12 @@ object SpeciesCatalog {
         val scaled = (this + SensorLuxDivisor - 1) / SensorLuxDivisor
         return (((scaled + SensorLuxStep - 1) / SensorLuxStep) * SensorLuxStep)
             .coerceAtLeast(SensorLuxStep)
+    }
+
+    private fun IntRange.toDailySensorLuxHours(): Int = when {
+        first <= 800 -> 25_000
+        first <= 2_000 -> 40_000
+        first <= 5_000 -> 60_000
+        else -> 80_000
     }
 }
