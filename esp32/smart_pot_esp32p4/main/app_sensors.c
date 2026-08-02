@@ -293,40 +293,40 @@ static const char *environment_prompt(env_alert_state_t state)
 {
     static const char *const prompts[][2] = {
         [ENV_ALERT_LOW_LOW] = {
-            "又黑又干，小麦像在南极流浪，主人快给我水和阳光抱抱嘛！",
-            "没光没水，我要委屈巴巴躺平啦，快来救救这株可怜小麦！",
+            "又冷又干……感觉我在南极流浪……",
+            "没光没水，我选择躺平。等我变成了干柴，主人记得拿我去烧火取暖……",
         },
         [ENV_ALERT_LOW_NORMAL] = {
-            "主人主人，我快要变成小干花啦，快给我喝两口水嘛，我还要长漂亮叶子呢！",
-            "我掐指一算，上辈子可能是海绵宝宝，可现在干得连蟹堡都捏不出来啦！",
+            "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！",
+            "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！",
         },
         [ENV_ALERT_LOW_HIGH] = {
-            "又干又晒，我是不是上了铁板烧呀，主人快加水再帮我遮一遮！",
-            "太阳烤着我，土也干巴巴，小麦快变成盆栽小饼干啦！",
+            "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！",
+            "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！",
         },
         [ENV_ALERT_NORMAL_LOW] = {
-            "主人，带我去晒晒太阳嘛，我想开开心心地光合作用！",
-            "好黑呀，我再待下去都要偷偷长蘑菇啦，救救小麦的叶子吧！",
+            "好黑呀，我是不是要长蘑菇了？",
+            "主人，能带我去晒晒太阳吗？我想光合作用！",
         },
         [ENV_ALERT_NORMAL_NORMAL] = {
-            "主人你被评为今日最佳养植官啦，奖励你摸摸我的新叶子！",
-            "报告主人，我今天绿到发亮，正在偷偷变得更漂亮哦！",
+            "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！",
+            "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！",
         },
         [ENV_ALERT_NORMAL_HIGH] = {
-            "哎呀太阳太热情啦，我快被晒成小干花了，主人帮我遮一遮嘛！",
-            "再晒下去小麦就要变成盆栽小饼干啦，快给我打一把伞！",
+            "哎呀，我要被晒干了！主人给我打把伞",
+            "哎呀，我要被晒干了！主人给我打把伞",
         },
         [ENV_ALERT_HIGH_LOW] = {
-            "又湿又暗，我像一朵泡发的小木耳，再这样要长蘑菇啦！",
-            "这里又潮又黑，小麦都想给自己挂除湿袋啦，快让我透气见光！",
+            "我感觉自己像被泡发的木耳，又冷又潮，再泡下去我就要长蘑菇了！",
+            "又湿又暗……这不是梅雨季吗？我是不是该给自己贴个除湿袋了？我好潮啊！",
         },
         [ENV_ALERT_HIGH_NORMAL] = {
-            "主人主人，我的根根快学会游泳啦，水有点多，让我透透气嘛！",
-            "水太多啦，我的小脚脚闷闷的，快帮我通通风呀！",
+            "我好像泡在游泳池里了……脚脚有点闷。",
+            "我好像泡在游泳池里了……脚脚有点闷。",
         },
         [ENV_ALERT_HIGH_HIGH] = {
-            "又涝又热，小麦像泡在蒸笼里，主人快让我透气凉快一下！",
-            "泡着水还晒太阳，听着浪漫，其实我要变成小包子啦！",
+            "又涝又热……我觉得我的人生已经到达了火山口的顶峰！",
+            "又涝又热……我觉得我的人生已经到达了火山口的顶峰！",
         },
     };
 
@@ -401,14 +401,17 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
     }
 
     struct tm local_time = { 0 };
-    if (!app_time_get_local(&local_time) || !reminder_time_allowed(&local_time, next_state)) {
+    bool has_local_time = app_time_get_local(&local_time);
+    if (has_local_time && !reminder_time_allowed(&local_time, next_state)) {
         return;
     }
 
-    int day_id = reminder_day_id(&local_time);
-    if (hw->reminder_day_id != day_id) {
-        hw->reminder_day_id = day_id;
-        hw->normal_announced_today = false;
+    if (has_local_time) {
+        int day_id = reminder_day_id(&local_time);
+        if (hw->reminder_day_id != day_id) {
+            hw->reminder_day_id = day_id;
+            hw->normal_announced_today = false;
+        }
     }
 
     bool all_normal = next_state == ENV_ALERT_NORMAL_NORMAL;
@@ -416,28 +419,30 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
                                 hw->last_reminded_state == next_state &&
                                 hw->last_abnormal_reminder_us != 0 &&
                                 now_us - hw->last_abnormal_reminder_us < ENV_ABNORMAL_REMINDER_US;
-    bool should_speak = false;
+    bool should_notify = false;
     if (all_normal) {
-        should_speak = hw->state_change_pending || !hw->normal_announced_today;
+        should_notify = hw->state_change_pending || (has_local_time && !hw->normal_announced_today);
     } else {
-        should_speak = !same_abnormal_recent;
+        should_notify = !same_abnormal_recent;
     }
 
-    if (should_speak) {
+    if (should_notify) {
         const char *text = environment_prompt(next_state);
-        if (app_tts_speak_text_with_tone(text, environment_tone(next_state))) {
-            app_ui_show_remote_content(text, 3500);
-            hw->state_change_pending = false;
-            hw->last_reminded_state = next_state;
-            if (all_normal) {
-                hw->normal_announced_today = true;
-            } else {
-                hw->last_abnormal_reminder_us = now_us;
-            }
+        app_ui_show_remote_content(text, 6000);
+        bool tts_queued = app_tts_speak_text_with_tone(text, environment_tone(next_state));
+        hw->state_change_pending = false;
+        hw->last_reminded_state = next_state;
+        if (all_normal) {
+            hw->normal_announced_today = has_local_time;
+        } else {
+            hw->last_abnormal_reminder_us = now_us;
+        }
+        if (tts_queued) {
             ESP_LOGI(TAG, "Environment reminder queued: state=%d soil=%u%% light=%ulux",
                      next_state, soil_percent, (unsigned int)light_lux);
         } else {
-            ESP_LOGI(TAG, "Environment reminder deferred because TTS is busy");
+            ESP_LOGI(TAG, "Environment reminder displayed without TTS: state=%d soil=%u%% light=%ulux",
+                     next_state, soil_percent, (unsigned int)light_lux);
         }
     }
 }
