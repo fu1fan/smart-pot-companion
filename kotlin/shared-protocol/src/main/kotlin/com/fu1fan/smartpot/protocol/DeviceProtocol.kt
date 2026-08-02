@@ -31,6 +31,7 @@ data class DeviceTelemetry(
     val lightPercent: Int,
     val tvocPpb: Int? = null,
     val eco2Ppm: Int? = null,
+    val lightStripOn: Boolean? = null,
     val touchCount: Long,
     val touchActive: Boolean = false,
     val motion: MotionState? = null,

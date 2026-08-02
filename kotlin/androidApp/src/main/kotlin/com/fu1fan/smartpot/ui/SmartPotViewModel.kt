@@ -214,6 +214,12 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                     refreshSnapshot(id)
                 }
             }
+            launch {
+                while (isActive) {
+                    delay(60L * 60L * 1_000L)
+                    refreshTelemetry(id)
+                }
+            }
             while (isActive) {
                 runCatching {
                     api.realtime(id).collect { event ->
@@ -242,6 +248,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun refreshSnapshot(id: String) = runCatching { api.snapshot(id) }
         .onSuccess { value -> mutableState.update { it.copy(snapshot = value, error = null) } }
+
+    private suspend fun refreshTelemetry(id: String) = runCatching { api.telemetry(id) }
+        .onSuccess { value -> mutableState.update { it.copy(telemetry = value, error = null) } }
 
     fun addCare(type: CareType, note: String, imageDataUrl: String?) {
         val potId = mutableState.value.selectedPotId ?: return

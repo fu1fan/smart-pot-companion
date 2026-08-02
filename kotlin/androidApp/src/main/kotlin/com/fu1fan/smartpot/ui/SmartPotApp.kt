@@ -83,6 +83,7 @@ import java.time.temporal.ChronoUnit
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private val Leaf = Color(0xFF407A52)
@@ -125,10 +126,14 @@ private data class DashboardMetrics(
     val interactionSuitability: Double,
 )
 
-private data class HourlyTelemetryPoint(
-    val hour: ZonedDateTime,
-    val soilPercent: Float?,
-    val lightLux: Float?,
+private data class DailyLightIntegral(
+    val effectiveMinutes: Int,
+    val totalLuxHours: Int,
+    val ambientLuxHours: Int,
+    val supplementalLuxHours: Int,
+    val recommendedSupplementMinutes: Int,
+    val targetLuxHours: Int,
+    val completionPercent: Int,
 )
 
 private data class PlantCoreStatus(
@@ -1138,24 +1143,20 @@ private fun DashboardScreen(
             item { TodayEnvironmentCard(state) }
             item { CompanionScoreCard(metrics) }
             item {
-                Row(
-                    Modifier.fillMaxWidth().height(184.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    TelemetryTrendCard(
-                        state.telemetry,
-                        snap?.telemetry,
-                        pot?.timezone,
-                        Modifier.weight(1f).fillMaxHeight(),
-                        compact = true,
-                    )
-                    DashboardAttentionCard(
-                        snap,
-                        state.careOverview?.weather,
-                        Modifier.weight(1f).fillMaxHeight(),
-                        compact = true,
-                    )
-                }
+                TodayLightIntegralCard(
+                    values = state.telemetry,
+                    latest = snap?.telemetry,
+                    timezone = pot?.timezone,
+                    thresholds = pot?.species?.thresholds,
+                    lightStripOn = snap?.deviceState?.lightStrip?.on == true,
+                )
+            }
+            item {
+                DashboardAttentionCard(
+                    snapshot = snap,
+                    weather = state.careOverview?.weather,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             item {
                 DashboardAdviceCard(
@@ -1664,72 +1665,129 @@ private fun StarRating(stars: Float) {
 }
 
 @Composable
-private fun TelemetryTrendCard(
+private fun TodayLightIntegralCard(
     values: List<DeviceTelemetry>,
     latest: DeviceTelemetry?,
     timezone: String?,
+    thresholds: PlantThresholds?,
+    lightStripOn: Boolean,
     modifier: Modifier = Modifier,
-    compact: Boolean = false,
 ) {
-    val points = remember(values, latest, timezone) { hourlyTelemetryPoints(values, latest, timezone) }
+    val integral = remember(values, latest, timezone, thresholds) {
+        calculateDailyLightIntegral(values, latest, timezone, thresholds)
+    }
+    val completion = integral.completionPercent.coerceIn(0, 100)
+    val summary = when {
+        integral.completionPercent >= 100 -> "今日光照目标已完成"
+        lightStripOn -> "自然光不足，当前正在补光"
+        integral.recommendedSupplementMinutes > 0 -> "今日光照仍不足，建议按需补光"
+        else -> "正在积累今日光照数据"
+    }
     PixelPanel(
         modifier.fillMaxWidth(),
         fill = PixelPanelFill,
         edge = CardBorder,
-        contentPadding = if (compact) PaddingValues(8.dp) else PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 13.dp),
         showCornerBolts = false,
-        fillContainer = compact,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 7.dp)) {
-            Text("最近趋势", fontSize = if (compact) 15.sp else 17.sp, fontWeight = FontWeight.Black, color = Ink)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                TrendLegend(Sky, "湿度")
-                Spacer(Modifier.width(if (compact) 12.dp else 42.dp))
-                TrendLegend(Sun, "光照")
-            }
-            Canvas(Modifier.fillMaxWidth().height(if (compact) 72.dp else 118.dp)) {
-                val topPadding = 8.dp.toPx()
-                val bottomPadding = 7.dp.toPx()
-                val chartHeight = size.height - topPadding - bottomPadding
-                val maxLight = points.mapNotNull { it.lightLux }.maxOrNull()?.coerceAtLeast(1f) ?: 1f
-                repeat(3) { index ->
-                    val y = topPadding + chartHeight * index / 2f
-                    drawLine(Color(0x802C94C8), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
-                }
-                fun drawSeries(color: Color, valueOf: (HourlyTelemetryPoint) -> Float?, max: Float) {
-                    val path = Path()
-                    var drawing = false
-                    points.forEachIndexed { index, point ->
-                        val value = valueOf(point)
-                        if (value == null) {
-                            drawing = false
-                        } else {
-                            val x = if (points.size == 1) size.width / 2f else size.width * index / (points.size - 1)
-                            val y = topPadding + chartHeight * (1f - (value / max).coerceIn(0f, 1f))
-                            if (drawing) path.lineTo(x, y) else path.moveTo(x, y)
-                            drawing = true
-                            drawCircle(Color.White, 4.5.dp.toPx(), Offset(x, y))
-                            drawCircle(color, 3.dp.toPx(), Offset(x, y))
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Canvas(Modifier.size(26.dp)) {
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    drawCircle(Color(0xFFFFB13B), radius = 6.dp.toPx(), center = center)
+                    repeat(8) { index ->
+                        rotate(index * 45f, center) {
+                            drawLine(
+                                color = Color(0xFFFF8B24),
+                                start = Offset(center.x, 1.dp.toPx()),
+                                end = Offset(center.x, 5.dp.toPx()),
+                                strokeWidth = 2.dp.toPx(),
+                                cap = StrokeCap.Square,
+                            )
                         }
                     }
-                    drawPath(path, color, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
                 }
-                drawSeries(Sky, { it.soilPercent }, 100f)
-                drawSeries(Sun, { it.lightLux }, maxLight)
+                Spacer(Modifier.width(8.dp))
+                Text("今日光积分", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Ink)
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier
+                        .background(Color(0xFFF2F1EC), RoundedCornerShape(5.dp))
+                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                ) {
+                    Text("每小时更新", color = Muted, fontSize = 10.sp)
+                }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val labels = if (compact && points.size > 3) {
-                    listOf(points.first(), points[points.lastIndex / 2], points.last())
-                } else {
-                    points
+
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF8F8F6), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LightIntegralRow("今日累计有效光照时长", formatLightDuration(integral.effectiveMinutes), Ink)
+                LightIntegralRow("今日光照累积量", "${integral.totalLuxHours} lux·h", Color(0xFFF08A24))
+                LightIntegralRow(
+                    "自动补光建议时长",
+                    if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需 ${formatLightDuration(integral.recommendedSupplementMinutes)}",
+                    BrightLeaf,
+                )
+                LightIntegralRow("今日光照完成度", "$completion%", Color(0xFFF08A24))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    repeat(24) { index ->
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(9.dp)
+                                .background(
+                                    if ((index + 1) * 100 <= completion * 24) Color(0xFFFFA63A) else Color(0xFFFFE4B8),
+                                    RoundedCornerShape(2.dp),
+                                ),
+                        )
+                    }
                 }
-                labels.forEach { point ->
-                    Text(
-                        point.hour.format(DateTimeFormatter.ofPattern("HH:00")),
-                        color = Muted,
-                        fontSize = if (compact) 8.sp else 9.sp,
-                        textAlign = TextAlign.Center,
-                    )
+            }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.matchParentSize()) {
+                        val stroke = 13.dp.toPx()
+                        val diameter = size.minDimension - stroke
+                        val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                        val arcSize = Size(diameter, diameter)
+                        val ambientSweep = (integral.ambientLuxHours.toFloat() / integral.targetLuxHours * 360f).coerceIn(0f, 360f)
+                        val supplementSweep = (integral.supplementalLuxHours.toFloat() / integral.targetLuxHours * 360f)
+                            .coerceIn(0f, 360f - ambientSweep)
+                        drawArc(Color(0xFFE7E3D8), -90f, 360f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                        if (ambientSweep > 0f) {
+                            drawArc(Color(0xFF55B8EA), -90f, ambientSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                        }
+                        if (supplementSweep > 0f) {
+                            drawArc(Color(0xFFFFB347), -90f + ambientSweep, supplementSweep, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+                        }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("$completion%", color = Color(0xFFF08A24), fontSize = 27.sp, fontWeight = FontWeight.Black)
+                        Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = 10.sp)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("光照构成", color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    LightCompositionLegend(Color(0xFF55B8EA), "环境光实测", "${integral.ambientLuxHours} lux·h")
+                    LightCompositionLegend(Color(0xFFFFB347), "补光估算", "${integral.supplementalLuxHours} lux·h")
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFFF3D7), RoundedCornerShape(5.dp))
+                            .padding(horizontal = 9.dp, vertical = 7.dp),
+                    ) {
+                        Text(summary, color = Color(0xFFD77A22), fontSize = 11.sp, maxLines = 2)
+                    }
                 }
             }
         }
@@ -1737,13 +1795,22 @@ private fun TelemetryTrendCard(
 }
 
 @Composable
-private fun TrendLegend(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Canvas(Modifier.width(17.dp).height(8.dp)) {
-            drawLine(color, Offset(0f, size.height / 2f), Offset(size.width, size.height / 2f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-            drawCircle(color, 2.5.dp.toPx(), Offset(size.width / 2f, size.height / 2f))
-        }
+private fun LightIntegralRow(label: String, value: String, valueColor: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Muted, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun LightCompositionLegend(color: Color, label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(12.dp).background(color, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(7.dp))
         Text(label, color = Muted, fontSize = 11.sp)
+        Spacer(Modifier.weight(1f))
+        Text(value, color = Ink, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -4730,28 +4797,67 @@ private fun dashboardMetrics(state: SmartPotUiState): DashboardMetrics {
     )
 }
 
-private fun hourlyTelemetryPoints(
+private fun calculateDailyLightIntegral(
     values: List<DeviceTelemetry>,
     latest: DeviceTelemetry?,
     timezone: String?,
-): List<HourlyTelemetryPoint> {
+    thresholds: PlantThresholds?,
+): DailyLightIntegral {
     val zone = zoneIdOf(timezone)
-    val currentHour = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.HOURS)
-    val firstHour = currentHour.minusHours(5)
-    val grouped = telemetryWithLatest(values, latest)
-        .mapNotNull { item ->
-            val hour = parseInstant(item.recordedAt)?.atZone(zone)?.truncatedTo(ChronoUnit.HOURS) ?: return@mapNotNull null
-            if (hour.isBefore(firstHour) || hour.isAfter(currentHour)) null else hour to item
+    val now = Instant.now()
+    val today = now.atZone(zone).toLocalDate()
+    val samples = telemetryWithLatest(values, latest)
+        .mapNotNull { telemetry ->
+            val instant = parseInstant(telemetry.recordedAt) ?: return@mapNotNull null
+            if (instant.atZone(zone).toLocalDate() != today || instant.isAfter(now)) null else instant to telemetry
         }
-        .groupBy({ it.first }, { it.second })
-    return (0L..5L).map { offset ->
-        val hour = firstHour.plusHours(offset)
-        val hourly = grouped[hour].orEmpty()
-        HourlyTelemetryPoint(
-            hour = hour,
-            soilPercent = if (hourly.isEmpty()) null else hourly.map { it.soilPercent }.average().toFloat(),
-            lightLux = if (hourly.isEmpty()) null else hourly.map { it.lightLux }.average().toFloat(),
-        )
+        .distinctBy { (instant, telemetry) -> "${telemetry.deviceId}:${telemetry.sequence}:$instant" }
+        .sortedBy { it.first }
+
+    val lightMinLux = thresholds?.lightMinLux?.coerceAtLeast(1) ?: 400
+    val effectiveThresholdLux = (lightMinLux / 10).coerceAtLeast(50)
+    val targetLuxHours = (lightMinLux * 6).coerceAtLeast(1)
+    val lampEquivalentLux = 500.0
+    var effectiveSeconds = 0.0
+    var totalLuxHours = 0.0
+    var supplementalLuxHours = 0.0
+
+    samples.forEachIndexed { index, (instant, telemetry) ->
+        val nextInstant = samples.getOrNull(index + 1)?.first ?: now
+        val intervalSeconds = ChronoUnit.MILLIS.between(instant, nextInstant).toDouble() / 1000.0
+        val boundedSeconds = intervalSeconds.coerceIn(0.0, 5.0 * 60.0)
+        if (boundedSeconds <= 0.0) return@forEachIndexed
+        val lux = telemetry.lightLux.coerceAtLeast(0).toDouble()
+        if (lux >= effectiveThresholdLux) effectiveSeconds += boundedSeconds
+        val contribution = lux * boundedSeconds / 3600.0
+        totalLuxHours += contribution
+        if (telemetry.lightStripOn == true) {
+            supplementalLuxHours += minOf(lux, lampEquivalentLux) * boundedSeconds / 3600.0
+        }
+    }
+
+    val totalRounded = totalLuxHours.roundToInt().coerceAtLeast(0)
+    val supplementalRounded = supplementalLuxHours.roundToInt().coerceIn(0, totalRounded)
+    val remainingLuxHours = (targetLuxHours - totalLuxHours).coerceAtLeast(0.0)
+    return DailyLightIntegral(
+        effectiveMinutes = (effectiveSeconds / 60.0).roundToInt().coerceAtLeast(0),
+        totalLuxHours = totalRounded,
+        ambientLuxHours = (totalRounded - supplementalRounded).coerceAtLeast(0),
+        supplementalLuxHours = supplementalRounded,
+        recommendedSupplementMinutes = ceil(remainingLuxHours / lampEquivalentLux * 60.0).toInt().coerceAtLeast(0),
+        targetLuxHours = targetLuxHours,
+        completionPercent = (totalLuxHours / targetLuxHours * 100.0).roundToInt().coerceAtLeast(0),
+    )
+}
+
+private fun formatLightDuration(totalMinutes: Int): String {
+    val minutes = totalMinutes.coerceAtLeast(0)
+    val hours = minutes / 60
+    val remainder = minutes % 60
+    return when {
+        hours > 0 && remainder > 0 -> "${hours}h ${remainder}min"
+        hours > 0 -> "${hours}h"
+        else -> "${remainder}min"
     }
 }
 

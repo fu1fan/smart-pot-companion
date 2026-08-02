@@ -677,6 +677,9 @@ void app_cloud_update_plant_state(const app_plant_state_t *state)
             cJSON_AddNumberToObject(root, "tvocPpb", state->tvoc_ppb);
             cJSON_AddNumberToObject(root, "eco2Ppm", state->eco2_ppm);
         }
+        app_light_strip_state_t light_strip = {0};
+        app_sensors_get_light_strip_state(&light_strip);
+        cJSON_AddBoolToObject(root, "lightStripOn", light_strip.on);
         cJSON_AddNumberToObject(root, "touchCount", state->touch_count);
         cJSON_AddBoolToObject(root, "touchActive", state->touch_active);
 #ifdef CONFIG_SMART_POT_MPU6050_ENABLE
