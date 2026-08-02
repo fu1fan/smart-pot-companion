@@ -1752,11 +1752,11 @@ private fun TodayLightIntegralCard(
                         .padding(horizontal = 11.dp, vertical = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    LightIntegralRow("有效光照时长", formatLightDuration(integral.effectiveMinutes), Ink)
+                    LightIntegralRow("有效光照时长", formatCompactLightDuration(integral.effectiveMinutes), Ink)
                     LightIntegralRow("光照累积量", "${integral.totalLuxHours} lux·h", Color(0xFFF08A24))
                     LightIntegralRow(
                         "补光建议时长",
-                        if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需 ${formatLightDuration(integral.recommendedSupplementMinutes)}",
+                        if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需${formatCompactLightDuration(integral.recommendedSupplementMinutes)}",
                         BrightLeaf,
                     )
                     LightIntegralRow("光照完成度", "$completion%", Color(0xFFF08A24))
@@ -1782,9 +1782,9 @@ private fun TodayLightIntegralCard(
 @Composable
 private fun LightIntegralRow(label: String, value: String, valueColor: Color) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Muted, fontSize = 13.sp)
+        Text(label, color = Muted, fontSize = 10.sp, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = valueColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -4849,6 +4849,17 @@ private fun formatLightDuration(totalMinutes: Int): String {
         hours > 0 && remainder > 0 -> "${hours}h ${remainder}min"
         hours > 0 -> "${hours}h"
         else -> "${remainder}min"
+    }
+}
+
+private fun formatCompactLightDuration(totalMinutes: Int): String {
+    val minutes = totalMinutes.coerceAtLeast(0)
+    val hours = minutes / 60
+    val remainder = minutes % 60
+    return when {
+        hours > 0 && remainder > 0 -> "${hours}h${remainder}m"
+        hours > 0 -> "${hours}h"
+        else -> "${remainder}m"
     }
 }
 
