@@ -137,8 +137,7 @@ private data class DailyLightIntegral(
 )
 
 private data class PlantCoreStatus(
-    val title: String,
-    val message: String,
+    val text: String,
     val color: Color,
 )
 
@@ -234,7 +233,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
             if (activeReminder != null) {
                 EnvironmentReminderDialog(
                     type = activeReminder,
-                    plantName = state.snapshot?.pot?.displayName ?: "小麦",
+                    userName = state.userName,
                     onConfirm = {
                         reminderPreferences.edit()
                             .putLong(activeReminder.preferenceKey, System.currentTimeMillis())
@@ -972,10 +971,11 @@ private fun PixelConfirmDialog(
 @Composable
 private fun EnvironmentReminderDialog(
     type: EnvironmentReminderType,
-    plantName: String,
+    userName: String,
     onConfirm: () -> Unit,
 ) {
     val thirsty = type == EnvironmentReminderType.THIRSTY
+    val ownerName = userName.trim().ifBlank { "主人" }
     Dialog(onDismissRequest = {}) {
         PixelPanel(
             Modifier.fillMaxWidth(0.86f).widthIn(max = 320.dp).wrapContentHeight(),
@@ -985,6 +985,7 @@ private fun EnvironmentReminderDialog(
             showCornerBolts = false,
         ) {
             Column(
+                modifier = Modifier.offset(x = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -1001,14 +1002,14 @@ private fun EnvironmentReminderDialog(
                     )
                 }
                 Text(
-                    if (thirsty) "${plantName}有点口渴" else "${plantName}想晒晒太阳",
+                    if (thirsty) "小麦有点口渴" else "小麦想晒晒太阳",
                     color = Ink,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    if (thirsty) "主人记得喂我喝水哦！" else "室内光线有点暗，主人帮我补充一些温柔的光吧！",
+                    if (thirsty) "${ownerName}记得喂我喝水哦！" else "室内光线有点暗，${ownerName}帮我补充一些温柔的光吧！",
                     color = Muted,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -1091,7 +1092,7 @@ private fun DashboardScreen(
                 PlantHealthCard(
                     metrics = metrics,
                     online = snap?.online == true,
-                    plantName = pot?.displayName ?: "小麦",
+                    userName = state.userName,
                     soilStatus = snap?.evaluated?.soilStatus,
                     lightStatus = snap?.evaluated?.lightStatus,
                     thresholds = pot?.species?.thresholds,
@@ -1397,7 +1398,7 @@ private fun clearConnectedDarkBackground(bitmap: Bitmap) {
 private fun PlantHealthCard(
     metrics: DashboardMetrics,
     online: Boolean,
-    plantName: String,
+    userName: String,
     soilStatus: SoilStatus?,
     lightStatus: LightStatus?,
     thresholds: PlantThresholds?,
@@ -1405,7 +1406,7 @@ private fun PlantHealthCard(
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
 ) {
-    val coreStatus = plantCoreStatus(plantName, online, soilStatus, lightStatus)
+    val coreStatus = plantCoreStatus(userName, online, soilStatus, lightStatus)
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
@@ -1416,9 +1417,14 @@ private fun PlantHealthCard(
             Text("植物健康值", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 HealthGauge(metrics.healthPercent, Modifier.size(118.dp))
-                Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(coreStatus.title, fontSize = 21.sp, fontWeight = FontWeight.Black, color = coreStatus.color)
-                    Text(coreStatus.message, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, lineHeight = 20.sp)
+                Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(
+                        coreStatus.text,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black,
+                        color = coreStatus.color,
+                        lineHeight = 25.sp,
+                    )
                     PixelTextButton(onClick = onToggleDetails, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) {
                         Text(if (detailsVisible) "收起详情 ︿" else "健康详情 ›", fontSize = 14.sp, color = Color(0xFF087D3C), fontWeight = FontWeight.Bold)
                     }
@@ -4902,46 +4908,42 @@ private fun metricStatusColor(value: String): Color = when (value) {
 }
 
 private fun plantCoreStatus(
-    plantName: String,
+    userName: String,
     online: Boolean,
     soilStatus: SoilStatus?,
     lightStatus: LightStatus?,
-): PlantCoreStatus = when {
+): PlantCoreStatus {
+    val ownerName = userName.trim().ifBlank { "主人" }
+    return when {
     !online -> PlantCoreStatus(
-        title = "${plantName}在等你",
-        message = "设备连接后，我会马上告诉主人现在的感受。",
+        text = "小麦正在等${ownerName}回来，设备连接后我就告诉你现在的感受。",
         color = Muted,
     )
     soilStatus == SoilStatus.TOO_DRY -> PlantCoreStatus(
-        title = "${plantName}有点口渴",
-        message = "主人记得喂我喝水哦！",
+        text = "小麦现在有点口渴，${ownerName}记得喂我喝水哦！",
         color = Color(0xFF3789B5),
     )
     lightStatus == LightStatus.DARK -> PlantCoreStatus(
-        title = "${plantName}想晒太阳",
-        message = "这里有点暗，主人帮我补充一些温柔的光吧！",
+        text = "小麦现在需要光照哦，请${ownerName}把我移到光照更充足的地方吧！",
         color = Color(0xFFD28A20),
     )
     soilStatus == SoilStatus.TOO_WET -> PlantCoreStatus(
-        title = "${plantName}喝得有点多",
-        message = "先让我休息一下，等土壤透透气吧。",
+        text = "小麦今天喝得有点饱，${ownerName}先让我透透气吧！",
         color = Color(0xFF4B7F91),
     )
     lightStatus == LightStatus.TOO_STRONG -> PlantCoreStatus(
-        title = "${plantName}有点晒",
-        message = "主人帮我挪到柔和的散射光里吧！",
+        text = "小麦觉得阳光有点热，${ownerName}帮我挪到柔和的散射光里吧！",
         color = Color(0xFFD07C28),
     )
     soilStatus == SoilStatus.SUITABLE && lightStatus == LightStatus.DIFFUSE -> PlantCoreStatus(
-        title = "${plantName}现在很开心！",
-        message = "水分和光照都刚刚好，谢谢主人照顾我。",
+        text = "小麦现在很开心！${ownerName}把水分和光照都照顾得刚刚好。",
         color = Color(0xFF087D3C),
     )
     else -> PlantCoreStatus(
-        title = "${plantName}正在感受环境",
-        message = "数据稳定后，我会告诉主人现在的心情。",
+        text = "小麦正在感受环境，${ownerName}稍等我一下哦！",
         color = Leaf,
     )
+}
 }
 
 private fun telemetryWithLatest(history: List<DeviceTelemetry>, latest: DeviceTelemetry?): List<DeviceTelemetry> {
