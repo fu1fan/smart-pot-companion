@@ -985,7 +985,7 @@ private fun EnvironmentReminderDialog(
             showCornerBolts = false,
         ) {
             Column(
-                modifier = Modifier.offset(x = 6.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -1003,6 +1003,7 @@ private fun EnvironmentReminderDialog(
                 }
                 Text(
                     if (thirsty) "小麦有点口渴" else "小麦想晒晒太阳",
+                    modifier = Modifier.fillMaxWidth(),
                     color = Ink,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
@@ -1010,6 +1011,7 @@ private fun EnvironmentReminderDialog(
                 )
                 Text(
                     if (thirsty) "${ownerName}记得喂我喝水哦！" else "室内光线有点暗，${ownerName}帮我补充一些温柔的光吧！",
+                    modifier = Modifier.fillMaxWidth(),
                     color = Muted,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
