@@ -1278,7 +1278,7 @@ private fun DashboardHero(
             ) {
                 Text(
                     pot?.let { "${it.species.chineseName} · ${it.species.scientificName}" } ?: "正在连接你的盆栽",
-                    color = Color(0xFF3A7A94),
+                    color = BrightLeaf,
                     fontSize = SmartPotTypeScale.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -1447,7 +1447,13 @@ private fun PlantHealthCard(
     detailsVisible: Boolean,
     onToggleDetails: () -> Unit,
 ) {
-    val coreStatus = plantCoreStatus(userName, online, soilStatus, lightStatus)
+    val coreStatus = plantCoreStatus(
+        userName = userName,
+        online = online,
+        soilStatus = soilStatus,
+        lightStatus = lightStatus,
+        interactionSuitability = metrics.interactionSuitability,
+    )
     PixelPanel(
         Modifier.fillMaxWidth(),
         fill = PixelPanelFill,
@@ -1782,7 +1788,7 @@ private fun TodayLightIntegralCard(
                             }
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("$completion%", color = Color(0xFFF08A24), fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Black)
+                            Text("$completion%", color = Ink, fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Black)
                             Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                         }
                     }
@@ -1800,13 +1806,13 @@ private fun TodayLightIntegralCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     LightIntegralRow("有效光照时长", formatCompactLightDuration(integral.effectiveMinutes), Ink)
-                    LightIntegralRow("光照累积量", "${integral.totalLuxHours} lux·h", Color(0xFFF08A24))
+                    LightIntegralRow("光照累积量", "${integral.totalLuxHours} lux·h", Ink)
                     LightIntegralRow(
                         "补光建议时长",
                         if (integral.recommendedSupplementMinutes == 0) "已达标" else "还需${formatCompactLightDuration(integral.recommendedSupplementMinutes)}",
-                        BrightLeaf,
+                        Ink,
                     )
-                    LightIntegralRow("光照完成度", "$completion%", Color(0xFFF08A24))
+                    LightIntegralRow("光照完成度", "$completion%", Ink)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         repeat(16) { index ->
                             Box(
@@ -1814,7 +1820,7 @@ private fun TodayLightIntegralCard(
                                     .weight(1f)
                                     .height(8.dp)
                                     .background(
-                                        if ((index + 1) * 100 <= completion * 16) Color(0xFFFFA63A) else Color(0xFFFFE4B8),
+                                        if ((index + 1) * 100 <= completion * 16) BrightLeaf else SoftLeaf,
                                         RoundedCornerShape(2.dp),
                                     ),
                             )
@@ -4958,36 +4964,39 @@ private fun plantCoreStatus(
     online: Boolean,
     soilStatus: SoilStatus?,
     lightStatus: LightStatus?,
+    interactionSuitability: Double,
 ): PlantCoreStatus {
     val ownerName = userName.trim().ifBlank { "主人" }
     return when {
     !online -> PlantCoreStatus(
         text = "小麦正在等${ownerName}回来，设备连接后我就告诉你现在的感受。",
-        color = Muted,
+        color = Color(0xFFD17B2F),
     )
     soilStatus == SoilStatus.TOO_DRY -> PlantCoreStatus(
         text = "小麦现在有点口渴，${ownerName}记得喂我喝水哦！",
-        color = Color(0xFF3789B5),
+        color = Color(0xFFD17B2F),
     )
     lightStatus == LightStatus.DARK -> PlantCoreStatus(
         text = "小麦现在需要光照哦，请${ownerName}把我移到光照更充足的地方吧！",
-        color = Color(0xFFD28A20),
+        color = Color(0xFFD17B2F),
     )
     soilStatus == SoilStatus.TOO_WET -> PlantCoreStatus(
         text = "小麦今天喝得有点饱，${ownerName}先让我透透气吧！",
-        color = Color(0xFF4B7F91),
+        color = Color(0xFFD17B2F),
     )
     lightStatus == LightStatus.TOO_STRONG -> PlantCoreStatus(
         text = "小麦觉得阳光有点热，${ownerName}帮我挪到柔和的散射光里吧！",
-        color = Color(0xFFD07C28),
+        color = Color(0xFFD17B2F),
     )
-    soilStatus == SoilStatus.SUITABLE && lightStatus == LightStatus.DIFFUSE -> PlantCoreStatus(
+    soilStatus == SoilStatus.SUITABLE &&
+        lightStatus == LightStatus.DIFFUSE &&
+        interactionSuitability >= 1.0 -> PlantCoreStatus(
         text = "小麦现在很开心！${ownerName}把水分和光照都照顾得刚刚好。",
-        color = Color(0xFF087D3C),
+        color = BrightLeaf,
     )
     else -> PlantCoreStatus(
         text = "小麦正在感受环境，${ownerName}稍等我一下哦！",
-        color = Leaf,
+        color = Color(0xFFD17B2F),
     )
 }
 }
