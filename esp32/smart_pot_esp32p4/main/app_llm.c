@@ -164,19 +164,71 @@ static const char *strip_accidental_tone_prefix(const char *reply)
     return start;
 }
 
+static bool extract_json_string_loose(const char *json, const char *key,
+                                      char *value, size_t value_capacity)
+{
+    if (json == NULL || key == NULL || value == NULL || value_capacity == 0) return false;
+    value[0] = '\0';
+    char needle[40];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *cursor = strstr(json, needle);
+    if (cursor == NULL) return false;
+    cursor = strchr(cursor + strlen(needle), ':');
+    if (cursor == NULL) return false;
+    cursor++;
+    while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
+    if (*cursor != '\"') return false;
+    cursor++;
+
+    size_t written = 0;
+    while (*cursor != '\0' && *cursor != '\"' && written + 1 < value_capacity) {
+        if (*cursor == '\\' && cursor[1] != '\0') {
+            cursor++;
+            char decoded = *cursor;
+            if (decoded == 'n' || decoded == 'r' || decoded == 't') decoded = ' ';
+            value[written++] = decoded;
+            cursor++;
+            continue;
+        }
+        value[written++] = *cursor++;
+    }
+    value[written] = '\0';
+    return written > 0;
+}
+
 static bool parse_structured_reply(char *output, size_t output_capacity,
                                    char *tone, size_t tone_capacity)
 {
     char *json_start = strchr(output, '{');
     char *json_end = strrchr(output, '}');
     if (json_start == NULL || json_end == NULL || json_end <= json_start) {
-        return false;
+        const char *plain_reply = strip_accidental_tone_prefix(output);
+        if (plain_reply[0] == '\0' || plain_reply[0] == '{' || plain_reply[0] == '[') return false;
+        char recovered[1024];
+        utf8_strlcpy(recovered, plain_reply, sizeof(recovered));
+        utf8_strlcpy(output, recovered, output_capacity);
+        utf8_strlcpy(tone, "自然、亲切", tone_capacity);
+        return output[0] != '\0';
     }
     json_end[1] = '\0';
 
     cJSON *root = cJSON_Parse(json_start);
     if (root == NULL) {
-        return false;
+        char recovered_reply[1024] = { 0 };
+        char recovered_tone[96] = { 0 };
+        bool has_reply = extract_json_string_loose(json_start, "reply",
+                                                   recovered_reply, sizeof(recovered_reply)) ||
+                         extract_json_string_loose(json_start, "text",
+                                                   recovered_reply, sizeof(recovered_reply));
+        if (!has_reply) return false;
+        (void)(extract_json_string_loose(json_start, "tone", recovered_tone, sizeof(recovered_tone)) ||
+               extract_json_string_loose(json_start, "emotion", recovered_tone, sizeof(recovered_tone)));
+        const char *clean_reply = strip_accidental_tone_prefix(recovered_reply);
+        utf8_strlcpy(output, clean_reply, output_capacity);
+        utf8_strlcpy(tone, recovered_tone[0] != '\0' ? recovered_tone : "自然、亲切",
+                      tone_capacity);
+        ESP_LOGW(TAG, "Recovered malformed structured reply with tolerant parser");
+        return output[0] != '\0';
     }
     cJSON *reply_item = cJSON_GetObjectItemCaseSensitive(root, "reply");
     if (!cJSON_IsString(reply_item) || reply_item->valuestring == NULL) {
@@ -350,7 +402,8 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
                             "When the user asks multiple questions, answer every question in order. "
                             "Do not volunteer sensor readings or care advice unless asked. "
                             "Use the previous dialogue messages to preserve context and remember user details. "
-                            "If the speech is unclear, ask the user to repeat. "
+                            "Treat the user text as an ASR transcript: infer minor recognition errors from context and answer directly. "
+                            "Do not say you did not hear clearly and do not ask the user to repeat unless the user text is empty or completely unintelligible. "
                             "Return exactly one JSON object in this format: "
                             "{\"tone\":\"开心、亲切、轻快\",\"reply\":\"简洁的中文回复\"}. "
                             "The tone field must contain two to four concise Chinese tone words for speech synthesis. "

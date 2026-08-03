@@ -583,9 +583,11 @@ static void transcribe_and_reply_with_prefix(esp_codec_dev_handle_t mic,
     } else {
         /* Empty ASR results must not masquerade as a spoken model response. */
         app_ui_set_voice_status("ASR: no speech");
-        ESP_LOGW(TAG, "ASR returned no text; returning to wake state");
+        ESP_LOGW(TAG, "ASR returned no text after reconnect attempts");
         free(transcript);
-        app_voice_conversation_complete();
+        if (!app_tts_speak_text("刚才的声音有点轻，请靠近一点再说一次吧。")) {
+            app_voice_conversation_complete();
+        }
     }
 }
 

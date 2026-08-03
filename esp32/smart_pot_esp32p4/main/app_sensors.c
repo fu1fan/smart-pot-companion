@@ -20,6 +20,7 @@
 #include "app_time.h"
 #include "app_tts.h"
 #include "app_ui.h"
+#include "app_wifi.h"
 #include "app_board_config.h"
 
 #ifndef CONFIG_SMART_POT_SENSOR_HARDWARE_ENABLE
@@ -348,6 +349,24 @@ static bool environment_has_low_light(env_alert_state_t state)
            state == ENV_ALERT_HIGH_LOW;
 }
 
+static app_tts_tone_t environment_voice_tone(env_alert_state_t state)
+{
+    switch (state) {
+    case ENV_ALERT_NORMAL_NORMAL:
+        return APP_TTS_TONE_CHEERFUL;
+    case ENV_ALERT_LOW_HIGH:
+    case ENV_ALERT_NORMAL_HIGH:
+    case ENV_ALERT_HIGH_HIGH:
+        return APP_TTS_TONE_FLUSTERED;
+    case ENV_ALERT_LOW_LOW:
+    case ENV_ALERT_NORMAL_LOW:
+    case ENV_ALERT_HIGH_LOW:
+        return APP_TTS_TONE_SLEEPY;
+    default:
+        return APP_TTS_TONE_WORRIED;
+    }
+}
+
 static bool reminder_time_allowed(const struct tm *local_time, env_alert_state_t state)
 {
     int minute_of_day = local_time->tm_hour * 60 + local_time->tm_min;
@@ -414,7 +433,14 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
         const environment_reply_t *reply = environment_reply(next_state);
         if (reply == NULL) return;
         app_ui_show_remote_content(reply->text, 6000);
-        bool tts_queued = app_tts_play_local_wav(reply->audio_path);
+        bool tts_queued = false;
+        if (app_wifi_is_connected()) {
+            tts_queued = app_tts_speak_text_with_tone(
+                reply->text, environment_voice_tone(next_state));
+        }
+        if (!tts_queued) {
+            tts_queued = app_tts_play_local_wav(reply->audio_path);
+        }
         hw->state_change_pending = false;
         hw->last_reminded_state = next_state;
         if (all_normal) {

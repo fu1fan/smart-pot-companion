@@ -8,8 +8,8 @@ dependencies:
   espressif/esp_hosted:
     version: "1.4.*"
   espressif/esp-sr:
-    version: "^2.4.4"
+    version: "2.4.6"
   espressif/esp_websocket_client:
-    version: "^1.4.0"
+    version: "1.7.0"
   idf:
     version: ">=5.3.0"

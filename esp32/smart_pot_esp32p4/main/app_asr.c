@@ -45,6 +45,7 @@
 #define ASR_RESULT_CAP 768
 #define ASR_ERROR_CAP 384
 #define ASR_CONNECT_TIMEOUT_MS 8000
+#define ASR_CONNECT_ATTEMPTS 2
 #define ASR_FINAL_TIMEOUT_MS 5000
 #define ASR_SPEECH_START_LEVEL 25
 #define ASR_SPEECH_CONTINUE_LEVEL 12
@@ -447,40 +448,57 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
     /* Start capturing immediately. TLS/DNS/WebSocket setup now happens in the
      * background while the user speaks, instead of presenting several seconds
      * of dead time before recording begins. */
-    app_ui_set_voice_status("ASR: listening");
-    esp_err_t start_err = esp_websocket_client_start(client);
-    if (start_err != ESP_OK) {
-        ESP_LOGE(TAG, "Volc ASR WebSocket start failed: %s", esp_err_to_name(start_err));
-        free(pcm);
-        free(prefetch);
-        esp_websocket_client_destroy(client);
-        vEventGroupDelete(ctx.events);
-        return NULL;
-    }
-
     EventBits_t bits = 0;
     bool stream_failed = false;
-    int64_t connect_deadline = esp_timer_get_time() +
-                               (int64_t)ASR_CONNECT_TIMEOUT_MS * 1000;
-    while (prefetched_packets < max_packets && esp_timer_get_time() < connect_deadline) {
-        bits = xEventGroupGetBits(ctx.events);
-        if ((bits & (ASR_EVENT_CONNECTED | ASR_EVENT_FAILED)) != 0) break;
-        if (esp_codec_dev_read(mic, pcm, ASR_PACKET_BYTES) != ESP_CODEC_DEV_OK) {
-            ESP_LOGE(TAG, "Microphone read failed while ASR was connecting");
-            stream_failed = true;
-            break;
+    bool connected = false;
+    for (int attempt = 1; attempt <= ASR_CONNECT_ATTEMPTS; attempt++) {
+        xEventGroupClearBits(ctx.events, ASR_EVENT_CONNECTED | ASR_EVENT_FINAL | ASR_EVENT_FAILED);
+        bits = 0;
+        ctx.error[0] = '\0';
+        app_ui_set_voice_status(attempt == 1 ? "ASR: listening" : "ASR: reconnecting");
+        esp_err_t start_err = esp_websocket_client_start(client);
+        if (start_err != ESP_OK) {
+            ESP_LOGE(TAG, "Volc ASR WebSocket start attempt %d failed: %s",
+                     attempt, esp_err_to_name(start_err));
+        } else {
+            int64_t connect_deadline = esp_timer_get_time() +
+                                       (int64_t)ASR_CONNECT_TIMEOUT_MS * 1000;
+            while (esp_timer_get_time() < connect_deadline) {
+                bits = xEventGroupGetBits(ctx.events);
+                if ((bits & (ASR_EVENT_CONNECTED | ASR_EVENT_FAILED)) != 0) break;
+                if (prefetched_packets < max_packets) {
+                    if (esp_codec_dev_read(mic, pcm, ASR_PACKET_BYTES) != ESP_CODEC_DEV_OK) {
+                        ESP_LOGE(TAG, "Microphone read failed while ASR was connecting");
+                        stream_failed = true;
+                        break;
+                    }
+                    memcpy(prefetch + (size_t)prefetched_packets * ASR_PACKET_BYTES,
+                           pcm, ASR_PACKET_BYTES);
+                    update_speech_state(pcm, ASR_PACKET_BYTES, &speech_start_packets,
+                                        &speech_detected, &silence_ms, &speech_ms,
+                                        &speech_continue_packets);
+                    prefetched_packets++;
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                }
+            }
+            bits = xEventGroupGetBits(ctx.events);
+            connected = (bits & ASR_EVENT_CONNECTED) != 0;
+            if (connected) break;
         }
-        memcpy(prefetch + (size_t)prefetched_packets * ASR_PACKET_BYTES,
-               pcm, ASR_PACKET_BYTES);
-        update_speech_state(pcm, ASR_PACKET_BYTES, &speech_start_packets,
-                            &speech_detected, &silence_ms, &speech_ms,
-                            &speech_continue_packets);
-        prefetched_packets++;
+
+        ESP_LOGW(TAG, "Volc ASR connection attempt %d/%d failed bits=0x%lx detail=%s",
+                 attempt, ASR_CONNECT_ATTEMPTS, (unsigned long)bits, ctx.error);
+        esp_websocket_client_stop(client);
+        if (stream_failed) break;
+        if (attempt < ASR_CONNECT_ATTEMPTS) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
     }
-    bits = xEventGroupGetBits(ctx.events);
-    if ((bits & ASR_EVENT_CONNECTED) == 0) {
-        ESP_LOGE(TAG, "Volc ASR connection failed bits=0x%lx connected=%d detail=%s",
-                 (unsigned long)bits, esp_websocket_client_is_connected(client), ctx.error);
+
+    if (!connected || stream_failed) {
+        ESP_LOGE(TAG, "Volc ASR connection failed after %d attempts buffered=%d detail=%s",
+                 ASR_CONNECT_ATTEMPTS, prefetched_packets, ctx.error);
         goto cleanup;
     }
     ESP_LOGI(TAG, "Volc ASR connected with %d buffered packets (%d ms)",

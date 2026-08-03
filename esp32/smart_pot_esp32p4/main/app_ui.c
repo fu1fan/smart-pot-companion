@@ -2812,7 +2812,7 @@ void app_ui_update(const app_plant_state_t *state)
         return;
     }
 
-    if (bsp_display_lock(100) != ESP_OK) {
+    if (bsp_display_lock(500) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to lock display for UI update");
         return;
     }
