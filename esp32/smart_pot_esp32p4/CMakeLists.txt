@@ -15,3 +15,5 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 add_compile_options(-Wno-format)
 project(smart_pot_esp32p4)
+
+spiffs_create_partition_image(storage offline_audio FLASH_IN_PROJECT)

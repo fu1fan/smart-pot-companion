@@ -89,6 +89,7 @@ static const char *TAG = "app_tts";
 
 typedef enum {
     TTS_CMD_ONE_SHOT = 0,
+    TTS_CMD_LOCAL_WAV,
     TTS_CMD_PRECONNECT,
     TTS_CMD_STREAM_BEGIN,
     TTS_CMD_STREAM_TEXT,
@@ -616,6 +617,115 @@ static bool play_one_shot(tts_runtime_t *rt, const tts_msg_t *msg)
     return finish_session(rt);
 }
 
+static uint16_t read_le16(const uint8_t *value)
+{
+    return (uint16_t)value[0] | ((uint16_t)value[1] << 8);
+}
+
+static uint32_t read_le32(const uint8_t *value)
+{
+    return (uint32_t)value[0] |
+           ((uint32_t)value[1] << 8) |
+           ((uint32_t)value[2] << 16) |
+           ((uint32_t)value[3] << 24);
+}
+
+static bool play_local_wav_file(const char *path, uint8_t volume)
+{
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        ESP_LOGW(TAG, "Offline WAV missing: %s", path);
+        return false;
+    }
+
+    uint8_t header[12];
+    if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
+        memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+        ESP_LOGW(TAG, "Invalid offline WAV header: %s", path);
+        fclose(file);
+        return false;
+    }
+
+    uint16_t format = 0;
+    uint16_t channels = 0;
+    uint16_t bits_per_sample = 0;
+    uint32_t sample_rate = 0;
+    uint32_t data_size = 0;
+    bool has_format = false;
+    bool has_data = false;
+    uint8_t chunk_header[8];
+    while (fread(chunk_header, 1, sizeof(chunk_header), file) == sizeof(chunk_header)) {
+        uint32_t chunk_size = read_le32(chunk_header + 4);
+        if (memcmp(chunk_header, "fmt ", 4) == 0 && chunk_size >= 16) {
+            uint8_t format_data[16];
+            if (fread(format_data, 1, sizeof(format_data), file) != sizeof(format_data)) break;
+            format = read_le16(format_data);
+            channels = read_le16(format_data + 2);
+            sample_rate = read_le32(format_data + 4);
+            bits_per_sample = read_le16(format_data + 14);
+            if (chunk_size > sizeof(format_data)) {
+                fseek(file, (long)(chunk_size - sizeof(format_data)), SEEK_CUR);
+            }
+            has_format = true;
+        } else if (memcmp(chunk_header, "data", 4) == 0) {
+            data_size = chunk_size;
+            has_data = true;
+            break;
+        } else {
+            fseek(file, (long)chunk_size, SEEK_CUR);
+        }
+        if ((chunk_size & 1U) != 0) fseek(file, 1, SEEK_CUR);
+    }
+
+    if (!has_format || !has_data || format != 1 || channels != 1 ||
+        bits_per_sample != 16 || sample_rate != CONFIG_SMART_POT_VOLC_TTS_SAMPLE_RATE) {
+        ESP_LOGW(TAG, "Unsupported offline WAV format: %s rate=%lu ch=%u bits=%u", path,
+                 (unsigned long)sample_rate, channels, bits_per_sample);
+        fclose(file);
+        return false;
+    }
+
+    if (!app_voice_pause_microphone(10000)) {
+        ESP_LOGW(TAG, "Offline WAV microphone pause timeout");
+        fclose(file);
+        return false;
+    }
+
+    bool ok = false;
+    esp_codec_dev_handle_t speaker = bsp_audio_codec_speaker_init();
+    if (speaker != NULL) {
+        esp_codec_dev_sample_info_t fs = {
+            .sample_rate = (int)sample_rate,
+            .channel = 1,
+            .bits_per_sample = 16,
+        };
+        if (esp_codec_dev_open(speaker, &fs) == ESP_CODEC_DEV_OK) {
+            esp_codec_dev_set_out_vol(speaker, volume);
+            app_ui_set_voice_status("TTS: local");
+            uint8_t buffer[TTS_PLAY_CHUNK];
+            uint32_t remaining = data_size;
+            ok = true;
+            while (remaining > 0) {
+                size_t requested = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+                size_t count = fread(buffer, 1, requested, file);
+                count &= ~((size_t)1);
+                if (count == 0 || esp_codec_dev_write(speaker, buffer, count) != ESP_CODEC_DEV_OK) {
+                    ok = false;
+                    break;
+                }
+                remaining -= (uint32_t)count;
+            }
+            esp_codec_dev_close(speaker);
+        }
+    }
+    fclose(file);
+    if (!app_voice_resume_microphone(2500)) {
+        ESP_LOGW(TAG, "Timed out resuming microphone after offline WAV");
+    }
+    ESP_LOGI(TAG, "Offline WAV playback %s: %s", ok ? "complete" : "failed", path);
+    return ok;
+}
+
 static void tts_task(void *arg)
 {
     (void)arg;
@@ -646,6 +756,12 @@ static void tts_task(void *arg)
                 app_voice_conversation_complete();
             }
             release_pcm_buffer(&rt);
+            s_tts_busy = false;
+        } else if (msg.command == TTS_CMD_LOCAL_WAV) {
+            s_tts_busy = true;
+            bool ok = play_local_wav_file(msg.text, msg.volume);
+            if (!ok) app_ui_set_voice_status("TTS: local failed");
+            if (msg.complete_conversation) app_voice_conversation_complete();
             s_tts_busy = false;
         } else if (msg.command == TTS_CMD_STREAM_BEGIN) {
             if (streaming) {
@@ -750,7 +866,8 @@ static bool queue_one_shot(const char *text, bool complete,
                            uint8_t volume, int16_t rate, int8_t pitch,
                            const char *style, bool low_priority)
 {
-    if (s_tts_queue == NULL || text == NULL || text[0] == '\0') return false;
+    if (s_tts_queue == NULL || CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0' ||
+        text == NULL || text[0] == '\0') return false;
     if (low_priority && (s_tts_busy || uxQueueMessagesWaiting(s_tts_queue) > 0)) {
         ESP_LOGI(TAG, "Dropping low-priority TTS while busy");
         return false;
@@ -770,8 +887,8 @@ static bool queue_one_shot(const char *text, bool complete,
 
 void app_tts_start(void)
 {
-    if (!CONFIG_SMART_POT_TTS_ENABLE || CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0') {
-        ESP_LOGI(TAG, "Volc TTS disabled or API key missing");
+    if (!CONFIG_SMART_POT_TTS_ENABLE) {
+        ESP_LOGI(TAG, "TTS disabled");
         return;
     }
     if (s_tts_queue != NULL) return;
@@ -781,7 +898,9 @@ void app_tts_start(void)
         app_ui_set_voice_status("TTS: task failed");
         return;
     }
-    if (CONFIG_SMART_POT_TTS_STARTUP_TEST) {
+    if (CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0') {
+        ESP_LOGI(TAG, "Volc TTS API key missing; local fixed prompts remain available");
+    } else if (CONFIG_SMART_POT_TTS_STARTUP_TEST) {
         (void)queue_one_shot("你好，我是小麦。", false,
                              TTS_VOLUME_COMMAND, 5, 1,
                              "请用自然、亲切、活泼的语气说话。", false);
@@ -790,7 +909,8 @@ void app_tts_start(void)
 
 bool app_tts_prepare_connection(void)
 {
-    if (!CONFIG_SMART_POT_TTS_ENABLE || s_tts_queue == NULL) return false;
+    if (!CONFIG_SMART_POT_TTS_ENABLE || CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0' ||
+        s_tts_queue == NULL) return false;
     if (s_preconnect_requested || s_tts_busy || s_stream_requested) return true;
     tts_msg_t msg = { .command = TTS_CMD_PRECONNECT };
     s_preconnect_requested = queue_message(&msg, 0);
@@ -799,7 +919,7 @@ bool app_tts_prepare_connection(void)
 
 bool app_tts_stream_begin(const char *voice_instruction)
 {
-    if (s_stream_requested || s_tts_busy) return false;
+    if (CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0' || s_stream_requested || s_tts_busy) return false;
     tts_msg_t msg = {
         .command = TTS_CMD_STREAM_BEGIN,
         .volume = apply_user_volume(TTS_VOLUME_CONVERSATION),
@@ -888,6 +1008,24 @@ bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone)
     }
     return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION,
                           rate, pitch, style, true);
+}
+
+bool app_tts_play_local_wav(const char *path)
+{
+    if (!CONFIG_SMART_POT_TTS_ENABLE || s_tts_queue == NULL || path == NULL || path[0] == '\0') {
+        return false;
+    }
+    if (s_tts_busy || uxQueueMessagesWaiting(s_tts_queue) > 0) {
+        ESP_LOGI(TAG, "Dropping low-priority offline WAV while TTS is busy");
+        return false;
+    }
+    tts_msg_t msg = {
+        .command = TTS_CMD_LOCAL_WAV,
+        .complete_conversation = true,
+        .volume = apply_user_volume(TTS_VOLUME_AUTOMATION),
+    };
+    utf8_strlcpy(msg.text, path, sizeof(msg.text));
+    return queue_message(&msg, 0);
 }
 
 bool app_tts_speak_stream_segment(const char *text)

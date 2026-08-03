@@ -21,6 +21,7 @@ bool app_tts_speak_text_with_instruction(const char *text, const char *voice_ins
 bool app_tts_speak_once(const char *text);
 bool app_tts_speak_text_quietly(const char *text);
 bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone);
+bool app_tts_play_local_wav(const char *path);
 bool app_tts_speak_stream_segment(const char *text);
 bool app_tts_finish_stream(void);
 bool app_tts_play_success_chime(void);

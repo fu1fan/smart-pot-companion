@@ -232,6 +232,10 @@ void app_main(void)
 #else
     init_display();
 
+    esp_err_t storage_err = bsp_spiffs_mount();
+    if (storage_err != ESP_OK) {
+        ESP_LOGW(TAG, "Offline voice storage mount failed: %s", esp_err_to_name(storage_err));
+    }
     app_wifi_start();
     app_cloud_start();
     app_time_start();
