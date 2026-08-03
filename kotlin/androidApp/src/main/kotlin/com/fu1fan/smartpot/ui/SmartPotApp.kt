@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -112,6 +113,36 @@ private val PixelDanger = Color(0xFFD14343)
 private val WarmShadow = Color(0x332B1A08)
 private val WarmLine = Color(0xFFDCC889)
 private val WarmLeafSoft = Color(0xFFEAF4D7)
+
+private object SmartPotTypeScale {
+    val labelSmall = 11.sp
+    val bodySmall = 12.sp
+    val bodyMedium = 14.sp
+    val titleMedium = 16.sp
+    val titleLarge = 22.sp
+    val headlineSmall = 24.sp
+    val headlineMedium = 28.sp
+    val headlineLarge = 32.sp
+    val displaySmall = 36.sp
+}
+
+private val SmartPotTypography = Typography(
+    displayLarge = TextStyle(fontSize = 57.sp, lineHeight = 64.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    displayMedium = TextStyle(fontSize = 45.sp, lineHeight = 52.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    displaySmall = TextStyle(fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    headlineMedium = TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    headlineSmall = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp),
+    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.sp),
+)
 
 private data class DashboardMetrics(
     val growthDays: Int?,
@@ -174,7 +205,10 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
             }
         }
     }
-    MaterialTheme(colorScheme = lightColorScheme(primary = Leaf, secondary = Color(0xFF7D9763), background = Sand, surface = Color.White)) {
+    MaterialTheme(
+        colorScheme = lightColorScheme(primary = Leaf, secondary = Color(0xFF7D9763), background = Sand, surface = Color.White),
+        typography = SmartPotTypography,
+    ) {
         Scaffold(
             containerColor = Sand,
             topBar = {
@@ -274,11 +308,11 @@ private fun InviteGateScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text("加入共享盆栽", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text("加入共享盆栽", color = Ink, fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Black)
                 Text(
                     "输入主人提供的 6 位邀请码后，即可和 ESP 一起照顾小麦。",
                     color = Muted,
-                    fontSize = 13.sp,
+                    fontSize = SmartPotTypeScale.bodyMedium,
                     textAlign = TextAlign.Center,
                 )
                 PixelTextField(
@@ -292,7 +326,7 @@ private fun InviteGateScreen(
                     enabled = !submitting,
                 )
                 error?.let {
-                    Text(it, color = PixelDanger, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Text(it, color = PixelDanger, fontSize = SmartPotTypeScale.bodySmall, textAlign = TextAlign.Center)
                 }
                 PixelButton(
                     onClick = { onRedeem(code) },
@@ -340,7 +374,7 @@ private fun SetupScreen(species: List<PlantSpecies>, create: (String, String, St
                             selected = selected == plant.id,
                             onClick = { selected = plant.id },
                             contentPadding = PaddingValues(horizontal = 9.dp, vertical = 6.dp),
-                        ) { Text(plant.chineseName, fontSize = 12.sp) }
+                        ) { Text(plant.chineseName, fontSize = SmartPotTypeScale.bodySmall) }
                     }
                 }
             }
@@ -380,7 +414,7 @@ private fun SpeciesPickerDialog(
             showCornerBolts = false,
         ) {
             Column(Modifier.fillMaxWidth().wrapContentHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("修改植物品种", fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
+                Text("修改植物品种", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
                 PixelTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -390,7 +424,7 @@ private fun SpeciesPickerDialog(
                     singleLine = true,
                 )
                 if (filteredSpecies.isEmpty()) {
-                    Text("没有找到匹配的植物品种", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
+                    Text("没有找到匹配的植物品种", color = Muted, fontSize = SmartPotTypeScale.bodySmall, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     LazyColumn(
                         Modifier.fillMaxWidth().heightIn(max = 220.dp).wrapContentHeight(),
@@ -407,10 +441,10 @@ private fun SpeciesPickerDialog(
                             ) {
                                 Column(Modifier.weight(1f)) {
                                     Text(plant.chineseName, fontWeight = FontWeight.SemiBold)
-                                    Text(plant.scientificName, fontSize = 12.sp, color = Color.Gray)
+                                    Text(plant.scientificName, fontSize = SmartPotTypeScale.bodySmall, color = Color.Gray)
                                     Text(
                                         "湿度 ${plant.thresholds.soilMinPercent}-${plant.thresholds.soilMaxPercent}% · 光照 ${plant.thresholds.lightMinLux}-${plant.thresholds.lightMaxLux} lux",
-                                        fontSize = 11.sp,
+                                        fontSize = SmartPotTypeScale.labelSmall,
                                         color = Color.Gray,
                                     )
                                 }
@@ -437,7 +471,7 @@ private fun PixelBottomBar(selectedTab: Int, onSelect: (Int) -> Unit) {
             NavigationBarItem(
                 selected = selectedTab == index,
                 onClick = { onSelect(index) },
-                icon = { Text(item.second, fontSize = 22.sp, fontWeight = FontWeight.Bold) },
+                icon = { Text(item.second, fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold) },
                 label = { Text(item.first) },
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = BrightLeaf,
@@ -667,7 +701,12 @@ private fun PixelTitleSign(title: String, modifier: Modifier = Modifier, compact
             }
             drawRect(WarmShadow, Offset(4.dp.toPx(), size.height - 1.dp.toPx()), Size(size.width - 8.dp.toPx(), 2.dp.toPx()))
         }
-        Text(title, color = PixelWoodDark, fontSize = if (compact) 21.sp else 25.sp, fontWeight = FontWeight.Black)
+        Text(
+            title,
+            color = PixelWoodDark,
+            fontSize = if (compact) SmartPotTypeScale.titleLarge else SmartPotTypeScale.headlineSmall,
+            fontWeight = FontWeight.Black,
+        )
         PixelCornerBolts(Color(0xFFE6AD60))
     }
 }
@@ -805,7 +844,7 @@ private fun PixelTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        label?.let { Text(it, color = PixelWoodDark, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+        label?.let { Text(it, color = PixelWoodDark, fontSize = SmartPotTypeScale.labelSmall, fontWeight = FontWeight.Bold) }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -814,7 +853,7 @@ private fun PixelTextField(
             minLines = minLines,
             maxLines = maxLines,
             keyboardOptions = keyboardOptions,
-            textStyle = LocalTextStyle.current.copy(color = Ink, fontSize = 14.sp),
+            textStyle = LocalTextStyle.current.copy(color = Ink, fontSize = SmartPotTypeScale.bodyMedium),
             modifier = Modifier.fillMaxWidth(),
             decorationBox = { innerTextField ->
                 Box(
@@ -827,13 +866,13 @@ private fun PixelTextField(
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     if (value.isBlank() && placeholder != null) {
-                        Text(placeholder, color = Muted, fontSize = 13.sp)
+                        Text(placeholder, color = Muted, fontSize = SmartPotTypeScale.bodyMedium)
                     }
                     innerTextField()
                 }
             },
         )
-        supportingText?.let { Text(it, color = Muted, fontSize = 10.sp) }
+        supportingText?.let { Text(it, color = Muted, fontSize = SmartPotTypeScale.labelSmall) }
     }
 }
 
@@ -930,7 +969,7 @@ private fun PixelCheckbox(checked: Boolean, modifier: Modifier = Modifier) {
             .border(1.dp, if (checked) Leaf else CardBorder, RoundedCornerShape(4.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        if (checked) Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+        if (checked) Text("✓", color = Color.White, fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.Black)
     }
 }
 
@@ -952,15 +991,15 @@ private fun PixelConfirmDialog(
             showCornerBolts = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Text(title, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Ink)
-                Text(text, color = Ink, fontSize = 12.sp)
+                Text(title, fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
+                Text(text, color = Ink, fontSize = SmartPotTypeScale.bodySmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     PixelTextButton(onClick = onDismiss, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 3.dp)) {
-                        Text("取消", fontSize = 11.sp)
+                        Text("取消", fontSize = SmartPotTypeScale.labelSmall)
                     }
                     Spacer(Modifier.width(6.dp))
                     PixelTextButton(onClick = onConfirm, danger = danger, contentPadding = PaddingValues(horizontal = 7.dp, vertical = 3.dp)) {
-                        Text(confirmText, fontSize = 11.sp)
+                        Text(confirmText, fontSize = SmartPotTypeScale.labelSmall)
                     }
                 }
             }
@@ -1005,7 +1044,7 @@ private fun EnvironmentReminderDialog(
                     if (thirsty) "小麦有点口渴" else "小麦想晒晒太阳",
                     modifier = Modifier.fillMaxWidth(),
                     color = Ink,
-                    fontSize = 20.sp,
+                    fontSize = SmartPotTypeScale.titleLarge,
                     fontWeight = FontWeight.Black,
                     textAlign = TextAlign.Center,
                 )
@@ -1013,7 +1052,7 @@ private fun EnvironmentReminderDialog(
                     if (thirsty) "${ownerName}记得喂我喝水哦！" else "室内光线有点暗，${ownerName}帮我补充一些温柔的光吧！",
                     modifier = Modifier.fillMaxWidth(),
                     color = Muted,
-                    fontSize = 14.sp,
+                    fontSize = SmartPotTypeScale.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                 )
@@ -1240,7 +1279,7 @@ private fun DashboardHero(
                 Text(
                     pot?.let { "${it.species.chineseName} · ${it.species.scientificName}" } ?: "正在连接你的盆栽",
                     color = Color(0xFF3A7A94),
-                    fontSize = 13.sp,
+                    fontSize = SmartPotTypeScale.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1248,7 +1287,7 @@ private fun DashboardHero(
                 Text(
                     if (online) "${pot?.displayName ?: "小麦"}今天也在等你哦~" else "设备离线，数据会在连接后自动更新",
                     color = if (online) Color(0xFF6F5B38) else Color(0xFF8B6736),
-                    fontSize = 10.sp,
+                    fontSize = SmartPotTypeScale.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                 )
@@ -1263,14 +1302,14 @@ private fun DashboardHero(
                 Column(Modifier.fillMaxSize().padding(5.dp), verticalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         "成长第 ${metrics.growthDays?.toString() ?: "--"} 天",
-                        fontSize = 14.sp,
+                        fontSize = SmartPotTypeScale.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = Ink,
                     )
-                    Text("我们一起的日子", fontSize = 9.sp, color = Muted)
+                    Text("我们一起的日子", fontSize = SmartPotTypeScale.labelSmall, color = Muted)
                     Text(
                         metrics.growthDays?.toString() ?: "--",
-                        fontSize = 38.sp,
+                        fontSize = SmartPotTypeScale.displaySmall,
                         fontWeight = FontWeight.Black,
                         color = Color(0xFF087D3C),
                     )
@@ -1416,40 +1455,40 @@ private fun PlantHealthCard(
         showCornerBolts = false,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("植物健康值", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
+            Text("植物健康值", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 HealthGauge(metrics.healthPercent, Modifier.size(118.dp))
                 Column(Modifier.weight(1f).padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(
                         coreStatus.text,
-                        fontSize = 18.sp,
+                        fontSize = SmartPotTypeScale.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = coreStatus.color,
                         lineHeight = 25.sp,
                     )
                     PixelTextButton(onClick = onToggleDetails, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp)) {
-                        Text(if (detailsVisible) "收起详情 ︿" else "健康详情 ›", fontSize = 14.sp, color = Color(0xFF087D3C), fontWeight = FontWeight.Bold)
+                        Text(if (detailsVisible) "收起详情 ︿" else "健康详情 ›", fontSize = SmartPotTypeScale.bodyMedium, color = Color(0xFF087D3C), fontWeight = FontWeight.Bold)
                     }
                 }
             }
             if (detailsVisible) {
                 HorizontalDivider(color = CardBorder)
-                Text("湿度 40% · 光照 40% · 互动 20%", fontSize = 11.sp, color = Muted)
+                Text("湿度 40% · 光照 40% · 互动 20%", fontSize = SmartPotTypeScale.labelSmall, color = Muted)
                 Text(
                     "湿度 ${suitabilityLabel(metrics.soilSuitability)} · 光照 ${suitabilityLabel(metrics.lightSuitability)} · 互动 ${suitabilityLabel(metrics.interactionSuitability)}",
-                    fontSize = 11.sp,
+                    fontSize = SmartPotTypeScale.labelSmall,
                     color = Leaf,
                 )
                 thresholds?.let {
                     Text(
                         "适宜范围：湿度 ${it.soilMinPercent}-${it.soilMaxPercent}% · 光照 ${it.lightMinLux}-${it.lightMaxLux} lux",
-                        fontSize = 11.sp,
+                        fontSize = SmartPotTypeScale.labelSmall,
                         color = Muted,
                     )
                 }
                 affinity?.let {
                     val normalized = PlantRules.normalizeAffinity(it)
-                    Text("好感度 ${normalized.score}/${PlantRules.maxAffinityPoints} · ${affinityLabel(normalized.level)}", fontSize = 11.sp, color = Muted)
+                    Text("好感度 ${normalized.score}/${PlantRules.maxAffinityPoints} · ${affinityLabel(normalized.level)}", fontSize = SmartPotTypeScale.labelSmall, color = Muted)
                 }
             }
         }
@@ -1484,8 +1523,8 @@ private fun HealthGauge(healthPercent: Int?, modifier: Modifier = Modifier) {
             )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(healthPercent?.toString() ?: "--", fontSize = 31.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text("/100", color = Muted, fontSize = 11.sp)
+            Text(healthPercent?.toString() ?: "--", fontSize = SmartPotTypeScale.headlineLarge, fontWeight = FontWeight.Bold, color = Ink)
+            Text("/100", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
         }
     }
 }
@@ -1510,16 +1549,16 @@ private fun DashboardMetricCard(
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 PixelMetricGlyph(iconKind, iconColor, Modifier.size(24.dp))
-                Text(title, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(title, color = Ink, fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 Text(
                     value,
                     fontSize = when {
-                        value.length >= 6 -> 17.sp
-                        value.length == 5 -> 19.sp
-                        value.length == 4 -> 23.sp
-                        else -> 29.sp
+                        value.length >= 6 -> SmartPotTypeScale.titleMedium
+                        value.length == 5 -> SmartPotTypeScale.titleLarge
+                        value.length == 4 -> SmartPotTypeScale.titleLarge
+                        else -> SmartPotTypeScale.headlineMedium
                     },
                     fontWeight = FontWeight.Black,
                     color = Ink,
@@ -1530,7 +1569,7 @@ private fun DashboardMetricCard(
                 Spacer(Modifier.width(3.dp))
                 Text(
                     unit,
-                    fontSize = if (unit.length > 1) 11.sp else 13.sp,
+                    fontSize = if (unit.length > 1) SmartPotTypeScale.labelSmall else SmartPotTypeScale.bodyMedium,
                     color = Ink,
                     maxLines = 1,
                     softWrap = false,
@@ -1540,7 +1579,7 @@ private fun DashboardMetricCard(
             Text(
                 status,
                 color = metricStatusColor(status),
-                fontSize = if (status.length > 6) 11.sp else 14.sp,
+                fontSize = if (status.length > 6) SmartPotTypeScale.labelSmall else SmartPotTypeScale.bodyMedium,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
             )
@@ -1648,13 +1687,13 @@ private fun CompanionScoreCard(metrics: DashboardMetrics) {
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("主人陪伴评分", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Ink)
-                Text(starScoreText(metrics.companionStars), color = Color(0xFF087D3C), fontSize = 22.sp, fontWeight = FontWeight.Black)
+                Text("主人陪伴评分", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
+                Text(starScoreText(metrics.companionStars), color = Color(0xFF087D3C), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Black)
             }
             StarRating(metrics.companionStars)
             Text(
                 "今日浇水 ${metrics.dailyWaterCount} 次 · 触摸 ${metrics.dailyTouchCount} 次 · 对话 ${metrics.dailyDialogCount} 次",
-                fontSize = 13.sp,
+                fontSize = SmartPotTypeScale.bodyMedium,
                 color = Ink,
             )
         }
@@ -1666,7 +1705,7 @@ private fun StarRating(stars: Float) {
     val filled = (stars + 0.5f).toInt().coerceIn(0, 5)
     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         repeat(5) { index ->
-            Text(if (index < filled) "★" else "☆", color = Sun, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+            Text(if (index < filled) "★" else "☆", color = Sun, fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1708,14 +1747,14 @@ private fun TodayLightIntegralCard(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                Text("今日光积分", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Ink)
+                Text("今日光积分", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
                 Spacer(Modifier.weight(1f))
                 Box(
                     Modifier
                         .background(Color(0xFFF2F1EC), RoundedCornerShape(5.dp))
                         .padding(horizontal = 9.dp, vertical = 4.dp),
                 ) {
-                    Text("每小时更新", color = Muted, fontSize = 10.sp)
+                    Text("每小时更新", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                 }
             }
 
@@ -1743,8 +1782,8 @@ private fun TodayLightIntegralCard(
                             }
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("$completion%", color = Color(0xFFF08A24), fontSize = 24.sp, fontWeight = FontWeight.Black)
-                            Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = 9.sp)
+                            Text("$completion%", color = Color(0xFFF08A24), fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Black)
+                            Text("${integral.totalLuxHours}/${integral.targetLuxHours}", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                         }
                     }
                     Spacer(Modifier.height(7.dp))
@@ -1790,9 +1829,9 @@ private fun TodayLightIntegralCard(
 @Composable
 private fun LightIntegralRow(label: String, value: String, valueColor: Color) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Muted, fontSize = 10.sp, maxLines = 1)
+        Text(label, color = Muted, fontSize = SmartPotTypeScale.labelSmall, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        Text(value, color = valueColor, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(value, color = valueColor, fontSize = SmartPotTypeScale.bodySmall, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -1801,7 +1840,7 @@ private fun LightCompositionLegend(color: Color, label: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(12.dp).background(color, RoundedCornerShape(2.dp)))
         Spacer(Modifier.width(7.dp))
-        Text(label, color = Muted, fontSize = 11.sp)
+        Text(label, color = Muted, fontSize = SmartPotTypeScale.labelSmall)
     }
 }
 
@@ -1913,11 +1952,16 @@ private fun DashboardTextCard(
         fillContainer = fillContainer,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 5.dp)) {
-            Text(title, fontSize = if (compact) 15.sp else 17.sp, fontWeight = FontWeight.Black, color = Ink)
+            Text(title, fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Black, color = Ink)
             lines.forEach { line ->
                 Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 7.dp)) {
                     Text(if (warning) "△" else "•", color = if (warning) Color(0xFFFF5A5F) else Leaf, fontWeight = FontWeight.Black)
-                    Text(line, fontSize = if (compact) 11.sp else 14.sp, color = Ink, modifier = Modifier.weight(1f))
+                    Text(
+                        line,
+                        fontSize = if (compact) SmartPotTypeScale.labelSmall else SmartPotTypeScale.bodyMedium,
+                        color = Ink,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -2068,11 +2112,11 @@ private fun CarePageHeader() {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(16.dp))
-        Text("养护", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("养护", color = Color(0xFF304A1D), fontSize = SmartPotTypeScale.headlineMedium, fontWeight = FontWeight.Black)
         Spacer(Modifier.width(16.dp))
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -2098,7 +2142,7 @@ private fun CareSectionShortcut(
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             CareShortcutIcon(icon, Modifier.size(44.dp))
-            Text(label, color = Color(0xFF304A1D), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = Color(0xFF304A1D), fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -2193,8 +2237,8 @@ private fun CareAffinityHeader(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("好感度等级", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text("Lv. $level", fontSize = 25.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("好感度等级", fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text("Lv. $level", fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.Bold, color = Ink)
                     PixelProgressBar(levelProgress, Modifier.fillMaxWidth())
                     Text(
                         if (level >= 30) {
@@ -2202,7 +2246,7 @@ private fun CareAffinityHeader(
                         } else {
                             "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度（最高等级30）"
                         },
-                        fontSize = 9.sp,
+                        fontSize = SmartPotTypeScale.labelSmall,
                         color = Color(0xFF5C513D),
                         maxLines = 1,
                         softWrap = false,
@@ -2263,18 +2307,18 @@ private fun AffinityImpactContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("今日好感影响因素", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text(if (expanded) "︿" else "﹀", color = Leaf, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("今日好感影响因素", fontSize = SmartPotTypeScale.labelSmall, fontWeight = FontWeight.Bold, color = Ink)
+            Text(if (expanded) "︿" else "﹀", color = Leaf, fontWeight = FontWeight.Bold, fontSize = SmartPotTypeScale.bodySmall)
         }
         if (expanded) {
             Text(
                 "加分：${positive.ifEmpty { listOf("暂无加分记录") }.joinToString(" · ")}",
-                fontSize = 10.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
                 color = BrightLeaf,
             )
             Text(
                 "扣分：${negative.ifEmpty { listOf("暂无扣分项") }.joinToString(" · ")}",
-                fontSize = 10.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
                 color = if (negative.isEmpty()) Muted else Color(0xFFD45A52),
             )
         }
@@ -2322,12 +2366,12 @@ private fun AddCareRecordCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("记录图片", color = Muted, fontSize = 11.sp)
+                Text("记录图片", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                 PixelOutlinedButton(
                     onClick = { imagePicker.launch("image/*") },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
                 ) {
-                    Text(if (imageDataUrl == null) "选择图片" else "更换图片", fontSize = 11.sp)
+                    Text(if (imageDataUrl == null) "选择图片" else "更换图片", fontSize = SmartPotTypeScale.labelSmall)
                 }
             }
             imageDataUrl?.let { dataUrl ->
@@ -2339,7 +2383,7 @@ private fun AddCareRecordCard(
                         fill = PixelDanger,
                         contentPadding = PaddingValues(0.dp),
                     ) {
-                        Text("×", color = Color.White, fontSize = 14.sp)
+                        Text("×", color = Color.White, fontSize = SmartPotTypeScale.bodyMedium)
                     }
                 }
             }
@@ -2354,7 +2398,7 @@ private fun AddCareRecordCard(
                         ) {
                             CareTypeIcon(type, Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(careLabel(type), fontSize = 12.sp, maxLines = 1)
+                            Text(careLabel(type), fontSize = SmartPotTypeScale.bodySmall, maxLines = 1)
                         }
                     }
                     repeat(3 - rowActions.size) { Spacer(Modifier.weight(1f)) }
@@ -2363,7 +2407,7 @@ private fun AddCareRecordCard(
             Text(
                 selectedType?.let { "已选择：${careLabel(it)}，可继续填写备注或添加图片。" } ?: "请先选择记录类型。",
                 color = if (selectedType == null) Muted else Leaf,
-                fontSize = 11.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 PixelOutlinedButton(onClick = onDismiss) { Text("取消") }
@@ -2392,11 +2436,11 @@ private fun GrowthTimelineCard(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("成长时间轴", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
-                PixelTextButton(onClick = onAddRecord, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("＋ 添加记录", fontSize = 12.sp) }
+                Text("成长时间轴", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
+                PixelTextButton(onClick = onAddRecord, contentPadding = PaddingValues(horizontal = 5.dp)) { Text("＋ 添加记录", fontSize = SmartPotTypeScale.bodySmall) }
             }
             if (visibleEvents.isEmpty()) {
-                Text("还没有成长记录", color = Muted, fontSize = 12.sp)
+                Text("还没有成长记录", color = Muted, fontSize = SmartPotTypeScale.bodySmall)
             } else {
                 visibleEvents.forEachIndexed { index, event ->
                     SwipeToDeleteTimelineEvent(
@@ -2409,7 +2453,7 @@ private fun GrowthTimelineCard(
             if (events.size > 3) {
                 HorizontalDivider(color = CardBorder)
                 PixelTextButton(onClick = onToggleExpanded, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (expanded) "收起记录 ︿" else "查看全部记录 ›", fontSize = 12.sp)
+                    Text(if (expanded) "收起记录 ︿" else "查看全部记录 ›", fontSize = SmartPotTypeScale.bodySmall)
                 }
             }
         }
@@ -2449,7 +2493,7 @@ private fun SwipeToDeleteTimelineEvent(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("删除", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("删除", color = Color.White, fontSize = SmartPotTypeScale.bodySmall, fontWeight = FontWeight.Bold)
             }
         }
         Row(
@@ -2484,10 +2528,10 @@ private fun SwipeToDeleteTimelineEvent(
                 CareTypeIcon(event.type, Modifier.size(22.dp))
             }
             Column(Modifier.weight(1f).padding(start = 5.dp, top = 1.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(event.date, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
-                Text(event.title, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
+                Text(event.date, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = SmartPotTypeScale.bodyMedium)
+                Text(event.title, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = SmartPotTypeScale.bodyMedium)
                 if (event.detail.isNotBlank()) {
-                    Text(event.detail, fontSize = 11.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(event.detail, fontSize = SmartPotTypeScale.labelSmall, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             CareEventThumbnail(event, Modifier.padding(start = 8.dp).size(width = 68.dp, height = 58.dp))
@@ -2659,11 +2703,11 @@ private fun CareDiarySection(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("养护日记", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("养护日记", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                 PixelTextButton(
                     onClick = { if (editorVisible) editorVisible = false else openEditor() },
                     contentPadding = PaddingValues(horizontal = 5.dp),
-                ) { Text(if (editorVisible) "取消" else "＋ 写日记", fontSize = 12.sp) }
+                ) { Text(if (editorVisible) "取消" else "＋ 写日记", fontSize = SmartPotTypeScale.bodySmall) }
             }
             if (editorVisible) {
                 PixelPanel(
@@ -2704,16 +2748,16 @@ private fun CareDiarySection(
                                     selected = mood == tag,
                                     onClick = { mood = tag.takeUnless { mood == tag } },
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
-                                ) { Text(tag, fontSize = 11.sp) }
+                                ) { Text(tag, fontSize = SmartPotTypeScale.labelSmall) }
                             }
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("成长照片 ${imageDataUrls.size}/3", color = Muted, fontSize = 11.sp)
+                            Text("成长照片 ${imageDataUrls.size}/3", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                             PixelOutlinedButton(
                                 onClick = { imagePicker.launch("image/*") },
                                 enabled = imageDataUrls.size < 3,
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            ) { Text("上传照片", fontSize = 11.sp) }
+                            ) { Text("上传照片", fontSize = SmartPotTypeScale.labelSmall) }
                         }
                         if (imageDataUrls.isNotEmpty()) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2725,7 +2769,7 @@ private fun CareDiarySection(
                                             modifier = Modifier.align(Alignment.TopEnd).size(24.dp),
                                             fill = PixelDanger,
                                             contentPadding = PaddingValues(0.dp),
-                                        ) { Text("×", color = Color.White, fontSize = 14.sp) }
+                                        ) { Text("×", color = Color.White, fontSize = SmartPotTypeScale.bodyMedium) }
                                     }
                                 }
                             }
@@ -2742,7 +2786,7 @@ private fun CareDiarySection(
                 }
             }
             if (visibleDiaries.isEmpty()) {
-                Text("今天还没有日记，写一篇记录小麦的变化吧。", color = Muted, fontSize = 12.sp)
+                Text("今天还没有日记，写一篇记录小麦的变化吧。", color = Muted, fontSize = SmartPotTypeScale.bodySmall)
             } else {
                 visibleDiaries.forEachIndexed { index, diary ->
                     if (index > 0) HorizontalDivider(color = CardBorder)
@@ -2757,7 +2801,7 @@ private fun CareDiarySection(
             if (diaries.size > 2) {
                 HorizontalDivider(color = CardBorder)
                 PixelTextButton(onClick = onToggleExpanded, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (expanded) "收起日记 ︿" else "查看全部日记 ›", fontSize = 12.sp)
+                    Text(if (expanded) "收起日记 ︿" else "查看全部日记 ›", fontSize = SmartPotTypeScale.bodySmall)
                 }
             }
         }
@@ -2776,22 +2820,22 @@ private fun CareDiaryEntry(
     val canExpand = displayContent.length > 90 || displayContent.count { it == '\n' } >= 3
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(diary.diaryDate, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = 13.sp)
+            Text(diary.diaryDate, fontWeight = FontWeight.SemiBold, color = Ink, fontSize = SmartPotTypeScale.bodyMedium)
             Spacer(Modifier.width(8.dp))
             Text(
                 if (diary.author == DiaryAuthor.WHEAT) "小麦" else diary.authorName?.takeIf(String::isNotBlank) ?: "用户",
                 color = Leaf,
-                fontSize = 11.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.width(8.dp))
-            Text(weather?.condition ?: diary.title, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(weather?.condition ?: diary.title, color = Muted, fontSize = SmartPotTypeScale.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             DiaryMoodIcon(diary, Modifier.size(22.dp))
             Text(
                 "朗读",
                 modifier = Modifier.clickable(onClick = onSpeak).padding(horizontal = 6.dp, vertical = 2.dp),
                 color = Leaf,
-                fontSize = 11.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             if (diary.author == DiaryAuthor.USER) {
@@ -2799,12 +2843,12 @@ private fun CareDiaryEntry(
                     onClick = onDelete,
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                     danger = true,
-                ) { Text("删除", fontSize = 11.sp) }
+                ) { Text("删除", fontSize = SmartPotTypeScale.labelSmall) }
             }
         }
         Text(
             displayContent,
-            fontSize = 12.sp,
+            fontSize = SmartPotTypeScale.bodySmall,
             color = Color(0xFF4D534E),
             maxLines = if (expanded) Int.MAX_VALUE else 3,
             overflow = TextOverflow.Ellipsis,
@@ -2814,7 +2858,7 @@ private fun CareDiaryEntry(
                 if (expanded) "收起" else "展开全文",
                 modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 3.dp),
                 color = Leaf,
-                fontSize = 11.sp,
+                fontSize = SmartPotTypeScale.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -2937,7 +2981,7 @@ private fun TodayEnvironmentCard(state: SmartPotUiState) {
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("今日天气", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("今日天气", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                 Text("${weatherEmoji(weather?.condition)} ${weather?.condition ?: "等待数据"}", color = Leaf, fontWeight = FontWeight.SemiBold)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2947,8 +2991,8 @@ private fun TodayEnvironmentCard(state: SmartPotUiState) {
                 VerticalDivider(Modifier.height(42.dp), color = CardBorder)
                 EnvironmentStat("环境状态", environmentStatus, Modifier.weight(1f))
             }
-            weather?.hint?.takeIf(String::isNotBlank)?.let { Text(it, color = Muted, fontSize = 11.sp) }
-            if (weather?.source == "OPEN_METEO") Text("实时天气 · Open-Meteo", color = Muted, fontSize = 9.sp)
+            weather?.hint?.takeIf(String::isNotBlank)?.let { Text(it, color = Muted, fontSize = SmartPotTypeScale.labelSmall) }
+            if (weather?.source == "OPEN_METEO") Text("实时天气 · Open-Meteo", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
         }
     }
 }
@@ -2956,8 +3000,8 @@ private fun TodayEnvironmentCard(state: SmartPotUiState) {
 @Composable
 private fun EnvironmentStat(title: String, value: String, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(title, color = Muted, fontSize = 10.sp)
-        Text(value, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(title, color = Muted, fontSize = SmartPotTypeScale.labelSmall)
+        Text(value, color = Ink, fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -2991,7 +3035,7 @@ private fun UserProfileDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("用户资料", color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("用户资料", color = Ink, fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
                     PixelTextButton(onClick = onDismiss) { Text("关闭") }
                 }
                 Row(
@@ -3037,7 +3081,7 @@ private fun UserProfileDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
-                Text("昵称会用于首页问候；头像会显示在你与小麦的对话中。", color = Muted, fontSize = 10.sp)
+                Text("昵称会用于首页问候；头像会显示在你与小麦的对话中。", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     PixelOutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
                         Text("取消")
@@ -3142,11 +3186,11 @@ private fun ControlScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("植物补光", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                                Text("植物补光", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                                 Text(
                                     "当前：${if (lightStrip?.on == true) "灯带开" else "灯带关"} · ${if (manualMode) "APP 手动控制" else "ESP 自动控制"}\n标准 ${lightStrip?.lightMinLux ?: state.snapshot?.pot?.species?.thresholds?.lightMinLux ?: "--"}-${lightStrip?.lightMaxLux ?: state.snapshot?.pot?.species?.thresholds?.lightMaxLux ?: "--"} lux",
                                     color = Muted,
-                                    fontSize = 9.sp,
+                                    fontSize = SmartPotTypeScale.labelSmall,
                                     maxLines = 2,
                                 )
                             }
@@ -3181,12 +3225,12 @@ private fun ControlScreen(
                                 )
                             },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (manualMode) "退出手动开关灯模式" else "进入手动开关灯模式", fontSize = 12.sp) }
+                        ) { Text(if (manualMode) "退出手动开关灯模式" else "进入手动开关灯模式", fontSize = SmartPotTypeScale.bodySmall) }
                         HorizontalDivider(color = CardBorder)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                                 Text("一直灭灯时间段", fontWeight = FontWeight.SemiBold, color = Ink)
-                                Text("仅命中该时段时禁止开灯，时段外仍可手动开灯", color = Muted, fontSize = 10.sp)
+                                Text("仅命中该时段时禁止开灯，时段外仍可手动开灯", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                         }
                         PixelSwitch(checked = offPeriodEnabled, onCheckedChange = { offPeriodEnabled = it })
                     }
@@ -3221,7 +3265,7 @@ private fun ControlScreen(
                         },
                         enabled = !offPeriodEnabled || offPeriodValid,
                         modifier = Modifier.fillMaxWidth(),
-                        ) { Text("保存灭灯时间段", fontSize = 12.sp) }
+                        ) { Text("保存灭灯时间段", fontSize = SmartPotTypeScale.bodySmall) }
                             }
                         }
                     }
@@ -3268,8 +3312,8 @@ private fun ControlScreen(
                                 .align(Alignment.CenterStart)
                                 .padding(start = 84.dp, end = 116.dp),
                         ) {
-                            Text("双人共享", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
-                            Text("你和 ESP 一起照顾小麦", color = Muted, fontSize = 10.sp)
+                            Text("双人共享", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
+                            Text("你和 ESP 一起照顾小麦", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                         }
                     }
                     if (shareExpanded) {
@@ -3281,7 +3325,7 @@ private fun ControlScreen(
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 PixelButton(onClick = createShare, modifier = Modifier.fillMaxWidth()) { Text("生成临时分享码") }
-                                state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", color = Leaf, fontWeight = FontWeight.SemiBold, fontSize = 11.sp) }
+                                state.shareCode?.let { Text("分享码 ${it.code}，有效至 ${it.expiresAt.take(16).replace('T', ' ')}", color = Leaf, fontWeight = FontWeight.SemiBold, fontSize = SmartPotTypeScale.labelSmall) }
                             }
                         }
                     }
@@ -3306,8 +3350,8 @@ private fun ControlScreen(
                                 .align(Alignment.CenterStart)
                                 .padding(start = 84.dp, end = 104.dp),
                         ) {
-                            Text("更多设置", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
-                            Text("用户资料、屏幕休眠、设备重启", color = Muted, fontSize = 9.sp, maxLines = 1)
+                            Text("更多设置", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
+                            Text("用户资料、屏幕休眠、设备重启", color = Muted, fontSize = SmartPotTypeScale.labelSmall, maxLines = 1)
                         }
                     }
                     if (settingsExpanded) {
@@ -3318,9 +3362,9 @@ private fun ControlScreen(
                             showCornerBolts = false,
                         ) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                PixelButton(onClick = { userProfileVisible = true }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("用户", fontSize = 11.sp) }
-                                PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SET_STANDBY, standby = true)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("休眠屏幕", fontSize = 11.sp) }
-                                PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.RESTART)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("重启设备", fontSize = 11.sp) }
+                                PixelButton(onClick = { userProfileVisible = true }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("用户", fontSize = SmartPotTypeScale.labelSmall) }
+                                PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.SET_STANDBY, standby = true)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("休眠屏幕", fontSize = SmartPotTypeScale.labelSmall) }
+                                PixelOutlinedButton(onClick = { control(DeviceControlRequest(DeviceCommandType.RESTART)) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text("重启设备", fontSize = SmartPotTypeScale.labelSmall) }
                             }
                         }
                     }
@@ -3336,7 +3380,7 @@ private fun ControlScreen(
                     Text(
                         commandMessage,
                         color = if (command.acknowledged) Leaf else Color(0xFFA56A00),
-                        fontSize = 11.sp,
+                        fontSize = SmartPotTypeScale.labelSmall,
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
@@ -3352,11 +3396,11 @@ private fun ControlPageHeader() {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(16.dp))
-        Text("控制", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("控制", color = Color(0xFF304A1D), fontSize = SmartPotTypeScale.headlineMedium, fontWeight = FontWeight.Black)
         Spacer(Modifier.width(16.dp))
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -3385,9 +3429,9 @@ private fun ControlDeviceStatusCard(state: SmartPotUiState) {
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
                 Text("设备状态", fontWeight = FontWeight.Bold, color = Ink)
-                Text(if (snapshot?.online == true) "在线" else "离线", color = if (snapshot?.online == true) BrightLeaf else Color(0xFFE05252), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(if (snapshot?.online == true) "ESP 已连接" else "等待 ESP 连接", color = Muted, fontSize = 11.sp)
-                Text("设备：${snapshot?.pot?.deviceId ?: "--"}", color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(if (snapshot?.online == true) "在线" else "离线", color = if (snapshot?.online == true) BrightLeaf else Color(0xFFE05252), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
+                Text(if (snapshot?.online == true) "ESP 已连接" else "等待 ESP 连接", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
+                Text("设备：${snapshot?.pot?.deviceId ?: "--"}", color = Muted, fontSize = SmartPotTypeScale.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -3411,14 +3455,14 @@ private fun ControlProjectionCard(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("↗", color = BrightLeaf, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("快捷投送", modifier = Modifier.padding(start = 7.dp), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("↗", color = BrightLeaf, fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
+                Text("快捷投送", modifier = Modifier.padding(start = 7.dp), fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                 Spacer(Modifier.weight(1f))
                 PixelOutlinedButton(
                     onClick = onRemoteTouch,
                     contentPadding = PaddingValues(horizontal = 9.dp, vertical = 5.dp),
                 ) {
-                    Text("隔空触摸", fontSize = 11.sp)
+                    Text("隔空触摸", fontSize = SmartPotTypeScale.labelSmall)
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3464,10 +3508,10 @@ private fun ControlActionTile(kind: String, title: String, subtitle: String, sel
         Row(Modifier.fillMaxSize().padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically) {
             ControlProjectionIcon(kind, Modifier.size(42.dp))
             Column(Modifier.padding(start = 10.dp).weight(1f)) {
-                Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text(subtitle, color = Muted, fontSize = 9.sp, maxLines = 1)
+                Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = SmartPotTypeScale.bodyMedium)
+                Text(subtitle, color = Muted, fontSize = SmartPotTypeScale.labelSmall, maxLines = 1)
             }
-            Text("›", color = Color(0xFFC99B52), fontSize = 20.sp)
+            Text("›", color = Color(0xFFC99B52), fontSize = SmartPotTypeScale.titleLarge)
         }
     }
 }
@@ -3530,11 +3574,11 @@ private fun ControlSliderCard(
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ControlAdjustIcon(kind = kind, high = true, color = accent, modifier = Modifier.size(24.dp))
-                Text(title, modifier = Modifier.padding(start = 6.dp), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(title, modifier = Modifier.padding(start = 6.dp), color = Ink, fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.Bold)
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(value.toInt().toString(), color = accent, fontSize = 34.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
-                Text("%", color = Ink, fontSize = 20.sp, modifier = Modifier.padding(start = 2.dp, bottom = 3.dp))
+                Text(value.toInt().toString(), color = accent, fontSize = SmartPotTypeScale.headlineLarge, lineHeight = 36.sp, fontWeight = FontWeight.Bold)
+                Text("%", color = Ink, fontSize = SmartPotTypeScale.titleLarge, modifier = Modifier.padding(start = 2.dp, bottom = 3.dp))
             }
             PixelSlider(
                 value = value,
@@ -3620,7 +3664,7 @@ private fun ScheduleTable(
                     .padding(horizontal = 12.dp, vertical = 18.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("今天还没有日程", color = Muted, fontSize = 12.sp)
+                Text("今天还没有日程", color = Muted, fontSize = SmartPotTypeScale.bodySmall)
             }
         }
         rows.forEach { item ->
@@ -3645,7 +3689,7 @@ private fun ScheduleTable(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
                         scheduleCardTimeText(item, timezone),
-                        fontSize = 20.sp,
+                        fontSize = SmartPotTypeScale.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = color,
                         textDecoration = decoration,
@@ -3653,11 +3697,11 @@ private fun ScheduleTable(
                     Text(
                         item.title,
                         color = color,
-                        fontSize = 12.sp,
+                        fontSize = SmartPotTypeScale.bodySmall,
                         fontWeight = FontWeight.Medium,
                         textDecoration = decoration,
                     )
-                    Text(scheduleSourceLabel(item.source), color = Muted, fontSize = 9.sp)
+                    Text(scheduleSourceLabel(item.source), color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                 }
                 PixelCheckbox(checked = item.completed)
             }
@@ -3835,11 +3879,11 @@ private fun CompanionPageHeader() {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(16.dp))
-        Text("陪伴", color = Color(0xFF304A1D), fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("陪伴", color = Color(0xFF304A1D), fontSize = SmartPotTypeScale.headlineMedium, fontWeight = FontWeight.Black)
         Spacer(Modifier.width(16.dp))
-        Text("⌁", color = Color(0xFF8FA86A), fontSize = 23.sp, fontWeight = FontWeight.Bold)
+        Text("⌁", color = Color(0xFF8FA86A), fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -3865,7 +3909,7 @@ private fun CompanionSectionShortcut(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             CompanionShortcutIcon(icon, Modifier.size(38.dp))
-            Text(label, color = Color(0xFF304A1D), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(label, color = Color(0xFF304A1D), fontSize = SmartPotTypeScale.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
@@ -3986,9 +4030,9 @@ private fun CompanionChatCard(
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     CompanionHeaderSproutIcon(Modifier.size(23.dp))
                     Spacer(Modifier.width(7.dp))
-                    Text("与小麦的对话", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Text("与小麦的对话", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                 }
-                Text(if (expanded) "⌃" else "⌄", color = Leaf, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(if (expanded) "⌃" else "⌄", color = Leaf, fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold)
             }
             if (expanded) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -3997,11 +4041,11 @@ private fun CompanionChatCard(
                             selected = state.selectedChatDate == day.date,
                             onClick = { selectDay(day.date) },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
-                        ) { Text(if (day.date == today) "今天" else day.date.takeLast(5), fontSize = 11.sp) }
+                        ) { Text(if (day.date == today) "今天" else day.date.takeLast(5), fontSize = SmartPotTypeScale.labelSmall) }
                     }
                 }
                 if (messages.isEmpty()) {
-                    Text("这一天还没有对话记录", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 10.dp))
+                    Text("这一天还没有对话记录", color = Muted, fontSize = SmartPotTypeScale.bodySmall, modifier = Modifier.padding(vertical = 10.dp))
                 } else {
                     Column(
                         Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(messageScrollState),
@@ -4025,7 +4069,7 @@ private fun CompanionChatCard(
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                 )
-                PixelButton(onClick = onSend, enabled = input.isNotBlank(), modifier = Modifier.size(46.dp), contentPadding = PaddingValues(0.dp)) { Text("➤", fontSize = 17.sp) }
+                PixelButton(onClick = onSend, enabled = input.isNotBlank(), modifier = Modifier.size(46.dp), contentPadding = PaddingValues(0.dp)) { Text("➤", fontSize = SmartPotTypeScale.titleMedium) }
             }
         }
     }
@@ -4057,11 +4101,11 @@ private fun CompanionChatBubble(
                 .border(1.dp, bubbleEdge, RoundedCornerShape(11.dp)),
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-                Text(message.content, color = Ink, fontSize = 12.sp)
+                Text(message.content, color = Ink, fontSize = SmartPotTypeScale.bodySmall)
                 Spacer(Modifier.height(3.dp))
                 Text(
                     "${chatSourceLabel(message)} · ${chatTimeText(message.createdAt, zone)}",
-                    fontSize = 9.sp,
+                    fontSize = SmartPotTypeScale.labelSmall,
                     color = Muted,
                 )
             }
@@ -4199,11 +4243,11 @@ private fun CompanionMemoryCard(
                     CompanionShortcutIcon("memory", Modifier.size(42.dp))
                     Spacer(Modifier.width(9.dp))
                     Column {
-                        Text("专属记忆库", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
-                        Text("让小麦记住重要的事情", color = Muted, fontSize = 11.sp)
+                        Text("专属记忆库", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
+                        Text("让小麦记住重要的事情", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                     }
                 }
-                Text(if (expanded) "⌃" else "›", color = Muted, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (expanded) "⌃" else "›", color = Muted, fontSize = SmartPotTypeScale.headlineSmall, fontWeight = FontWeight.SemiBold)
             }
             if (expanded) {
                 PixelTextField(
@@ -4215,13 +4259,13 @@ private fun CompanionMemoryCard(
                 )
                 PixelButton(onClick = onRemember, enabled = input.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("让小麦记住") }
                 if (memories.isNotEmpty()) {
-                    Text("已记住", color = Muted, fontSize = 11.sp)
+                    Text("已记住", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
                     memories.asReversed().forEach { item ->
                         Box(Modifier.background(Color(0xFFF8FAEC), RoundedCornerShape(8.dp)).border(1.dp, CardBorder, RoundedCornerShape(8.dp))) {
                             Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(item.content, modifier = Modifier.weight(1f), fontSize = 11.sp, color = Color(0xFF4D534E), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(item.content, modifier = Modifier.weight(1f), fontSize = SmartPotTypeScale.labelSmall, color = Color(0xFF4D534E), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 PixelTextButton(onClick = { onDelete(item) }, contentPadding = PaddingValues(horizontal = 7.dp), danger = true) {
-                                    Text("删除", color = Color(0xFFD14343), fontSize = 10.sp)
+                                    Text("删除", color = Color(0xFFD14343), fontSize = SmartPotTypeScale.labelSmall)
                                 }
                             }
                         }
@@ -4268,7 +4312,7 @@ private fun CompanionScheduleCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 CompanionShortcutIcon("schedule", Modifier.size(25.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("今日日程", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("今日日程", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
             }
             ScheduleTable(items, timezone, toggleSchedule)
             PixelTextButton(
@@ -4276,7 +4320,7 @@ private fun CompanionScheduleCard(
                 modifier = Modifier.align(Alignment.End),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 3.dp),
             ) {
-                Text(if (formVisible) "收起" else "＋ 添加日程", fontSize = 12.sp)
+                Text(if (formVisible) "收起" else "＋ 添加日程", fontSize = SmartPotTypeScale.bodySmall)
             }
             if (formVisible) {
                 PixelTextField(title, onTitleChange, label = "任务名称", modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -4286,8 +4330,8 @@ private fun CompanionScheduleCard(
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
                 ) {
                     Column(Modifier.fillMaxWidth()) {
-                        Text("提醒时间", color = Muted, fontSize = 11.sp)
-                        Text(scheduleSelectionText(dueAt, timezone), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text("提醒时间", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
+                        Text(scheduleSelectionText(dueAt, timezone), color = Ink, fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 PixelButton(
@@ -4329,7 +4373,7 @@ private fun ScheduleDateTimeWheelDialog(
             edge = PixelWoodDark,
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("选择提醒时间", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("选择提醒时间", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     ScheduleNumberWheel("月", month, 1..12) {
                         month = it
@@ -4369,7 +4413,7 @@ private fun ScheduleNumberWheel(
         range.map { "%02d".format(it) }.toTypedArray()
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(label, color = Muted, fontSize = 12.sp)
+        Text(label, color = Muted, fontSize = SmartPotTypeScale.bodySmall)
         AndroidView(
             modifier = Modifier.width(62.dp).height(146.dp),
             factory = { context ->
@@ -4459,7 +4503,7 @@ private fun CompanionFocusCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 CompanionShortcutIcon("tomato", Modifier.size(25.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("今日番茄钟", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text("今日番茄钟", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
             }
             PomodoroDial(
                 progress = 1f - remainingSeconds.toFloat() / sessionSeconds,
@@ -4481,7 +4525,7 @@ private fun CompanionFocusCard(
                 ) {
                     Text(
                         if (timerRunning) "暂停" else if (remainingSeconds < sessionSeconds) "继续" else "开始",
-                        fontSize = 16.sp,
+                        fontSize = SmartPotTypeScale.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -4491,18 +4535,18 @@ private fun CompanionFocusCard(
                         danger = true,
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     ) {
-                        Text("退出", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("退出", fontSize = SmartPotTypeScale.bodyMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
             HorizontalDivider(color = CardBorder)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("$count 个 · $minutes min", color = BrightLeaf, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                Text("目标 $target 个番茄钟", color = Muted, fontSize = 10.sp)
+                Text("$count 个 · $minutes min", color = BrightLeaf, fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold)
+                Text("目标 $target 个番茄钟", color = Muted, fontSize = SmartPotTypeScale.labelSmall)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("日程完成度", fontWeight = FontWeight.Bold, color = Ink)
-                Text("$completion%", color = BrightLeaf, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("$completion%", color = BrightLeaf, fontSize = SmartPotTypeScale.titleLarge, fontWeight = FontWeight.Bold)
             }
             PixelProgressBar((completion / 100f).coerceIn(0f, 1f), Modifier.fillMaxWidth())
         }
@@ -4543,8 +4587,8 @@ private fun PomodoroDial(
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CompanionShortcutIcon("tomato", Modifier.size(28.dp))
-            Text(timeText, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-            Text(statusText, color = Muted, fontSize = 11.sp)
+            Text(timeText, color = Ink, fontSize = SmartPotTypeScale.headlineLarge, fontWeight = FontWeight.SemiBold)
+            Text(statusText, color = Muted, fontSize = SmartPotTypeScale.labelSmall)
         }
     }
 }
