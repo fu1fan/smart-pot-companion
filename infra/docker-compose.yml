@@ -38,6 +38,7 @@ services:
     environment:
       PORT: 8080
       DEMO_TOKEN: ${DEMO_TOKEN:-smart-pot-demo-token}
+      INITIAL_HOST_CODE: ${INITIAL_HOST_CODE:-520131}
       SHARE_TOKEN_SECRET: ${SHARE_TOKEN_SECRET:-replace-this-before-public-deployment}
       DATABASE_URL: jdbc:postgresql://postgres:5432/smartpot
       DATABASE_USER: ${POSTGRES_USER:-smartpot}

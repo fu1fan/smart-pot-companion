@@ -349,6 +349,18 @@ class PostgresSmartPotStore(config: AppConfig) : SmartPotStore {
         } finally { c.autoCommit = true }
     }
 
+    override suspend fun hostClaimed(): Boolean = db { c ->
+        c.prepareStatement("SELECT host_name IS NOT NULL FROM host_state WHERE id").use { s ->
+            s.executeQuery().use { rs -> if (rs.next()) rs.getBoolean(1) else false }
+        }
+    }
+
+    override suspend fun claimHost(actorName: String, now: String): Boolean = db { c ->
+        c.prepareStatement("UPDATE host_state SET host_name=?, claimed_at=?::timestamptz WHERE id AND host_name IS NULL").use { s ->
+            s.setString(1, actorName); s.setString(2, now); s.executeUpdate() == 1
+        }
+    }
+
     private suspend inline fun <reified T> listPotJson(table: String, potId: String, orderBy: String): List<T> = db { c ->
         c.prepareStatement("SELECT data FROM $table WHERE pot_id=?::uuid ORDER BY $orderBy").use { s ->
             s.setString(1, potId); s.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.decodeColumn()) } }

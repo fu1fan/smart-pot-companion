@@ -3,6 +3,7 @@ package com.fu1fan.smartpot.server
 data class AppConfig(
     val port: Int,
     val demoToken: String,
+    val initialHostCode: String,
     val shareTokenSecret: String,
     val databaseUrl: String?,
     val databaseUser: String,
@@ -20,6 +21,7 @@ data class AppConfig(
         fun fromEnvironment(env: Map<String, String> = System.getenv()): AppConfig = AppConfig(
             port = env["PORT"]?.toIntOrNull() ?: 8080,
             demoToken = env["DEMO_TOKEN"] ?: "smart-pot-demo-token",
+            initialHostCode = env["INITIAL_HOST_CODE"] ?: "520131",
             shareTokenSecret = env["SHARE_TOKEN_SECRET"] ?: "replace-this-demo-secret",
             databaseUrl = env["DATABASE_URL"],
             databaseUser = env["DATABASE_USER"] ?: "smartpot",

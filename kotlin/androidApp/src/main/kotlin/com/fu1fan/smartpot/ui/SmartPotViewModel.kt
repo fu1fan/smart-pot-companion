@@ -595,7 +595,6 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                     pomodoroRemainingSeconds = mutableState.value.pomodoroRemainingSeconds,
                     pomodoroTimerRunning = mutableState.value.pomodoroTimerRunning,
                     pomodoroTimerEndEpochMs = mutableState.value.pomodoroTimerEndEpochMs,
-                    selectedPotId = session.potId,
                 )
                 val species = api.species()
                 val pots = api.pots()
@@ -608,7 +607,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                         error = null,
                     )
                 }
-                selectPot(session.potId)
+                val targetPotId = session.potId.takeIf { id -> pots.any { it.id == id } }
+                    ?: pots.firstOrNull()?.id
+                if (targetPotId != null) selectPot(targetPotId)
             }.onFailure { error ->
                 mutableState.update {
                     it.copy(

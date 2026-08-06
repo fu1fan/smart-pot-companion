@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS host_state (
+    id BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    host_name TEXT,
+    claimed_at TIMESTAMPTZ
+);
+
+INSERT INTO host_state (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;

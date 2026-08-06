@@ -42,9 +42,16 @@ fun Application.configureRoutes(services: ServerServices) {
         get("/health") { call.respond(mapOf("status" to "ok", "service" to "smart-pot-server")) }
         post("/api/v1/share/redeem") {
             val request = call.receive<RedeemShareRequest>()
-            require(request.actorName.isNotBlank() && request.actorName.length <= 24) { "访客昵称应为 1-24 个字符" }
+            require(request.actorName.isNotBlank() && request.actorName.length <= 24) { "主人昵称应为 1-24 个字符" }
             val now = Instant.now()
-            val redeemed = requireNotNull(services.store.redeemShareCode(request.code.trim(), request.actorName.trim(), now.toString())) { "分享码无效或已过期" }
+            val code = request.code.trim()
+            if (code == services.config.initialHostCode) {
+                require(services.store.claimHost(request.actorName.trim(), now.toString())) { "首台主机已解锁，请使用主人生成的邀请码" }
+                val expires = now.plus(3650, ChronoUnit.DAYS)
+                call.respond(ShareSession(services.config.demoToken, "", request.actorName.trim(), expires.toString()))
+                return@post
+            }
+            val redeemed = requireNotNull(services.store.redeemShareCode(code, request.actorName.trim(), now.toString())) { "分享码无效或已过期" }
             val expires = now.plus(7, ChronoUnit.DAYS)
             call.respond(ShareSession(services.shares.issue(redeemed.first, request.actorName.trim(), expires), redeemed.first, request.actorName.trim(), expires.toString()))
         }

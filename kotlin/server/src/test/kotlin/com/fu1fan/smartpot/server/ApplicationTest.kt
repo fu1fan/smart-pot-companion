@@ -81,6 +81,7 @@ class ApplicationTest {
     private val config = AppConfig(
         port = 8080,
         demoToken = "test-owner-token",
+        initialHostCode = "520131",
         shareTokenSecret = "test-share-secret-with-enough-entropy",
         databaseUrl = null,
         databaseUser = "",
@@ -182,6 +183,47 @@ class ApplicationTest {
         }
         assertEquals(HttpStatusCode.OK, speciesUpdate.status)
         assertEquals("cactus", speciesUpdate.body<PotProfile>().species.id)
+    }
+
+    @Test
+    fun `initial host code claims first host once then expires and guest flow still works`() = testApplication {
+        application { module(config, InMemorySmartPotStore(), startMqtt = false) }
+        val api = createClient { install(ContentNegotiation) { json(appJson) } }
+
+        val host = api.post("/api/v1/share/redeem") {
+            contentType(ContentType.Application.Json)
+            setBody(RedeemShareRequest(config.initialHostCode, "首台主机"))
+        }.body<ShareSession>()
+        assertEquals("", host.potId)
+        assertEquals(config.demoToken, host.token)
+
+        val duplicate = api.post("/api/v1/share/redeem") {
+            contentType(ContentType.Application.Json)
+            setBody(RedeemShareRequest(config.initialHostCode, "另一个"))
+        }
+        assertEquals(HttpStatusCode.BadRequest, duplicate.status)
+        assertTrue(duplicate.body<String>().contains("首台主机"))
+
+        val created = api.post("/api/v1/pots") {
+            bearerAuth(host.token)
+            contentType(ContentType.Application.Json)
+            setBody(CreatePotRequest("esp32-host-001", "小绿", "pothos"))
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        val pot = created.body<PotProfile>()
+
+        val share = api.post("/api/v1/pots/${pot.id}/share") {
+            bearerAuth(host.token)
+            contentType(ContentType.Application.Json)
+            setBody(CreateShareRequest(30))
+        }.body<ShareCode>()
+
+        val guest = api.post("/api/v1/share/redeem") {
+            contentType(ContentType.Application.Json)
+            setBody(RedeemShareRequest(share.code, "访客"))
+        }.body<ShareSession>()
+        assertEquals(pot.id, guest.potId)
+        assertEquals(HttpStatusCode.OK, api.get("/api/v1/pots/${pot.id}") { bearerAuth(guest.token) }.status)
     }
 
     @Test

@@ -70,5 +70,8 @@ interface SmartPotStore : AutoCloseable {
     suspend fun saveShareCode(code: ShareCode, potId: String)
     suspend fun redeemShareCode(code: String, actorName: String, now: String): Pair<String, ShareCode>?
 
+    suspend fun hostClaimed(): Boolean
+    suspend fun claimHost(actorName: String, now: String): Boolean
+
     override fun close() = Unit
 }

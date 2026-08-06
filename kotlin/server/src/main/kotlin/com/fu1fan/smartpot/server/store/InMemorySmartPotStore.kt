@@ -25,6 +25,7 @@ class InMemorySmartPotStore : SmartPotStore {
     private val focusSessions = ConcurrentHashMap<String, MutableList<FocusSession>>()
     private val scheduleItems = ConcurrentHashMap<String, MutableList<ScheduleItem>>()
     private val shares = ConcurrentHashMap<String, Pair<String, ShareCode>>()
+    private var hostName: String? = null
 
     override suspend fun seedSpecies(species: List<PlantSpecies>) = lock.withLock {
         species.forEach { this.species.putIfAbsent(it.id, it) }
@@ -225,5 +226,11 @@ class InMemorySmartPotStore : SmartPotStore {
         if (Instant.parse(value.second.expiresAt).isBefore(Instant.parse(now))) return null
         shares.remove(code)
         return value
+    }
+
+    override suspend fun hostClaimed() = lock.withLock { hostName != null }
+
+    override suspend fun claimHost(actorName: String, now: String): Boolean = lock.withLock {
+        if (hostName != null) false else { hostName = actorName; true }
     }
 }

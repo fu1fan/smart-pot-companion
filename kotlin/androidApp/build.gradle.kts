@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val defaultServerUrl = providers.gradleProperty("SMART_POT_SERVER_URL").orElse("http://103.236.87.90:18080")
+val defaultServerUrl = providers.gradleProperty("SMART_POT_SERVER_URL").orElse("http://100.83.205.104:43423")
 val demoToken = providers.gradleProperty("SMART_POT_DEMO_TOKEN")
     .orElse(providers.environmentVariable("SMART_POT_DEMO_TOKEN"))
     .orElse("smart-pot-demo-token")
@@ -22,16 +22,12 @@ fun String.requireBearerToken68(): String = trim().also { value ->
 
 android {
     namespace = "com.fu1fan.smartpot"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.fu1fan.smartpot"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
 
