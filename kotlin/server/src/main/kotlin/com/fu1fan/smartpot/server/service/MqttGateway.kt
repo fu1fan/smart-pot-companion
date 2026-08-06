@@ -185,8 +185,7 @@ class MqttGateway(
             "online" -> {
                 val online = appJson.decodeFromString<DeviceOnlineState>(payload)
                 require(online.deviceId == deviceId)
-                val changedAt = if (online.online && retained) online.changedAt else observedAt
-                val observedOnline = online.copy(changedAt = changedAt)
+                val observedOnline = online.copy(changedAt = observedAt)
                 store.setOnline(deviceId, observedOnline.online, observedOnline.changedAt)
                 if (online.online) {
                     runCatching { commandService?.syncProfile(pot) }

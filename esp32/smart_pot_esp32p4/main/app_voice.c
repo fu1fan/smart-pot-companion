@@ -75,6 +75,22 @@ static volatile bool s_voice_ready;
 static volatile bool s_manual_request;
 static volatile bool s_conversation_busy;
 static volatile bool s_wakenet_rearm_requested;
+static SemaphoreHandle_t s_audio_lock;
+
+bool app_voice_audio_lock(TickType_t timeout)
+{
+    if (s_audio_lock == NULL) {
+        return true;
+    }
+    return xSemaphoreTake(s_audio_lock, timeout) == pdTRUE;
+}
+
+void app_voice_audio_unlock(void)
+{
+    if (s_audio_lock != NULL) {
+        xSemaphoreGive(s_audio_lock);
+    }
+}
 
 static bool transcript_has_text(const char *text)
 {
@@ -234,11 +250,15 @@ static bool service_microphone_pause(esp_codec_dev_handle_t mic, int16_t *sample
 {
     if (s_pause_requested) {
         if (!s_mic_paused) {
-            if (esp_codec_dev_close(mic) != ESP_CODEC_DEV_OK) {
-                ESP_LOGW(TAG, "Failed to pause microphone codec");
-            } else {
-                s_mic_paused = true;
-                ESP_LOGI(TAG, "Microphone paused for speaker playback");
+            if (app_voice_audio_lock(pdMS_TO_TICKS(1000))) {
+                esp_err_t close_err = esp_codec_dev_close(mic);
+                app_voice_audio_unlock();
+                if (close_err != ESP_CODEC_DEV_OK) {
+                    ESP_LOGW(TAG, "Failed to pause microphone codec: %s", esp_err_to_name(close_err));
+                } else {
+                    s_mic_paused = true;
+                    ESP_LOGI(TAG, "Microphone paused for speaker playback");
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -246,7 +266,12 @@ static bool service_microphone_pause(esp_codec_dev_handle_t mic, int16_t *sample
     }
 
     if (s_mic_paused) {
-        if (!open_microphone(mic)) {
+        bool reopened = false;
+        if (app_voice_audio_lock(pdMS_TO_TICKS(1000))) {
+            reopened = open_microphone(mic);
+            app_voice_audio_unlock();
+        }
+        if (!reopened) {
             app_ui_set_voice_status("Wake: mic resume failed");
             vTaskDelay(pdMS_TO_TICKS(200));
             return true;
@@ -626,6 +651,9 @@ static void voice_task(void *arg)
 
 void app_voice_start(void)
 {
+    if (s_audio_lock == NULL) {
+        s_audio_lock = xSemaphoreCreateMutex();
+    }
     BaseType_t created = xTaskCreate(voice_task, "smart_pot_voice",
                                      APP_BOARD_VOICE_TASK_STACK_BYTES, NULL, 5, NULL);
     if (created != pdPASS) {

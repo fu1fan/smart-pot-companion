@@ -87,13 +87,15 @@ class PotService(
 }
 
 private const val DEVICE_ONLINE_TIMEOUT_SECONDS = 45L
+private const val DEVICE_ACK_TIMEOUT_SECONDS = 90L
 
 internal fun deviceIsRecentlyOnline(state: com.fu1fan.smartpot.server.store.StoredDeviceState, now: Instant): Boolean {
     if (!state.online) return false
     val lastSeenAt = state.lastSeenAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
+    if (!isRecent(lastSeenAt, now, DEVICE_ONLINE_TIMEOUT_SECONDS)) return false
     val lastAckAt = state.lastAckAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: return false
-    return isRecent(lastSeenAt, now) && isRecent(lastAckAt, now)
+    return isRecent(lastAckAt, now, DEVICE_ACK_TIMEOUT_SECONDS)
 }
 
-private fun isRecent(value: Instant, now: Instant): Boolean =
-    Duration.between(value, now).seconds in 0..DEVICE_ONLINE_TIMEOUT_SECONDS
+private fun isRecent(value: Instant, now: Instant, windowSeconds: Long): Boolean =
+    Duration.between(value, now).seconds in 0..windowSeconds

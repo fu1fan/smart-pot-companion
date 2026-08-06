@@ -668,7 +668,7 @@ class ApplicationTest {
                 now,
             ),
         )
-        assertFalse(
+        assertTrue(
             deviceIsRecentlyOnline(
                 StoredDeviceState(
                     online = true,

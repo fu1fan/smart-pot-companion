@@ -52,7 +52,7 @@
 #define TTS_PREBUFFER_BYTES (24 * 1024)
 #define TTS_PLAY_CHUNK 2048
 #define TTS_CONNECT_TIMEOUT_MS 8000
-#define TTS_SESSION_TIMEOUT_MS 30000
+#define TTS_SESSION_TIMEOUT_MS 15000
 #define TTS_VOLUME_CONVERSATION 100
 #define TTS_VOLUME_COMMAND 100
 #define TTS_VOLUME_AUTOMATION 100
@@ -450,14 +450,24 @@ static void playback_task(void *arg)
         snprintf(rt->error, sizeof(rt->error), "microphone pause timeout");
         goto done;
     }
+    if (!app_voice_audio_lock(pdMS_TO_TICKS(3000))) {
+        snprintf(rt->error, sizeof(rt->error), "speaker lock timeout");
+        goto resume;
+    }
     if (rt->speaker == NULL) rt->speaker = bsp_audio_codec_speaker_init();
-    if (rt->speaker == NULL) goto resume;
+    if (rt->speaker == NULL) {
+        app_voice_audio_unlock();
+        goto resume;
+    }
     esp_codec_dev_sample_info_t fs = {
         .sample_rate = CONFIG_SMART_POT_VOLC_TTS_SAMPLE_RATE,
         .channel = 1,
         .bits_per_sample = 16,
     };
-    if (esp_codec_dev_open(rt->speaker, &fs) != ESP_CODEC_DEV_OK) goto resume;
+    if (esp_codec_dev_open(rt->speaker, &fs) != ESP_CODEC_DEV_OK) {
+        app_voice_audio_unlock();
+        goto resume;
+    }
     esp_codec_dev_set_out_vol(rt->speaker, rt->volume);
     rt->playback_started = true;
     app_ui_set_voice_status("TTS: speaking");
@@ -484,6 +494,7 @@ static void playback_task(void *arg)
     ESP_LOGI(TAG, "Volc TTS playback complete bytes=%u ok=%d",
              (unsigned int)offset, rt->playback_ok);
     esp_codec_dev_close(rt->speaker);
+    app_voice_audio_unlock();
 resume:
     if (!app_voice_resume_microphone(2500)) {
         ESP_LOGW(TAG, "Timed out resuming microphone after Volc TTS");
@@ -692,31 +703,34 @@ static bool play_local_wav_file(const char *path, uint8_t volume)
     }
 
     bool ok = false;
-    esp_codec_dev_handle_t speaker = bsp_audio_codec_speaker_init();
-    if (speaker != NULL) {
-        esp_codec_dev_sample_info_t fs = {
-            .sample_rate = (int)sample_rate,
-            .channel = 1,
-            .bits_per_sample = 16,
-        };
-        if (esp_codec_dev_open(speaker, &fs) == ESP_CODEC_DEV_OK) {
-            esp_codec_dev_set_out_vol(speaker, volume);
-            app_ui_set_voice_status("TTS: local");
-            uint8_t buffer[TTS_PLAY_CHUNK];
-            uint32_t remaining = data_size;
-            ok = true;
-            while (remaining > 0) {
-                size_t requested = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-                size_t count = fread(buffer, 1, requested, file);
-                count &= ~((size_t)1);
-                if (count == 0 || esp_codec_dev_write(speaker, buffer, count) != ESP_CODEC_DEV_OK) {
-                    ok = false;
-                    break;
+    if (app_voice_audio_lock(pdMS_TO_TICKS(3000))) {
+        esp_codec_dev_handle_t speaker = bsp_audio_codec_speaker_init();
+        if (speaker != NULL) {
+            esp_codec_dev_sample_info_t fs = {
+                .sample_rate = (int)sample_rate,
+                .channel = 1,
+                .bits_per_sample = 16,
+            };
+            if (esp_codec_dev_open(speaker, &fs) == ESP_CODEC_DEV_OK) {
+                esp_codec_dev_set_out_vol(speaker, volume);
+                app_ui_set_voice_status("TTS: local");
+                uint8_t buffer[TTS_PLAY_CHUNK];
+                uint32_t remaining = data_size;
+                ok = true;
+                while (remaining > 0) {
+                    size_t requested = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
+                    size_t count = fread(buffer, 1, requested, file);
+                    count &= ~((size_t)1);
+                    if (count == 0 || esp_codec_dev_write(speaker, buffer, count) != ESP_CODEC_DEV_OK) {
+                        ok = false;
+                        break;
+                    }
+                    remaining -= (uint32_t)count;
                 }
-                remaining -= (uint32_t)count;
+                esp_codec_dev_close(speaker);
             }
-            esp_codec_dev_close(speaker);
         }
+        app_voice_audio_unlock();
     }
     fclose(file);
     if (!app_voice_resume_microphone(2500)) {
@@ -836,17 +850,20 @@ static void chime_task(void *arg)
     if (s_tts_busy) goto done;
     s_chime_busy = true;
     if (!app_voice_pause_microphone(500)) goto done;
-    if (s_chime_spk == NULL) s_chime_spk = bsp_audio_codec_speaker_init();
-    if (s_chime_spk != NULL) {
-        esp_codec_dev_sample_info_t fs = {
-            .sample_rate = CHIME_SAMPLE_RATE, .channel = 1, .bits_per_sample = 16,
-        };
-        if (esp_codec_dev_open(s_chime_spk, &fs) == ESP_CODEC_DEV_OK) {
-            esp_codec_dev_set_out_vol(s_chime_spk, 58);
-            write_chime_note(s_chime_spk, 880, 95, 13500);
-            write_chime_note(s_chime_spk, 1320, 135, 14500);
-            esp_codec_dev_close(s_chime_spk);
+    if (app_voice_audio_lock(pdMS_TO_TICKS(1000))) {
+        if (s_chime_spk == NULL) s_chime_spk = bsp_audio_codec_speaker_init();
+        if (s_chime_spk != NULL) {
+            esp_codec_dev_sample_info_t fs = {
+                .sample_rate = CHIME_SAMPLE_RATE, .channel = 1, .bits_per_sample = 16,
+            };
+            if (esp_codec_dev_open(s_chime_spk, &fs) == ESP_CODEC_DEV_OK) {
+                esp_codec_dev_set_out_vol(s_chime_spk, 58);
+                write_chime_note(s_chime_spk, 880, 95, 13500);
+                write_chime_note(s_chime_spk, 1320, 135, 14500);
+                esp_codec_dev_close(s_chime_spk);
+            }
         }
+        app_voice_audio_unlock();
     }
     (void)app_voice_resume_microphone(500);
 done:
