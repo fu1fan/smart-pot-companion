@@ -387,30 +387,7 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
     make_uuid(connect_id);
     make_uuid(request_id);
     char headers[512];
-    snprintf(headers, sizeof(headers),
-             "X-Api-Key: %s\r\n"
-             "X-Api-Resource-Id: %s\r\n"
-             "X-Api-Request-Id: %s\r\n"
-             "X-Api-Sequence: -1\r\n"
-             "X-Api-Connect-Id: %s\r\n",
-             CONFIG_SMART_POT_VOLC_API_KEY, CONFIG_SMART_POT_VOLC_ASR_RESOURCE_ID,
-             request_id, connect_id);
-    esp_websocket_client_config_t config = {
-        .uri = CONFIG_SMART_POT_ASR_ENDPOINT,
-        .headers = headers,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .network_timeout_ms = ASR_CONNECT_TIMEOUT_MS,
-        .reconnect_timeout_ms = 2000,
-        .disable_auto_reconnect = true,
-        .buffer_size = 4096,
-        .task_stack = 5120,
-    };
-    esp_websocket_client_handle_t client = esp_websocket_client_init(&config);
-    if (client == NULL) {
-        vEventGroupDelete(ctx.events);
-        return NULL;
-    }
-    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocket_event_handler, &ctx);
+    esp_websocket_client_handle_t client = NULL;
     int max_packets = CONFIG_SMART_POT_ASR_MAX_RECORD_MS / ASR_PACKET_MS;
     uint8_t *pcm = malloc(ASR_PACKET_BYTES);
     uint8_t *prefetch = heap_caps_malloc((size_t)max_packets * ASR_PACKET_BYTES,
@@ -419,7 +396,6 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
         ESP_LOGE(TAG, "Failed to allocate ASR capture/prefetch buffers");
         free(pcm);
         free(prefetch);
-        esp_websocket_client_destroy(client);
         vEventGroupDelete(ctx.events);
         return NULL;
     }
@@ -452,14 +428,45 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
     bool stream_failed = false;
     bool connected = false;
     for (int attempt = 1; attempt <= ASR_CONNECT_ATTEMPTS; attempt++) {
+        if (client == NULL) {
+            make_uuid(connect_id);
+            make_uuid(request_id);
+            snprintf(headers, sizeof(headers),
+                     "X-Api-Key: %s\r\n"
+                     "X-Api-Resource-Id: %s\r\n"
+                     "X-Api-Request-Id: %s\r\n"
+                     "X-Api-Sequence: -1\r\n"
+                     "X-Api-Connect-Id: %s\r\n",
+                     CONFIG_SMART_POT_VOLC_API_KEY, CONFIG_SMART_POT_VOLC_ASR_RESOURCE_ID,
+                     request_id, connect_id);
+            esp_websocket_client_config_t ws_config = {
+                .uri = CONFIG_SMART_POT_ASR_ENDPOINT,
+                .headers = headers,
+                .crt_bundle_attach = esp_crt_bundle_attach,
+                .network_timeout_ms = ASR_CONNECT_TIMEOUT_MS,
+                .reconnect_timeout_ms = 2000,
+                .disable_auto_reconnect = true,
+                .buffer_size = 4096,
+                .task_stack = 5120,
+            };
+            client = esp_websocket_client_init(&ws_config);
+            if (client != NULL) {
+                esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocket_event_handler, &ctx);
+            } else {
+                ESP_LOGE(TAG, "Volc ASR client init failed attempt %d internal_free=%u",
+                         attempt, (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+                break;
+            }
+        }
         xEventGroupClearBits(ctx.events, ASR_EVENT_CONNECTED | ASR_EVENT_FINAL | ASR_EVENT_FAILED);
         bits = 0;
         ctx.error[0] = '\0';
         app_ui_set_voice_status(attempt == 1 ? "ASR: listening" : "ASR: reconnecting");
         esp_err_t start_err = esp_websocket_client_start(client);
         if (start_err != ESP_OK) {
-            ESP_LOGE(TAG, "Volc ASR WebSocket start attempt %d failed: %s",
-                     attempt, esp_err_to_name(start_err));
+            ESP_LOGE(TAG, "Volc ASR WebSocket start attempt %d failed: %s internal_free=%u",
+                     attempt, esp_err_to_name(start_err),
+                     (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         } else {
             int64_t connect_deadline = esp_timer_get_time() +
                                        (int64_t)ASR_CONNECT_TIMEOUT_MS * 1000;
@@ -489,7 +496,11 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
 
         ESP_LOGW(TAG, "Volc ASR connection attempt %d/%d failed bits=0x%lx detail=%s",
                  attempt, ASR_CONNECT_ATTEMPTS, (unsigned long)bits, ctx.error);
-        esp_websocket_client_stop(client);
+        if (client != NULL) {
+            esp_websocket_client_stop(client);
+            esp_websocket_client_destroy(client);
+            client = NULL;
+        }
         if (stream_failed) break;
         if (attempt < ASR_CONNECT_ATTEMPTS) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -569,8 +580,11 @@ char *app_asr_transcribe_from_mic_with_prefix(esp_codec_dev_handle_t mic,
              (xEventGroupGetBits(ctx.events) & ASR_EVENT_FINAL) != 0);
 
 cleanup:
-    esp_websocket_client_stop(client);
-    esp_websocket_client_destroy(client);
+    if (client != NULL) {
+        esp_websocket_client_stop(client);
+        esp_websocket_client_destroy(client);
+        client = NULL;
+    }
     free(pcm);
     free(prefetch);
     free(ctx.fragment);

@@ -480,10 +480,7 @@ static void llm_request_task(void *arg)
             .event_handler = http_event_handler,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .timeout_ms = 30000,
-            .keep_alive_enable = true,
-            .keep_alive_idle = 15,
-            .keep_alive_interval = 5,
-            .keep_alive_count = 3,
+            .keep_alive_enable = false,
         };
         s_http_client = esp_http_client_init(&cfg);
     }
