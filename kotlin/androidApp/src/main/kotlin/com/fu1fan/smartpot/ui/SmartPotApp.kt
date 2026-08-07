@@ -3708,7 +3708,7 @@ private fun ScheduleTable(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(
                         scheduleCardTimeText(item, timezone),
-                        fontSize = SmartPotTypeScale.titleLarge,
+                        fontSize = SmartPotTypeScale.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = color,
                         textDecoration = decoration,
