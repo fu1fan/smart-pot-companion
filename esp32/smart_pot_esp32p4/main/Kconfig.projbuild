@@ -27,9 +27,20 @@ menu "Smart Pot"
         default ""
         depends on SMART_POT_WIFI_ENABLE
 
+    config SMART_POT_WIFI_SECONDARY_SSID
+        string "Secondary Wi-Fi SSID"
+        default ""
+        depends on SMART_POT_WIFI_ENABLE
+
+    config SMART_POT_WIFI_SECONDARY_PASSWORD
+        string "Secondary Wi-Fi password"
+        default ""
+        depends on SMART_POT_WIFI_ENABLE
+
     config SMART_POT_WIFI_MAXIMUM_RETRY
-        int "Wi-Fi maximum retry count"
+        int "Wi-Fi retries before switching networks"
         default 5
+        range 1 20
         depends on SMART_POT_WIFI_ENABLE
 
     config SMART_POT_CLOUD_ENABLE
