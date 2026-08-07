@@ -3683,7 +3683,7 @@ private fun ScheduleTable(
                     .padding(horizontal = 12.dp, vertical = 18.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("今天还没有日程", color = Muted, fontSize = SmartPotTypeScale.bodySmall)
+                Text("还没有日程", color = Muted, fontSize = SmartPotTypeScale.bodySmall)
             }
         }
         rows.forEach { item ->
@@ -4331,7 +4331,7 @@ private fun CompanionScheduleCard(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 CompanionShortcutIcon("schedule", Modifier.size(25.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("今日日程", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
+                Text("日程安排", fontSize = SmartPotTypeScale.titleMedium, fontWeight = FontWeight.Bold, color = Ink)
             }
             ScheduleTable(items, timezone, toggleSchedule)
             PixelTextButton(
@@ -4810,15 +4810,21 @@ private fun diaryDisplayContent(diary: PlantDiary): String {
 
 private fun scheduleCardTimeText(item: ScheduleItem, timezone: String): String {
     val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of("Asia/Shanghai"))
-    val parsedTime = item.dueAt?.let { dueAt ->
-        runCatching { DateTimeFormatter.ofPattern("HH:mm").format(Instant.parse(dueAt).atZone(zone)) }.getOrNull()
+    val parsedDateTime = item.dueAt?.let { dueAt ->
+        runCatching {
+            DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm")
+                .format(Instant.parse(dueAt).atZone(zone))
+        }.getOrNull()
     }
-    if (parsedTime != null) return parsedTime
-    return item.displayTime
-        .substringAfterLast('/')
-        .substringAfterLast(' ')
-        .takeIf { it.matches(Regex("\\d{1,2}:\\d{2}")) }
-        ?: "待定"
+    if (parsedDateTime != null) return parsedDateTime
+
+    val legacyDateTime = Regex("(\\d{1,2})-(\\d{1,2})[/ ](\\d{1,2}:\\d{2})")
+        .matchEntire(item.displayTime.trim())
+    if (legacyDateTime != null) {
+        val (month, day, time) = legacyDateTime.destructured
+        return "${month.toInt()}月${day.toInt()}日 $time"
+    }
+    return item.displayTime.trim().takeIf { it.isNotEmpty() } ?: "待定"
 }
 
 private fun scheduleSourceLabel(source: String): String =
