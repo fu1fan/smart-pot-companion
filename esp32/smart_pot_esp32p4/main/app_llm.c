@@ -7,10 +7,13 @@
 #include <time.h>
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -43,6 +46,8 @@
 
 #define LLM_RESPONSE_CAPACITY 4096
 #define LLM_VOICE_INSTRUCTION_CAPACITY 192
+#define LLM_REQUEST_QUEUE_DEPTH 2
+#define LLM_WORKER_STACK_BYTES 8192
 #define LLM_REQUEST_STALE_TIMEOUT_US 45000000LL
 #define SCHEDULE_CONFIDENCE_MIN 0.50
 #define SCHEDULE_PENDING_TIMEOUT_US 90000000LL
@@ -67,6 +72,8 @@ static portMUX_TYPE s_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_request_running;
 static int64_t s_request_started_us;
 static uint32_t s_request_generation;
+static QueueHandle_t s_request_queue;
+static bool s_request_worker_ready;
 
 typedef struct {
     char *text;
@@ -82,7 +89,7 @@ typedef struct {
 
 static pending_schedule_t s_pending_schedule;
 
-static bool request_state_claim(bool supersede_running, uint32_t *generation)
+static bool request_state_claim(uint32_t *generation, bool report_busy)
 {
     const int64_t now_us = esp_timer_get_time();
     bool claimed = false;
@@ -93,7 +100,7 @@ static bool request_state_claim(bool supersede_running, uint32_t *generation)
     if (s_request_running && s_request_started_us > 0) {
         busy_age_us = now_us - s_request_started_us;
     }
-    if (!s_request_running || supersede_running || s_request_started_us <= 0 ||
+    if (!s_request_running || s_request_started_us <= 0 ||
         busy_age_us >= LLM_REQUEST_STALE_TIMEOUT_US) {
         recovered_stale = s_request_running;
         s_request_running = true;
@@ -110,10 +117,9 @@ static bool request_state_claim(bool supersede_running, uint32_t *generation)
     taskEXIT_CRITICAL(&s_request_lock);
 
     if (recovered_stale) {
-        ESP_LOGW(TAG, "%s LLM request state after %lld ms",
-                 supersede_running ? "Superseding previous" : "Recovering stale",
+        ESP_LOGW(TAG, "Recovering stale LLM request state after %lld ms",
                  busy_age_us / 1000);
-    } else if (!claimed) {
+    } else if (!claimed && report_busy) {
         ESP_LOGW(TAG, "LLM request still active for %lld ms", busy_age_us / 1000);
     }
     return claimed;
@@ -449,9 +455,8 @@ static void finish_local_command_with_voice(const char *spoken_text)
     }
 }
 
-static void llm_request_task(void *arg)
+static void process_llm_request(request_task_arg_t *request)
 {
-    request_task_arg_t *request = (request_task_arg_t *)arg;
     char *trigger = request != NULL ? request->text : NULL;
     uint32_t generation = request != NULL ? request->generation : 0;
     app_plant_state_t state;
@@ -551,7 +556,28 @@ done:
     free(trigger);
     free(request);
     request_state_release(generation);
-    vTaskDelete(NULL);
+}
+
+static void llm_request_worker(void *arg)
+{
+    (void)arg;
+    request_task_arg_t *request = NULL;
+
+    ESP_LOGI(TAG, "LLM request worker ready in PSRAM");
+    while (xQueueReceive(s_request_queue, &request, portMAX_DELAY) == pdTRUE) {
+        bool reported_busy = false;
+        while (!request_state_claim(&request->generation, !reported_busy)) {
+            reported_busy = true;
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        ESP_LOGI(TAG, "LLM worker started generation=%lu",
+                 (unsigned long)request->generation);
+        process_llm_request(request);
+        request = NULL;
+    }
+
+    s_request_worker_ready = false;
+    vTaskDeleteWithCaps(NULL);
 }
 
 void app_llm_start(void)
@@ -559,6 +585,25 @@ void app_llm_start(void)
     s_state_lock = xSemaphoreCreateMutex();
     s_schedule_pending_lock = xSemaphoreCreateMutex();
     app_memory_init();
+    if (s_request_queue == NULL) {
+        s_request_queue = xQueueCreate(LLM_REQUEST_QUEUE_DEPTH, sizeof(request_task_arg_t *));
+        if (s_request_queue != NULL &&
+            xTaskCreateWithCaps(llm_request_worker, "deepseek_worker",
+                                LLM_WORKER_STACK_BYTES, NULL, 5, NULL,
+                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
+            s_request_worker_ready = true;
+        } else {
+            ESP_LOGE(TAG,
+                     "Failed to create LLM worker: internal free=%u largest=%u PSRAM free=%u",
+                     (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+            if (s_request_queue != NULL) {
+                vQueueDelete(s_request_queue);
+                s_request_queue = NULL;
+            }
+        }
+    }
     if (CONFIG_SMART_POT_LLM_ENABLE) {
         app_ui_set_dialog_status("DeepSeek: ready");
     } else {
@@ -580,39 +625,52 @@ void app_llm_update_plant_state(const app_plant_state_t *state)
     }
 }
 
-static bool start_llm_request(const char *trigger, bool supersede_running)
+static bool start_llm_request(const char *trigger)
 {
-    request_task_arg_t *request = calloc(1, sizeof(*request));
+    if (!s_request_worker_ready || s_request_queue == NULL) {
+        ESP_LOGE(TAG, "LLM worker is unavailable");
+        app_ui_set_dialog_status("DeepSeek: worker unavailable");
+        return false;
+    }
+    request_task_arg_t *request = heap_caps_calloc(1, sizeof(*request),
+                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (request == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate LLM request: internal free=%u largest=%u",
+                 (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         app_ui_set_dialog_status("DeepSeek: memory not enough");
         return false;
     }
-    request->text = strdup(trigger ? trigger : "voice");
+    const char *request_text = trigger ? trigger : "voice";
+    size_t request_text_size = strlen(request_text) + 1;
+    request->text = heap_caps_malloc(request_text_size,
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (request->text == NULL) {
         free(request);
         app_ui_set_dialog_status("DeepSeek: memory not enough");
         return false;
     }
-    if (!request_state_claim(supersede_running, &request->generation)) {
-        free(request->text);
-        free(request);
-        app_ui_set_dialog_status("DeepSeek: still thinking...");
-        return false;
-    }
+    memcpy(request->text, request_text, request_text_size);
 
-    if (xTaskCreate(llm_request_task, "deepseek_req", 8192, request, 5, NULL) != pdPASS) {
-        request_state_release(request->generation);
+    if (xQueueSend(s_request_queue, &request, pdMS_TO_TICKS(500)) != pdTRUE) {
         free(request->text);
         free(request);
-        app_ui_set_dialog_status("DeepSeek: task start failed");
+        ESP_LOGE(TAG, "LLM request queue is full");
+        app_ui_set_dialog_status("DeepSeek: request queue full");
         return false;
     }
+    ESP_LOGI(TAG,
+             "LLM request queued internal free=%u largest=%u PSRAM free=%u pending=%u",
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned int)uxQueueMessagesWaiting(s_request_queue));
     return true;
 }
 
 void app_llm_request_care_tip(const char *trigger)
 {
-    start_llm_request(trigger, false);
+    start_llm_request(trigger);
 }
 
 static bool text_contains_any(const char *text, const char *const *markers, size_t marker_count)
@@ -1542,7 +1600,7 @@ done:
     free(user_text);
     free(request);
     request_state_release(generation);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static bool looks_like_schedule_add_command(const char *text)
@@ -1588,13 +1646,14 @@ static bool start_schedule_extract_request(const char *user_text)
         free(request);
         return false;
     }
-    if (!request_state_claim(true, &request->generation)) {
+    if (!request_state_claim(&request->generation, true)) {
         free(request->text);
         free(request);
         return false;
     }
     app_ui_set_dialog_status("Schedule: understanding...");
-    if (xTaskCreate(schedule_extract_task, "schedule_ai", 8192, request, 5, NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(schedule_extract_task, "schedule_ai", 8192, request, 5, NULL,
+                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         request_state_release(request->generation);
         free(request->text);
         free(request);
@@ -1724,7 +1783,7 @@ bool app_llm_request_voice_reply(const char *user_text)
     /* Only warm Seed-TTS for cloud dialogue. Local commands above need the
      * queue immediately and must never be displaced by a prewarm command. */
     (void)app_tts_prepare_connection();
-    if (!start_llm_request(user_text ? user_text : "voice wake", true)) {
+    if (!start_llm_request(user_text ? user_text : "voice wake")) {
         return app_tts_speak_text("我这边刚卡了一下，请再问一次。");
     }
     return true;

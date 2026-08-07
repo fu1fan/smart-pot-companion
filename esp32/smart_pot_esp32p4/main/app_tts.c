@@ -53,6 +53,8 @@
 #define TTS_PLAY_CHUNK 2048
 #define TTS_CONNECT_TIMEOUT_MS 8000
 #define TTS_SESSION_TIMEOUT_MS 15000
+#define TTS_ONE_SHOT_MAX_RETRIES 2
+#define TTS_ONE_SHOT_RETRY_DELAY_MS 1500
 #define TTS_VOLUME_CONVERSATION 100
 #define TTS_VOLUME_COMMAND 100
 #define TTS_VOLUME_AUTOMATION 100
@@ -103,6 +105,7 @@ typedef struct {
     char style[TTS_STYLE_MAX];
     bool complete_conversation;
     uint8_t volume;
+    uint8_t retry_count;
     int16_t speech_rate;
     int8_t pitch;
 } tts_msg_t;
@@ -684,10 +687,30 @@ static void tts_task(void *arg)
         } else if (msg.command == TTS_CMD_ONE_SHOT) {
             s_tts_busy = true;
             bool ok = play_one_shot(&rt, &msg);
+            bool retry_queued = false;
             if (!ok) {
                 ESP_LOGW(TAG, "Volc TTS one-shot failed: %s", rt.error);
                 close_connection(&rt);
-                app_ui_set_voice_status("TTS: failed");
+                release_pcm_buffer(&rt);
+                if (!s_stop_requested && msg.retry_count < TTS_ONE_SHOT_MAX_RETRIES) {
+                    msg.retry_count++;
+                    ESP_LOGW(TAG, "Retrying Volc TTS one-shot attempt=%u/%u after %u ms",
+                             (unsigned int)msg.retry_count,
+                             (unsigned int)TTS_ONE_SHOT_MAX_RETRIES,
+                             (unsigned int)TTS_ONE_SHOT_RETRY_DELAY_MS);
+                    vTaskDelay(pdMS_TO_TICKS(TTS_ONE_SHOT_RETRY_DELAY_MS));
+                    if (!s_stop_requested &&
+                        xQueueSendToFront(s_tts_queue, &msg, 0) == pdTRUE) {
+                        retry_queued = true;
+                    }
+                }
+                if (!retry_queued) {
+                    app_ui_set_voice_status("TTS: failed");
+                }
+            }
+            if (retry_queued) {
+                s_tts_busy = false;
+                continue;
             }
             if (msg.complete_conversation) {
                 app_voice_conversation_complete();

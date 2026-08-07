@@ -28,7 +28,7 @@ class CommandService(
             while (isActive) {
                 runCatching { store.listPots() }
                     .getOrDefault(emptyList())
-                    .forEach { pot -> launch { probe(pot) } }
+                    .forEach { pot -> launch { probeNow(pot) } }
                 delay(PRESENCE_PROBE_INTERVAL_MS)
             }
         }
@@ -102,10 +102,10 @@ class CommandService(
         realtime.publish(RealtimeEvent(RealtimeEventType.COMMAND_ACK, potId, appJson.encodeToJsonElement(ack)))
     }
 
-    private suspend fun probe(pot: PotProfile) {
+    suspend fun probeNow(pot: PotProfile): Boolean {
         if (!mqtt.isConnected()) {
             publishPresence(pot)
-            return
+            return false
         }
         val now = Instant.now()
         val command = DeviceCommand(
@@ -118,9 +118,14 @@ class CommandService(
         val waiter = CompletableDeferred<DeviceCommandAck>()
         pending[command.commandId] = waiter
         val published = runCatching { mqtt.publishCommand(command) }.isSuccess
-        if (published) withTimeoutOrNull(PRESENCE_PROBE_TIMEOUT_MS) { waiter.await() }
+        val ack = if (published) {
+            withTimeoutOrNull(PRESENCE_PROBE_TIMEOUT_MS) { waiter.await() }
+        } else {
+            null
+        }
         pending.remove(command.commandId)
         publishPresence(pot)
+        return ack != null
     }
 
     private suspend fun publishPresence(pot: PotProfile) {

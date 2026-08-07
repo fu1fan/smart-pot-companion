@@ -192,12 +192,28 @@ class MqttGateway(
                 require(online.deviceId == deviceId)
                 val observedOnline = online.copy(changedAt = observedAt)
                 store.setOnline(deviceId, observedOnline.online, observedOnline.changedAt)
-                if (online.online) {
-                    runCatching { commandService?.syncProfile(pot) }
-                        .onFailure { System.err.println("Profile MQTT resync on online skipped: ${it.message}") }
-                    resyncScheduleIfNeeded(pot, null, "online")
+                val confirmedOnline = if (online.online) {
+                    val alreadyConfirmed = deviceIsRecentlyOnline(store.deviceState(deviceId), Instant.now())
+                    val confirmed = alreadyConfirmed || commandService?.probeNow(pot) == true
+                    if (confirmed) {
+                        runCatching { commandService?.syncProfile(pot) }
+                            .onFailure { System.err.println("Profile MQTT resync on online skipped: ${it.message}") }
+                        resyncScheduleIfNeeded(pot, null, "online")
+                    } else {
+                        store.setOnline(deviceId, false, observedAt)
+                        System.err.println("Device online announcement was not confirmed by PING: $deviceId")
+                    }
+                    confirmed
+                } else {
+                    false
                 }
-                realtime.publish(RealtimeEvent(RealtimeEventType.ONLINE, pot.id, appJson.encodeToJsonElement(observedOnline)))
+                realtime.publish(
+                    RealtimeEvent(
+                        RealtimeEventType.ONLINE,
+                        pot.id,
+                        appJson.encodeToJsonElement(observedOnline.copy(online = confirmedOnline)),
+                    ),
+                )
             }
         }
     }
