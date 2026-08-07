@@ -240,6 +240,7 @@ fun SmartPotApp(viewModel: SmartPotViewModel) {
                         viewModel::saveDiary,
                         viewModel::deleteDiary,
                         viewModel::speakDiary,
+                        viewModel::stopDiarySpeech,
                     )
                     tab == 2 -> CompanionScreen(
                         state,
@@ -1982,6 +1983,7 @@ private fun CareScreen(
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
+    stopDiarySpeech: () -> Unit,
 ) {
     val context = LocalContext.current
     var note by rememberSaveable { mutableStateOf("") }
@@ -2105,6 +2107,7 @@ private fun CareScreen(
                     saveDiary = saveDiary,
                     deleteDiary = deleteDiary,
                     speakDiary = speakDiary,
+                    stopDiarySpeech = stopDiarySpeech,
                 )
             }
         }
@@ -2657,6 +2660,7 @@ private fun CareDiarySection(
     saveDiary: (String, String, List<String>, String?, String?) -> Unit,
     deleteDiary: (PlantDiary) -> Unit,
     speakDiary: (PlantDiary) -> Unit,
+    stopDiarySpeech: () -> Unit,
 ) {
     val diaries = state.diaries.sortedWith(compareByDescending<PlantDiary> { it.diaryDate }.thenByDescending { it.createdAt })
     val visibleDiaries = if (expanded) diaries else diaries.take(2)
@@ -2800,6 +2804,7 @@ private fun CareDiarySection(
                         diary = diary,
                         weather = state.careOverview?.weather?.takeIf { it.date == diary.diaryDate },
                         onSpeak = { speakDiary(diary) },
+                        onStopSpeaking = stopDiarySpeech,
                         onDelete = { pendingDelete = diary },
                     )
                 }
@@ -2819,6 +2824,7 @@ private fun CareDiaryEntry(
     diary: PlantDiary,
     weather: CareWeather?,
     onSpeak: () -> Unit,
+    onStopSpeaking: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var expanded by rememberSaveable(diary.id) { mutableStateOf(false) }
@@ -2841,6 +2847,13 @@ private fun CareDiaryEntry(
                 "朗读",
                 modifier = Modifier.clickable(onClick = onSpeak).padding(horizontal = 6.dp, vertical = 2.dp),
                 color = Leaf,
+                fontSize = SmartPotTypeScale.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "停止",
+                modifier = Modifier.clickable(onClick = onStopSpeaking).padding(horizontal = 6.dp, vertical = 2.dp),
+                color = PixelDanger,
                 fontSize = SmartPotTypeScale.labelSmall,
                 fontWeight = FontWeight.SemiBold,
             )

@@ -292,47 +292,46 @@ static env_alert_state_t classify_environment(uint8_t soil_percent, uint32_t lig
 
 typedef struct {
     const char *text;
-    const char *audio_path;
 } environment_reply_t;
 
 static const environment_reply_t *environment_reply(env_alert_state_t state)
 {
     static const environment_reply_t replies[][2] = {
         [ENV_ALERT_LOW_LOW] = {
-            { "又冷又干……感觉我在南极流浪……", "/spiffs/e00a.wav" },
-            { "没光没水，我选择躺平。等我变成了干柴，主人记得拿我去烧火取暖……", "/spiffs/e00b.wav" },
+            { "又冷又干……感觉我在南极流浪……" },
+            { "没光没水，我选择躺平。等我变成了干柴，主人记得拿我去烧火取暖……" },
         },
         [ENV_ALERT_LOW_NORMAL] = {
-            { "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！", "/spiffs/e01.wav" },
-            { "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！", "/spiffs/e01.wav" },
+            { "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！" },
+            { "我掐指一算，我上辈子可能是一块海绵宝宝……但现在，我干得连蟹堡王都捏不出来了！" },
         },
         [ENV_ALERT_LOW_HIGH] = {
-            { "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！", "/spiffs/e02.wav" },
-            { "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！", "/spiffs/e02.wav" },
+            { "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！" },
+            { "又干又晒……我是不是在铁板烧上？主人！撒点孜然就能上桌了！" },
         },
         [ENV_ALERT_NORMAL_LOW] = {
-            { "好黑呀，我是不是要长蘑菇了？", "/spiffs/e03a.wav" },
-            { "主人，能带我去晒晒太阳吗？我想光合作用！", "/spiffs/e03b.wav" },
+            { "好黑呀，我是不是要长蘑菇了？" },
+            { "主人，能带我去晒晒太阳吗？我想光合作用！" },
         },
         [ENV_ALERT_NORMAL_NORMAL] = {
-            { "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！", "/spiffs/e04.wav" },
-            { "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！", "/spiffs/e04.wav" },
+            { "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！" },
+            { "主人！我宣布！你被评为本月‘最佳铲屎官’！奖励你摸摸我的新叶子！" },
         },
         [ENV_ALERT_NORMAL_HIGH] = {
-            { "哎呀，我要被晒干了！主人给我打把伞", "/spiffs/e05.wav" },
-            { "哎呀，我要被晒干了！主人给我打把伞", "/spiffs/e05.wav" },
+            { "哎呀，我要被晒干了！主人给我打把伞" },
+            { "哎呀，我要被晒干了！主人给我打把伞" },
         },
         [ENV_ALERT_HIGH_LOW] = {
-            { "我感觉自己像被泡发的木耳，又冷又潮，再泡下去我就要长蘑菇了！", "/spiffs/e06a.wav" },
-            { "又湿又暗……这不是梅雨季吗？我是不是该给自己贴个除湿袋了？我好潮啊！", "/spiffs/e06b.wav" },
+            { "我感觉自己像被泡发的木耳，又冷又潮，再泡下去我就要长蘑菇了！" },
+            { "又湿又暗……这不是梅雨季吗？我是不是该给自己贴个除湿袋了？我好潮啊！" },
         },
         [ENV_ALERT_HIGH_NORMAL] = {
-            { "我好像泡在游泳池里了……脚脚有点闷。", "/spiffs/e07.wav" },
-            { "我好像泡在游泳池里了……脚脚有点闷。", "/spiffs/e07.wav" },
+            { "我好像泡在游泳池里了……脚脚有点闷。" },
+            { "我好像泡在游泳池里了……脚脚有点闷。" },
         },
         [ENV_ALERT_HIGH_HIGH] = {
-            { "又涝又热……我觉得我的人生已经到达了火山口的顶峰！", "/spiffs/e08.wav" },
-            { "又涝又热……我觉得我的人生已经到达了火山口的顶峰！", "/spiffs/e08.wav" },
+            { "又涝又热……我觉得我的人生已经到达了火山口的顶峰！" },
+            { "又涝又热……我觉得我的人生已经到达了火山口的顶峰！" },
         },
     };
 
@@ -432,14 +431,15 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
     if (should_notify) {
         const environment_reply_t *reply = environment_reply(next_state);
         if (reply == NULL) return;
-        app_ui_show_remote_content(reply->text, 6000);
         bool tts_queued = false;
         if (app_wifi_is_connected()) {
             tts_queued = app_tts_speak_text_with_tone(
                 reply->text, environment_voice_tone(next_state));
         }
         if (!tts_queued) {
-            tts_queued = app_tts_play_local_wav(reply->audio_path);
+            ESP_LOGI(TAG, "Environment voice reminder deferred: state=%d soil=%u%% light=%ulux",
+                     next_state, soil_percent, (unsigned int)light_lux);
+            return;
         }
         hw->state_change_pending = false;
         hw->last_reminded_state = next_state;
@@ -448,13 +448,8 @@ static void update_environment_voice_reminder(sensor_hw_t *hw, uint8_t soil_perc
         } else {
             hw->last_abnormal_reminder_us = now_us;
         }
-        if (tts_queued) {
-            ESP_LOGI(TAG, "Environment reminder queued: state=%d soil=%u%% light=%ulux",
-                     next_state, soil_percent, (unsigned int)light_lux);
-        } else {
-            ESP_LOGI(TAG, "Environment reminder displayed without TTS: state=%d soil=%u%% light=%ulux",
-                     next_state, soil_percent, (unsigned int)light_lux);
-        }
+        ESP_LOGI(TAG, "Environment voice reminder queued: state=%d soil=%u%% light=%ulux",
+                 next_state, soil_percent, (unsigned int)light_lux);
     }
 }
 

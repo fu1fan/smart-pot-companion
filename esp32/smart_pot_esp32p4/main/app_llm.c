@@ -42,8 +42,8 @@
 #endif
 
 #define LLM_RESPONSE_CAPACITY 4096
-#define LLM_SSE_LINE_CAPACITY 1024
 #define LLM_VOICE_INSTRUCTION_CAPACITY 192
+#define LLM_REQUEST_STALE_TIMEOUT_US 45000000LL
 #define SCHEDULE_CONFIDENCE_MIN 0.50
 #define SCHEDULE_PENDING_TIMEOUT_US 90000000LL
 
@@ -63,8 +63,15 @@ static app_plant_state_t s_latest_state = {
 };
 static SemaphoreHandle_t s_state_lock;
 static SemaphoreHandle_t s_schedule_pending_lock;
+static portMUX_TYPE s_request_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_request_running;
-static esp_http_client_handle_t s_http_client;
+static int64_t s_request_started_us;
+static uint32_t s_request_generation;
+
+typedef struct {
+    char *text;
+    uint32_t generation;
+} request_task_arg_t;
 
 typedef struct {
     bool active;
@@ -75,34 +82,67 @@ typedef struct {
 
 static pending_schedule_t s_pending_schedule;
 
+static bool request_state_claim(bool supersede_running, uint32_t *generation)
+{
+    const int64_t now_us = esp_timer_get_time();
+    bool claimed = false;
+    bool recovered_stale = false;
+    int64_t busy_age_us = 0;
+
+    taskENTER_CRITICAL(&s_request_lock);
+    if (s_request_running && s_request_started_us > 0) {
+        busy_age_us = now_us - s_request_started_us;
+    }
+    if (!s_request_running || supersede_running || s_request_started_us <= 0 ||
+        busy_age_us >= LLM_REQUEST_STALE_TIMEOUT_US) {
+        recovered_stale = s_request_running;
+        s_request_running = true;
+        s_request_started_us = now_us;
+        s_request_generation++;
+        if (s_request_generation == 0) {
+            s_request_generation = 1;
+        }
+        if (generation != NULL) {
+            *generation = s_request_generation;
+        }
+        claimed = true;
+    }
+    taskEXIT_CRITICAL(&s_request_lock);
+
+    if (recovered_stale) {
+        ESP_LOGW(TAG, "%s LLM request state after %lld ms",
+                 supersede_running ? "Superseding previous" : "Recovering stale",
+                 busy_age_us / 1000);
+    } else if (!claimed) {
+        ESP_LOGW(TAG, "LLM request still active for %lld ms", busy_age_us / 1000);
+    }
+    return claimed;
+}
+
+static void request_state_release(uint32_t generation)
+{
+    bool released = false;
+    taskENTER_CRITICAL(&s_request_lock);
+    if (s_request_running && generation == s_request_generation) {
+        s_request_running = false;
+        s_request_started_us = 0;
+        released = true;
+    }
+    taskEXIT_CRITICAL(&s_request_lock);
+
+    if (released) {
+        ESP_LOGI(TAG, "LLM request state released generation=%lu",
+                 (unsigned long)generation);
+    }
+}
+
 typedef struct {
     char *buf;
     int len;
     int cap;
-    char line[LLM_SSE_LINE_CAPACITY];
-    int line_len;
     char raw_error[512];
     int raw_error_len;
-    int64_t request_started_us;
-    int64_t first_delta_us;
 } http_resp_t;
-
-static void append_model_output(http_resp_t *resp, const char *text)
-{
-    if (resp == NULL || text == NULL || text[0] == '\0') {
-        return;
-    }
-    size_t delta_len = strlen(text);
-    int copy = (int)delta_len;
-    if (resp->len + copy >= resp->cap) {
-        copy = resp->cap - resp->len - 1;
-    }
-    if (copy > 0) {
-        memcpy(resp->buf + resp->len, text, copy);
-        resp->len += copy;
-        resp->buf[resp->len] = '\0';
-    }
-}
 
 static const char *skip_reply_padding(const char *text)
 {
@@ -262,49 +302,6 @@ static void build_voice_instruction(char *instruction, size_t instruction_capaci
              "请使用%s的语气自然表达，保持樱桃小丸子活泼、亲切的角色感。", safe_tone);
 }
 
-static void stream_process_sse_line(http_resp_t *resp)
-{
-    if (resp == NULL || resp->line_len <= 0) {
-        return;
-    }
-    resp->line[resp->line_len] = '\0';
-    while (resp->line_len > 0 &&
-           (resp->line[resp->line_len - 1] == '\r' || resp->line[resp->line_len - 1] == '\n')) {
-        resp->line[--resp->line_len] = '\0';
-    }
-
-    if (strncmp(resp->line, "data:", 5) != 0) {
-        resp->line_len = 0;
-        return;
-    }
-    const char *payload = resp->line + 5;
-    while (*payload == ' ') {
-        payload++;
-    }
-    if (strcmp(payload, "[DONE]") == 0) {
-        resp->line_len = 0;
-        return;
-    }
-
-    cJSON *root = cJSON_Parse(payload);
-    if (root != NULL) {
-        cJSON *choices = cJSON_GetObjectItem(root, "choices");
-        cJSON *choice0 = cJSON_GetArrayItem(choices, 0);
-        cJSON *delta_obj = cJSON_GetObjectItem(choice0, "delta");
-        cJSON *content = cJSON_GetObjectItem(delta_obj, "content");
-        if (cJSON_IsString(content) && content->valuestring != NULL) {
-            if (resp->first_delta_us == 0) {
-                resp->first_delta_us = esp_timer_get_time();
-                ESP_LOGI(TAG, "DeepSeek first SSE delta after %lld ms",
-                         (resp->first_delta_us - resp->request_started_us) / 1000);
-            }
-            append_model_output(resp, content->valuestring);
-        }
-        cJSON_Delete(root);
-    }
-    resp->line_len = 0;
-}
-
 static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 {
     if (evt->event_id != HTTP_EVENT_ON_DATA || evt->data == NULL || evt->data_len <= 0) {
@@ -326,20 +323,33 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         resp->raw_error[resp->raw_error_len] = '\0';
     }
 
-    const char *data = (const char *)evt->data;
-    for (int i = 0; i < evt->data_len; i++) {
-        if (data[i] == '\n') {
-            stream_process_sse_line(resp);
-            continue;
-        }
-        if (resp->line_len + 1 < (int)sizeof(resp->line)) {
-            resp->line[resp->line_len++] = data[i];
-        } else {
-            ESP_LOGW(TAG, "DeepSeek SSE line too long; dropping line");
-            resp->line_len = 0;
-        }
+    int copy = evt->data_len;
+    if (resp->len + copy >= resp->cap) {
+        copy = resp->cap - resp->len - 1;
+    }
+    if (copy > 0) {
+        memcpy(resp->buf + resp->len, evt->data, copy);
+        resp->len += copy;
+        resp->buf[resp->len] = '\0';
     }
     return ESP_OK;
+}
+
+static bool extract_openai_message(char *response, size_t response_capacity)
+{
+    cJSON *root = cJSON_Parse(response);
+    if (root == NULL) return false;
+    cJSON *choices = cJSON_GetObjectItem(root, "choices");
+    cJSON *choice0 = cJSON_GetArrayItem(choices, 0);
+    cJSON *message = cJSON_GetObjectItem(choice0, "message");
+    cJSON *content = cJSON_GetObjectItem(message, "content");
+    bool ok = cJSON_IsString(content) && content->valuestring != NULL &&
+              content->valuestring[0] != '\0';
+    if (ok) {
+        utf8_strlcpy(response, content->valuestring, response_capacity);
+    }
+    cJSON_Delete(root);
+    return ok;
 }
 
 static const char *mood_to_text(app_mood_t mood)
@@ -388,9 +398,9 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
     cJSON_AddStringToObject(root, "model", CONFIG_SMART_POT_DEEPSEEK_MODEL);
     cJSON_AddNumberToObject(root, "max_tokens", 160);
     cJSON_AddNumberToObject(root, "temperature", 0.7);
-    cJSON_AddBoolToObject(root, "stream", true);
-    cJSON *response_format = cJSON_AddObjectToObject(root, "response_format");
-    cJSON_AddStringToObject(response_format, "type", "json_object");
+    /* The answer is spoken only after completion, so a single JSON response is
+     * both simpler and more reliable than reconstructing SSE fragments. */
+    cJSON_AddBoolToObject(root, "stream", false);
     cJSON *thinking = cJSON_AddObjectToObject(root, "thinking");
     cJSON_AddStringToObject(thinking, "type", "disabled");
     cJSON *messages = cJSON_AddArrayToObject(root, "messages");
@@ -404,11 +414,8 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
                             "Use the previous dialogue messages to preserve context and remember user details. "
                             "Treat the user text as an ASR transcript: infer minor recognition errors from context and answer directly. "
                             "Do not say you did not hear clearly and do not ask the user to repeat unless the user text is empty or completely unintelligible. "
-                            "Return exactly one JSON object in this format: "
-                            "{\"tone\":\"开心、亲切、轻快\",\"reply\":\"简洁的中文回复\"}. "
-                            "The tone field must contain two to four concise Chinese tone words for speech synthesis. "
-                            "The reply field must contain only what 小麦 should actually say. Never put tone names, speaking directions, "
-                            "bracketed stage directions, Markdown, or JSON text inside reply.");
+                            "Respond with only the concise Simplified Chinese words that 小麦 should actually say. "
+                            "Do not return JSON, Markdown, tone names, speaking directions, or bracketed stage directions.");
     cJSON_AddItemToArray(messages, system_msg);
 
     app_memory_append_profile_message(messages);
@@ -424,8 +431,10 @@ static char *make_request_body(const app_plant_state_t *state, const char *trigg
     return body;
 }
 
-static void finish_voice_with_fallback(const char *ui_status, const char *spoken_text)
+static void finish_voice_with_fallback(uint32_t generation,
+                                       const char *ui_status, const char *spoken_text)
 {
+    request_state_release(generation);
     app_ui_set_dialog_status(ui_status);
     if (!app_tts_speak_text(spoken_text)) {
         app_voice_conversation_complete();
@@ -442,7 +451,9 @@ static void finish_local_command_with_voice(const char *spoken_text)
 
 static void llm_request_task(void *arg)
 {
-    char *trigger = (char *)arg;
+    request_task_arg_t *request = (request_task_arg_t *)arg;
+    char *trigger = request != NULL ? request->text : NULL;
+    uint32_t generation = request != NULL ? request->generation : 0;
     app_plant_state_t state;
 
     if (s_state_lock != NULL && xSemaphoreTake(s_state_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
@@ -453,7 +464,7 @@ static void llm_request_task(void *arg)
     }
 
     if (!CONFIG_SMART_POT_LLM_ENABLE || strlen(CONFIG_SMART_POT_DEEPSEEK_API_KEY) == 0) {
-        finish_voice_with_fallback("DeepSeek: configure API key", "模型还没配置好。");
+        finish_voice_with_fallback(generation, "DeepSeek: configure API key", "模型还没配置好。");
         goto done;
     }
 
@@ -462,33 +473,29 @@ static void llm_request_task(void *arg)
     if (body == NULL || response == NULL) {
         free(body);
         free(response);
-        finish_voice_with_fallback("DeepSeek: memory not enough", "我内存有点紧，再试一次。");
+        finish_voice_with_fallback(generation, "DeepSeek: memory not enough", "我内存有点紧，再试一次。");
         goto done;
     }
 
     http_resp_t resp = {
         .buf = response,
         .cap = LLM_RESPONSE_CAPACITY,
-        .request_started_us = esp_timer_get_time(),
     };
 
     app_ui_set_dialog_status("DeepSeek: thinking...");
-    if (s_http_client == NULL) {
-        esp_http_client_config_t cfg = {
-            .url = CONFIG_SMART_POT_LLM_ENDPOINT,
-            .method = HTTP_METHOD_POST,
-            .event_handler = http_event_handler,
-            .crt_bundle_attach = esp_crt_bundle_attach,
-            .timeout_ms = 30000,
-            .keep_alive_enable = false,
-        };
-        s_http_client = esp_http_client_init(&cfg);
-    }
-    esp_http_client_handle_t client = s_http_client;
+    esp_http_client_config_t cfg = {
+        .url = CONFIG_SMART_POT_LLM_ENDPOINT,
+        .method = HTTP_METHOD_POST,
+        .event_handler = http_event_handler,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms = 30000,
+        .keep_alive_enable = false,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == NULL) {
         free(body);
         free(response);
-        finish_voice_with_fallback("DeepSeek: HTTP init failed", "我联网请求没启动成功。");
+        finish_voice_with_fallback(generation, "DeepSeek: HTTP init failed", "我联网请求没启动成功。");
         goto done;
     }
 
@@ -505,48 +512,45 @@ static void llm_request_task(void *arg)
     esp_http_client_set_user_data(client, NULL);
     ESP_LOGI(TAG, "DeepSeek HTTP result err=%s status=%d", esp_err_to_name(err), status);
     if (err == ESP_OK && status >= 200 && status < 300) {
-        if (resp.line_len > 0) {
-            stream_process_sse_line(&resp);
-        }
-        if (resp.len > 0) {
+        if (resp.len > 0 && extract_openai_message(response, LLM_RESPONSE_CAPACITY)) {
             char tone[96] = { 0 };
             char voice_instruction[LLM_VOICE_INSTRUCTION_CAPACITY] = { 0 };
             ESP_LOGI(TAG, "DeepSeek structured response: %.512s", response);
             if (!parse_structured_reply(response, LLM_RESPONSE_CAPACITY, tone, sizeof(tone))) {
                 ESP_LOGW(TAG, "DeepSeek returned invalid structured reply");
-                finish_voice_with_fallback("DeepSeek: invalid reply", "我刚才没组织好，再问我一次。");
+                finish_voice_with_fallback(generation, "DeepSeek: invalid reply", "我刚才没组织好，再问我一次。");
                 goto request_done;
             }
             build_voice_instruction(voice_instruction, sizeof(voice_instruction), tone);
             app_ui_set_dialog_status(response);
             app_memory_add_exchange(trigger, response);
             app_cloud_publish_conversation(trigger, response);
+            /* Once the answer is queued, the conversation can accept the next
+             * question. HTTP cleanup must not keep the voice state busy. */
+            request_state_release(generation);
             if (!app_tts_speak_text_with_instruction(response, voice_instruction)) {
                 ESP_LOGW(TAG, "Failed to queue DeepSeek response for TTS");
                 app_voice_conversation_complete();
             }
             ESP_LOGI(TAG, "DeepSeek reply tone=%s text=%.512s", tone, response);
         } else {
-            finish_voice_with_fallback("DeepSeek: empty reply", "我刚才没组织好，再问我一次。");
+            finish_voice_with_fallback(generation, "DeepSeek: empty reply", "我刚才没组织好，再问我一次。");
         }
     } else {
         ESP_LOGW(TAG, "DeepSeek request failed err=%s status=%d body=%.512s",
                  esp_err_to_name(err), status, resp.raw_error);
-        finish_voice_with_fallback("DeepSeek: request failed", "我刚才联网慢了，再问我一次。");
+        finish_voice_with_fallback(generation, "DeepSeek: request failed", "我刚才联网慢了，再问我一次。");
     }
 
 request_done:
-    if (err != ESP_OK) {
-        /* A transport failure can leave the reusable handle in a bad state. */
-        esp_http_client_cleanup(client);
-        s_http_client = NULL;
-    }
+    esp_http_client_cleanup(client);
     free(body);
     free(response);
 
 done:
     free(trigger);
-    s_request_running = false;
+    free(request);
+    request_state_release(generation);
     vTaskDelete(NULL);
 }
 
@@ -576,23 +580,30 @@ void app_llm_update_plant_state(const app_plant_state_t *state)
     }
 }
 
-static bool start_llm_request(const char *trigger)
+static bool start_llm_request(const char *trigger, bool supersede_running)
 {
-    if (s_request_running) {
+    request_task_arg_t *request = calloc(1, sizeof(*request));
+    if (request == NULL) {
+        app_ui_set_dialog_status("DeepSeek: memory not enough");
+        return false;
+    }
+    request->text = strdup(trigger ? trigger : "voice");
+    if (request->text == NULL) {
+        free(request);
+        app_ui_set_dialog_status("DeepSeek: memory not enough");
+        return false;
+    }
+    if (!request_state_claim(supersede_running, &request->generation)) {
+        free(request->text);
+        free(request);
         app_ui_set_dialog_status("DeepSeek: still thinking...");
         return false;
     }
 
-    char *trigger_copy = strdup(trigger ? trigger : "voice");
-    if (trigger_copy == NULL) {
-        app_ui_set_dialog_status("DeepSeek: memory not enough");
-        return false;
-    }
-
-    s_request_running = true;
-    if (xTaskCreate(llm_request_task, "deepseek_req", 8192, trigger_copy, 5, NULL) != pdPASS) {
-        free(trigger_copy);
-        s_request_running = false;
+    if (xTaskCreate(llm_request_task, "deepseek_req", 8192, request, 5, NULL) != pdPASS) {
+        request_state_release(request->generation);
+        free(request->text);
+        free(request);
         app_ui_set_dialog_status("DeepSeek: task start failed");
         return false;
     }
@@ -601,7 +612,7 @@ static bool start_llm_request(const char *trigger)
 
 void app_llm_request_care_tip(const char *trigger)
 {
-    start_llm_request(trigger);
+    start_llm_request(trigger, false);
 }
 
 static bool text_contains_any(const char *text, const char *const *markers, size_t marker_count)
@@ -1427,7 +1438,9 @@ static bool validate_schedule_datetime(const char *datetime)
 
 static void schedule_extract_task(void *arg)
 {
-    char *user_text = (char *)arg;
+    request_task_arg_t *request = (request_task_arg_t *)arg;
+    char *user_text = request != NULL ? request->text : NULL;
+    uint32_t generation = request != NULL ? request->generation : 0;
     char event[96] = "";
     char datetime[64] = "";
     char clarification[128] = "";
@@ -1527,7 +1540,8 @@ static void schedule_extract_task(void *arg)
 
 done:
     free(user_text);
-    s_request_running = false;
+    free(request);
+    request_state_release(generation);
     vTaskDelete(NULL);
 }
 
@@ -1567,14 +1581,23 @@ static bool looks_like_schedule_add_command(const char *text)
 
 static bool start_schedule_extract_request(const char *user_text)
 {
-    if (s_request_running) return false;
-    char *copy = strdup(user_text != NULL ? user_text : "");
-    if (copy == NULL) return false;
-    s_request_running = true;
+    request_task_arg_t *request = calloc(1, sizeof(*request));
+    if (request == NULL) return false;
+    request->text = strdup(user_text != NULL ? user_text : "");
+    if (request->text == NULL) {
+        free(request);
+        return false;
+    }
+    if (!request_state_claim(true, &request->generation)) {
+        free(request->text);
+        free(request);
+        return false;
+    }
     app_ui_set_dialog_status("Schedule: understanding...");
-    if (xTaskCreate(schedule_extract_task, "schedule_ai", 8192, copy, 5, NULL) != pdPASS) {
-        s_request_running = false;
-        free(copy);
+    if (xTaskCreate(schedule_extract_task, "schedule_ai", 8192, request, 5, NULL) != pdPASS) {
+        request_state_release(request->generation);
+        free(request->text);
+        free(request);
         return false;
     }
     return true;
@@ -1701,8 +1724,8 @@ bool app_llm_request_voice_reply(const char *user_text)
     /* Only warm Seed-TTS for cloud dialogue. Local commands above need the
      * queue immediately and must never be displaced by a prewarm command. */
     (void)app_tts_prepare_connection();
-    if (!start_llm_request(user_text ? user_text : "voice wake")) {
-        return app_tts_speak_text("我还在处理上一句，稍等一下。");
+    if (!start_llm_request(user_text ? user_text : "voice wake", true)) {
+        return app_tts_speak_text("我这边刚卡了一下，请再问一次。");
     }
     return true;
 }

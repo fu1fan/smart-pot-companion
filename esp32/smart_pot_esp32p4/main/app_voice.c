@@ -256,6 +256,11 @@ static bool service_microphone_pause(esp_codec_dev_handle_t mic, int16_t *sample
                 if (close_err != ESP_CODEC_DEV_OK) {
                     ESP_LOGW(TAG, "Failed to pause microphone codec: %s", esp_err_to_name(close_err));
                 } else {
+                    esp_err_t stop_err = bsp_audio_stop_channels();
+                    if (stop_err != ESP_OK) {
+                        ESP_LOGW(TAG, "Failed to quiesce shared I2S channels: %s",
+                                 esp_err_to_name(stop_err));
+                    }
                     s_mic_paused = true;
                     ESP_LOGI(TAG, "Microphone paused for speaker playback");
                 }

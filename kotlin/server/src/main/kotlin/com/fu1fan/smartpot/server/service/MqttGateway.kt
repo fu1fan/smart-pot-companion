@@ -161,7 +161,12 @@ class MqttGateway(
                 val event = appJson.decodeFromString<DeviceEvent>(payload)
                 require(event.deviceId == deviceId)
                 store.setOnline(deviceId, true, observedAt)
-                if (event.type in setOf(DeviceEventType.PHYSICAL_TOUCH, DeviceEventType.REMOTE_TOUCH)) {
+                if (event.type in setOf(
+                        DeviceEventType.PHYSICAL_TOUCH,
+                        DeviceEventType.PHYSICAL_TAP,
+                        DeviceEventType.REMOTE_TOUCH,
+                    )
+                ) {
                     affinityService.award(pot.id, "device-event:${event.eventId}", 1, Instant.parse(event.occurredAt))
                 }
                 if (event.isPomodoroCompleted()) {

@@ -286,6 +286,22 @@ err:
     return ret;
 }
 
+esp_err_t bsp_audio_stop_channels(void)
+{
+    /* esp_codec_dev_close() already stops RX. In duplex record mode TX stays
+     * enabled as the shared clock master, although the codec component's
+     * bookkeeping says it is closed. Stop that physical channel before the
+     * speaker changes it from 16 kHz to 24 kHz. */
+    if (i2s_tx_chan != NULL) {
+        esp_err_t err = i2s_channel_disable(i2s_tx_chan);
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "Failed to stop I2S TX before mode switch: %s", esp_err_to_name(err));
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
 esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
 {
     if (i2s_data_if == NULL)

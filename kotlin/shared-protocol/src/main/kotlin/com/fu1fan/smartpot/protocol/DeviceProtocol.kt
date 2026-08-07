@@ -158,7 +158,11 @@ data class DeviceCommandAck(
 @Serializable
 enum class DeviceEventType {
     PHYSICAL_TOUCH,
+    PHYSICAL_TAP,
     REMOTE_TOUCH,
+    SHAKE,
+    FALLEN,
+    FALL_RECOVERED,
     MOVE_STARTED,
     MOVE_STOPPED,
     TILT_LIGHT,

@@ -8,6 +8,7 @@ import com.fu1fan.smartpot.BuildConfig
 import com.fu1fan.smartpot.data.SmartPotApi
 import com.fu1fan.smartpot.data.mobileJson
 import com.fu1fan.smartpot.protocol.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -107,6 +108,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<SmartPotUiState> = mutableState.asStateFlow()
     private var realtimeJob: Job? = null
     private var pomodoroTimerJob: Job? = null
+    private var diarySpeechJob: Job? = null
     private var weatherLocation: Pair<Double, Double>? = null
 
     init {
@@ -210,7 +212,9 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
         realtimeJob = viewModelScope.launch {
             launch {
                 while (isActive) {
-                    delay(5_000)
+                    // Realtime events update the visible state directly. Keep a slow HTTP
+                    // snapshot only as a safety net for a missed event or reconnect gap.
+                    delay(30_000)
                     refreshSnapshot(id)
                 }
             }
@@ -224,7 +228,75 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                 runCatching {
                     api.realtime(id).collect { event ->
                         when (event.type) {
-                            RealtimeEventType.FOCUS, RealtimeEventType.DIARY, RealtimeEventType.SCHEDULE, RealtimeEventType.MEMORY -> refreshAll(id)
+                            RealtimeEventType.SNAPSHOT -> {
+                                val snapshot = mobileJson.decodeFromJsonElement<PotSnapshot>(event.payload)
+                                mutableState.update { it.copy(snapshot = snapshot, error = null) }
+                            }
+                            RealtimeEventType.TELEMETRY -> {
+                                val telemetry = mobileJson.decodeFromJsonElement<DeviceTelemetry>(event.payload)
+                                mutableState.update { current ->
+                                    val snapshot = current.snapshot
+                                    current.copy(
+                                        snapshot = snapshot?.copy(
+                                            telemetry = telemetry,
+                                            evaluated = PlantRules.evaluate(telemetry, snapshot.pot.species.thresholds),
+                                        ),
+                                        error = null,
+                                    )
+                                }
+                            }
+                            RealtimeEventType.ONLINE -> {
+                                val online = mobileJson.decodeFromJsonElement<DeviceOnlineState>(event.payload)
+                                mutableState.update { current ->
+                                    current.copy(
+                                        snapshot = current.snapshot?.copy(
+                                            online = online.online,
+                                            lastSeenAt = online.changedAt,
+                                        ),
+                                        error = null,
+                                    )
+                                }
+                            }
+                            RealtimeEventType.ALERT -> {
+                                val alert = mobileJson.decodeFromJsonElement<PlantAlert>(event.payload)
+                                mutableState.update { current ->
+                                    val activeAlerts = current.snapshot?.activeAlerts.orEmpty()
+                                    val updatedAlerts = if (alert.status == AlertStatus.ACTIVE) {
+                                        (activeAlerts.filterNot { it.id == alert.id } + alert)
+                                    } else {
+                                        activeAlerts.filterNot { it.id == alert.id }
+                                    }
+                                    current.copy(
+                                        snapshot = current.snapshot?.copy(activeAlerts = updatedAlerts),
+                                        error = null,
+                                    )
+                                }
+                            }
+                            RealtimeEventType.AFFINITY -> {
+                                val affinity = mobileJson.decodeFromJsonElement<AffinityState>(event.payload)
+                                mutableState.update { current ->
+                                    current.copy(
+                                        snapshot = current.snapshot?.copy(affinity = affinity),
+                                        error = null,
+                                    )
+                                }
+                            }
+                            RealtimeEventType.FOCUS -> refreshFocusState(id)
+                            RealtimeEventType.DIARY -> refreshCareAndDiaries(id)
+                            RealtimeEventType.SCHEDULE -> {
+                                val schedule = mobileJson.decodeFromJsonElement<ScheduleSyncState>(event.payload)
+                                mutableState.update { it.copy(schedule = schedule, error = null) }
+                            }
+                            RealtimeEventType.MEMORY -> {
+                                val memory = mobileJson.decodeFromJsonElement<UserMemory>(event.payload)
+                                mutableState.update { current ->
+                                    current.copy(
+                                        memories = (current.memories.filterNot { it.id == memory.id } + memory)
+                                            .sortedByDescending(UserMemory::createdAt),
+                                        error = null,
+                                    )
+                                }
+                            }
                             RealtimeEventType.CHAT -> refreshChat(id)
                             RealtimeEventType.COMMAND_ACK -> {
                                 val ack = mobileJson.decodeFromJsonElement<DeviceCommandAck>(event.payload)
@@ -237,7 +309,6 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                             }
-                            else -> refreshSnapshot(id)
                         }
                     }
                 }
@@ -251,6 +322,28 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun refreshTelemetry(id: String) = runCatching { api.telemetry(id) }
         .onSuccess { value -> mutableState.update { it.copy(telemetry = value, error = null) } }
+
+    private suspend fun refreshFocusState(id: String) = runCatching {
+        val focusDaily = api.focusDaily(id)
+        val overview = careOverview(id)
+        mutableState.update { it.copy(focusDaily = focusDaily, careOverview = overview, error = null) }
+    }.onFailure { fail(it) }
+
+    private suspend fun refreshCareAndDiaries(id: String) = runCatching {
+        val careLogs = api.careLogs(id)
+        val reminders = api.reminders(id)
+        val overview = careOverview(id)
+        val diaries = api.diaries(id)
+        mutableState.update {
+            it.copy(
+                careLogs = careLogs,
+                reminders = reminders,
+                careOverview = overview,
+                diaries = diaries,
+                error = null,
+            )
+        }
+    }.onFailure { fail(it) }
 
     fun addCare(type: CareType, note: String, imageDataUrl: String?) {
         val potId = mutableState.value.selectedPotId ?: return
@@ -510,13 +603,35 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     fun speakDiary(diary: PlantDiary) {
         val id = mutableState.value.selectedPotId ?: return
         val chunks = splitTextForTts("${diary.title}。${diary.content}")
-        launchAction {
-            chunks.forEachIndexed { index, chunk ->
-                val result = api.control(id, DeviceControlRequest(type = DeviceCommandType.SPEAK_TEXT, text = chunk))
-                mutableState.update { it.copy(lastCommand = result) }
-                check(result.acknowledged && result.ack?.status != CommandAckStatus.FAILED) {
-                    "ESP 未能接收日记第 ${index + 1}/${chunks.size} 段，请稍后重试"
+        diarySpeechJob?.cancel()
+        diarySpeechJob = viewModelScope.launch {
+            try {
+                chunks.forEachIndexed { index, chunk ->
+                    val result = api.control(id, DeviceControlRequest(type = DeviceCommandType.SPEAK_TEXT, text = chunk))
+                    mutableState.update { it.copy(lastCommand = result) }
+                    check(result.acknowledged && result.ack?.status != CommandAckStatus.FAILED) {
+                        "ESP 未能接收日记第 ${index + 1}/${chunks.size} 段，请稍后重试"
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                fail(error)
+            }
+        }
+    }
+
+    fun stopDiarySpeech() {
+        diarySpeechJob?.cancel()
+        diarySpeechJob = null
+        val id = mutableState.value.selectedPotId ?: return
+        launchAction {
+            /* Empty SPEAK_TEXT is understood by the ESP as stop, while staying
+             * compatible with the currently deployed server protocol. */
+            val result = api.control(id, DeviceControlRequest(type = DeviceCommandType.SPEAK_TEXT, text = ""))
+            mutableState.update { it.copy(lastCommand = result) }
+            check(result.acknowledged && result.ack?.status != CommandAckStatus.FAILED) {
+                "ESP 未能停止朗读，请稍后重试"
             }
         }
     }
@@ -737,6 +852,7 @@ class SmartPotViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        diarySpeechJob?.cancel()
         pomodoroTimerJob?.cancel()
         api.close()
     }

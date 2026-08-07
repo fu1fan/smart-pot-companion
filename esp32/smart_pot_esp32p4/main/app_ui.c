@@ -138,7 +138,6 @@ static lv_timer_t *s_schedule_blink_restore_timer;
 static lv_timer_t *s_pomodoro_timer;
 static lv_timer_t *s_schedule_cleanup_timer;
 static lv_timer_t *s_projection_finish_timer;
-static lv_timer_t *s_message_finish_timer;
 static int32_t s_pomodoro_remaining_sec;
 static pomodoro_phase_t s_pomodoro_phase = POMODORO_IDLE;
 static char s_schedule_items[SCHEDULE_MAX_ITEMS][SCHEDULE_ITEM_LEN];
@@ -3003,42 +3002,15 @@ void app_ui_show_emoji(const char *emoji_id, uint32_t duration_ms)
 }
 
 #define MESSAGE_POPUP_H 120
-#define MESSAGE_POPUP_SLIDE_MS 300
 
-static void message_popup_y_anim_cb(void *obj, int32_t value)
+static void message_popup_hide_cb(lv_timer_t *timer)
 {
-    lv_obj_set_y((lv_obj_t *)obj, value);
-}
-
-static void message_popup_finish_cb(lv_timer_t *timer)
-{
-    s_message_finish_timer = NULL;
-    lv_timer_delete(timer);
+    (void)timer;
+    s_message_hold_timer = NULL;
     if (s_message_popup != NULL) {
         lv_obj_add_flag(s_message_popup, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_y(s_message_popup, -MESSAGE_POPUP_H);
     }
-}
-
-static void message_popup_hide_cb(lv_timer_t *timer)
-{
-    s_message_hold_timer = NULL;
-    lv_timer_delete(timer);
-    if (s_message_popup == NULL) {
-        return;
-    }
-
-    lv_anim_t slide;
-    lv_anim_init(&slide);
-    lv_anim_set_var(&slide, s_message_popup);
-    lv_anim_set_exec_cb(&slide, message_popup_y_anim_cb);
-    lv_anim_set_values(&slide, lv_obj_get_y(s_message_popup), -MESSAGE_POPUP_H);
-    lv_anim_set_duration(&slide, MESSAGE_POPUP_SLIDE_MS);
-    lv_anim_start(&slide);
-
-    s_message_finish_timer = lv_timer_create(message_popup_finish_cb,
-                                             MESSAGE_POPUP_SLIDE_MS + 20, NULL);
-    lv_timer_set_repeat_count(s_message_finish_timer, 1);
 }
 
 static void ensure_message_popup_unlocked(void)
@@ -3080,24 +3052,10 @@ static void show_message_popup_unlocked(const char *text, uint32_t duration_ms)
         lv_timer_delete(s_message_hold_timer);
         s_message_hold_timer = NULL;
     }
-    if (s_message_finish_timer != NULL) {
-        lv_timer_delete(s_message_finish_timer);
-        s_message_finish_timer = NULL;
-    }
-    lv_anim_delete(s_message_popup, message_popup_y_anim_cb);
     lv_label_set_text(s_message_popup_label, text);
     lv_obj_clear_flag(s_message_popup, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_y(s_message_popup, -MESSAGE_POPUP_H);
+    lv_obj_set_y(s_message_popup, 12);
     lv_obj_move_foreground(s_message_popup);
-
-    lv_anim_t slide;
-    lv_anim_init(&slide);
-    lv_anim_set_var(&slide, s_message_popup);
-    lv_anim_set_exec_cb(&slide, message_popup_y_anim_cb);
-    lv_anim_set_values(&slide, -MESSAGE_POPUP_H, 12);
-    lv_anim_set_duration(&slide, 240);
-    lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
-    lv_anim_start(&slide);
 
     s_message_hold_timer = lv_timer_create(message_popup_hide_cb,
                                            duration_ms > 0 ? duration_ms : 2000, NULL);

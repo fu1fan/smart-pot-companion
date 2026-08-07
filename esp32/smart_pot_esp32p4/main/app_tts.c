@@ -89,12 +89,12 @@ static const char *TAG = "app_tts";
 
 typedef enum {
     TTS_CMD_ONE_SHOT = 0,
-    TTS_CMD_LOCAL_WAV,
     TTS_CMD_PRECONNECT,
     TTS_CMD_STREAM_BEGIN,
     TTS_CMD_STREAM_TEXT,
     TTS_CMD_STREAM_FINISH,
     TTS_CMD_STREAM_ABORT,
+    TTS_CMD_STOP,
 } tts_command_t;
 
 typedef struct {
@@ -139,6 +139,8 @@ static volatile bool s_tts_busy;
 static volatile bool s_stream_requested;
 static volatile bool s_preconnect_requested;
 static volatile bool s_chime_busy;
+static volatile bool s_stop_requested;
+static tts_runtime_t *s_active_runtime;
 static esp_codec_dev_handle_t s_chime_spk;
 
 static const int16_t s_sine_lut[32] = {
@@ -362,6 +364,11 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 static bool send_event(tts_runtime_t *rt, app_volc_event_t event,
                        const char *session_id, const char *json)
 {
+    if (rt->client == NULL || !esp_websocket_client_is_connected(rt->client)) {
+        snprintf(rt->error, sizeof(rt->error),
+                 "TTS WebSocket disconnected before event %d", event);
+        return false;
+    }
     size_t frame_len = 0;
     const char *payload = json != NULL ? json : "{}";
     uint8_t *frame = app_volc_build_event_frame(event, session_id, payload,
@@ -370,13 +377,19 @@ static bool send_event(tts_runtime_t *rt, app_volc_event_t event,
     int sent = esp_websocket_client_send_bin(rt->client, (const char *)frame, frame_len,
                                               pdMS_TO_TICKS(3000));
     free(frame);
+    if (sent != (int)frame_len) {
+        snprintf(rt->error, sizeof(rt->error),
+                 "TTS event %d send failed: sent=%d expected=%u",
+                 event, sent, (unsigned int)frame_len);
+    }
     return sent == (int)frame_len;
 }
 
 static void close_connection(tts_runtime_t *rt)
 {
     if (rt->client != NULL) {
-        if ((xEventGroupGetBits(rt->events) & TTS_EVENT_CONNECTION_STARTED) != 0) {
+        if (esp_websocket_client_is_connected(rt->client) &&
+            (xEventGroupGetBits(rt->events) & TTS_EVENT_CONNECTION_STARTED) != 0) {
             (void)send_event(rt, APP_VOLC_EVENT_FINISH_CONNECTION, NULL, "{}");
         }
         esp_websocket_client_stop(rt->client);
@@ -392,6 +405,7 @@ static bool ensure_connection(tts_runtime_t *rt)
 {
     EventBits_t bits = xEventGroupGetBits(rt->events);
     if (rt->client != NULL &&
+        esp_websocket_client_is_connected(rt->client) &&
         (bits & (TTS_EVENT_WS_CONNECTED | TTS_EVENT_CONNECTION_STARTED)) ==
         (TTS_EVENT_WS_CONNECTED | TTS_EVENT_CONNECTION_STARTED)) {
         return true;
@@ -442,7 +456,8 @@ static bool ensure_connection(tts_runtime_t *rt)
 static void playback_task(void *arg)
 {
     tts_runtime_t *rt = (tts_runtime_t *)arg;
-    while (!rt->session_done && !rt->overflow && rt->pcm_len < TTS_PREBUFFER_BYTES) {
+    while (!rt->session_done && !rt->overflow && !s_stop_requested &&
+           rt->pcm_len < TTS_PREBUFFER_BYTES) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     if (rt->overflow || (rt->session_done && !rt->session_ok)) goto done;
@@ -473,7 +488,7 @@ static void playback_task(void *arg)
     app_ui_set_voice_status("TTS: speaking");
     ESP_LOGI(TAG, "Volc TTS playback starting buffered=%u", (unsigned int)rt->pcm_len);
     size_t offset = 0;
-    while (!rt->overflow) {
+    while (!rt->overflow && !s_stop_requested) {
         size_t available = rt->pcm_len;
         if (offset < available) {
             size_t chunk = available - offset;
@@ -532,32 +547,47 @@ static char *build_start_session_json(const tts_msg_t *msg, const char *section_
 
 static bool start_session(tts_runtime_t *rt, const tts_msg_t *msg)
 {
-    if (!ensure_connection(rt)) return false;
+    if (s_stop_requested) return false;
     if (!allocate_pcm_buffer(rt)) return false;
-    xEventGroupClearBits(rt->events, TTS_EVENT_SESSION_STARTED |
-                                    TTS_EVENT_SESSION_FINISHED | TTS_EVENT_FAILED);
-    make_uuid(rt->session_id);
-    make_uuid(rt->section_id);
-    rt->pcm_len = 0;
-    rt->session_done = false;
-    rt->session_ok = false;
-    rt->overflow = false;
-    rt->playback_ok = false;
-    rt->playback_started = false;
-    rt->tasks_sent = 0;
-    rt->tasks_finished = 0;
-    rt->first_audio_us = 0;
-    rt->session_started_us = 0;
-    rt->volume = msg->volume;
-    rt->error[0] = '\0';
-    char *json = build_start_session_json(msg, rt->section_id);
-    bool sent = json != NULL && send_event(rt, APP_VOLC_EVENT_START_SESSION, rt->session_id, json);
-    free(json);
-    if (!sent) return false;
-    EventBits_t bits = xEventGroupWaitBits(rt->events, TTS_EVENT_SESSION_STARTED | TTS_EVENT_FAILED,
-                                           pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(TTS_CONNECT_TIMEOUT_MS));
-    if ((bits & TTS_EVENT_SESSION_STARTED) == 0) return false;
+    bool started = false;
+    for (int attempt = 1; attempt <= 2 && !started && !s_stop_requested; attempt++) {
+        if (!ensure_connection(rt)) {
+            if (rt->error[0] == '\0') {
+                snprintf(rt->error, sizeof(rt->error), "TTS connection attempt %d failed", attempt);
+            }
+            continue;
+        }
+        xEventGroupClearBits(rt->events, TTS_EVENT_SESSION_STARTED |
+                                        TTS_EVENT_SESSION_FINISHED | TTS_EVENT_FAILED);
+        make_uuid(rt->session_id);
+        make_uuid(rt->section_id);
+        rt->pcm_len = 0;
+        rt->session_done = false;
+        rt->session_ok = false;
+        rt->overflow = false;
+        rt->playback_ok = false;
+        rt->playback_started = false;
+        rt->tasks_sent = 0;
+        rt->tasks_finished = 0;
+        rt->first_audio_us = 0;
+        rt->session_started_us = 0;
+        rt->volume = msg->volume;
+        rt->error[0] = '\0';
+        char *json = build_start_session_json(msg, rt->section_id);
+        bool sent = json != NULL &&
+                    send_event(rt, APP_VOLC_EVENT_START_SESSION, rt->session_id, json);
+        free(json);
+        EventBits_t bits = sent ?
+            xEventGroupWaitBits(rt->events, TTS_EVENT_SESSION_STARTED | TTS_EVENT_FAILED,
+                                pdFALSE, pdFALSE, pdMS_TO_TICKS(TTS_CONNECT_TIMEOUT_MS)) : 0;
+        started = (bits & TTS_EVENT_SESSION_STARTED) != 0;
+        if (!started) {
+            ESP_LOGW(TAG, "Volc TTS session start attempt %d/2 failed: %s",
+                     attempt, rt->error);
+            close_connection(rt);
+        }
+    }
+    if (!started) return false;
     rt->owner = xTaskGetCurrentTaskHandle();
     if (xTaskCreate(playback_task, "smart_pot_tts_play", 4096, rt, 5, &rt->playback_task) != pdPASS) {
         rt->playback_task = NULL;
@@ -621,123 +651,15 @@ static void cancel_session(tts_runtime_t *rt)
 static bool play_one_shot(tts_runtime_t *rt, const tts_msg_t *msg)
 {
     if (!start_session(rt, msg)) return false;
+    if (s_stop_requested) {
+        cancel_session(rt);
+        return false;
+    }
     if (!send_text(rt, msg->text)) {
         cancel_session(rt);
         return false;
     }
     return finish_session(rt);
-}
-
-static uint16_t read_le16(const uint8_t *value)
-{
-    return (uint16_t)value[0] | ((uint16_t)value[1] << 8);
-}
-
-static uint32_t read_le32(const uint8_t *value)
-{
-    return (uint32_t)value[0] |
-           ((uint32_t)value[1] << 8) |
-           ((uint32_t)value[2] << 16) |
-           ((uint32_t)value[3] << 24);
-}
-
-static bool play_local_wav_file(const char *path, uint8_t volume)
-{
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        ESP_LOGW(TAG, "Offline WAV missing: %s", path);
-        return false;
-    }
-
-    uint8_t header[12];
-    if (fread(header, 1, sizeof(header), file) != sizeof(header) ||
-        memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
-        ESP_LOGW(TAG, "Invalid offline WAV header: %s", path);
-        fclose(file);
-        return false;
-    }
-
-    uint16_t format = 0;
-    uint16_t channels = 0;
-    uint16_t bits_per_sample = 0;
-    uint32_t sample_rate = 0;
-    uint32_t data_size = 0;
-    bool has_format = false;
-    bool has_data = false;
-    uint8_t chunk_header[8];
-    while (fread(chunk_header, 1, sizeof(chunk_header), file) == sizeof(chunk_header)) {
-        uint32_t chunk_size = read_le32(chunk_header + 4);
-        if (memcmp(chunk_header, "fmt ", 4) == 0 && chunk_size >= 16) {
-            uint8_t format_data[16];
-            if (fread(format_data, 1, sizeof(format_data), file) != sizeof(format_data)) break;
-            format = read_le16(format_data);
-            channels = read_le16(format_data + 2);
-            sample_rate = read_le32(format_data + 4);
-            bits_per_sample = read_le16(format_data + 14);
-            if (chunk_size > sizeof(format_data)) {
-                fseek(file, (long)(chunk_size - sizeof(format_data)), SEEK_CUR);
-            }
-            has_format = true;
-        } else if (memcmp(chunk_header, "data", 4) == 0) {
-            data_size = chunk_size;
-            has_data = true;
-            break;
-        } else {
-            fseek(file, (long)chunk_size, SEEK_CUR);
-        }
-        if ((chunk_size & 1U) != 0) fseek(file, 1, SEEK_CUR);
-    }
-
-    if (!has_format || !has_data || format != 1 || channels != 1 ||
-        bits_per_sample != 16 || sample_rate != CONFIG_SMART_POT_VOLC_TTS_SAMPLE_RATE) {
-        ESP_LOGW(TAG, "Unsupported offline WAV format: %s rate=%lu ch=%u bits=%u", path,
-                 (unsigned long)sample_rate, channels, bits_per_sample);
-        fclose(file);
-        return false;
-    }
-
-    if (!app_voice_pause_microphone(10000)) {
-        ESP_LOGW(TAG, "Offline WAV microphone pause timeout");
-        fclose(file);
-        return false;
-    }
-
-    bool ok = false;
-    if (app_voice_audio_lock(pdMS_TO_TICKS(3000))) {
-        esp_codec_dev_handle_t speaker = bsp_audio_codec_speaker_init();
-        if (speaker != NULL) {
-            esp_codec_dev_sample_info_t fs = {
-                .sample_rate = (int)sample_rate,
-                .channel = 1,
-                .bits_per_sample = 16,
-            };
-            if (esp_codec_dev_open(speaker, &fs) == ESP_CODEC_DEV_OK) {
-                esp_codec_dev_set_out_vol(speaker, volume);
-                app_ui_set_voice_status("TTS: local");
-                uint8_t buffer[TTS_PLAY_CHUNK];
-                uint32_t remaining = data_size;
-                ok = true;
-                while (remaining > 0) {
-                    size_t requested = remaining < sizeof(buffer) ? remaining : sizeof(buffer);
-                    size_t count = fread(buffer, 1, requested, file);
-                    count &= ~((size_t)1);
-                    if (count == 0 || esp_codec_dev_write(speaker, buffer, count) != ESP_CODEC_DEV_OK) {
-                        ok = false;
-                        break;
-                    }
-                    remaining -= (uint32_t)count;
-                }
-                esp_codec_dev_close(speaker);
-            }
-        }
-        app_voice_audio_unlock();
-    }
-    fclose(file);
-    if (!app_voice_resume_microphone(2500)) {
-        ESP_LOGW(TAG, "Timed out resuming microphone after offline WAV");
-    }
-    ESP_LOGI(TAG, "Offline WAV playback %s: %s", ok ? "complete" : "failed", path);
-    return ok;
 }
 
 static void tts_task(void *arg)
@@ -750,6 +672,7 @@ static void tts_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+    s_active_runtime = &rt;
 
     bool streaming = false;
     tts_msg_t msg;
@@ -770,12 +693,6 @@ static void tts_task(void *arg)
                 app_voice_conversation_complete();
             }
             release_pcm_buffer(&rt);
-            s_tts_busy = false;
-        } else if (msg.command == TTS_CMD_LOCAL_WAV) {
-            s_tts_busy = true;
-            bool ok = play_local_wav_file(msg.text, msg.volume);
-            if (!ok) app_ui_set_voice_status("TTS: local failed");
-            if (msg.complete_conversation) app_voice_conversation_complete();
             s_tts_busy = false;
         } else if (msg.command == TTS_CMD_STREAM_BEGIN) {
             if (streaming) {
@@ -816,6 +733,19 @@ static void tts_task(void *arg)
             streaming = false;
             s_stream_requested = false;
             s_tts_busy = false;
+        } else if (msg.command == TTS_CMD_STOP) {
+            if (streaming || rt.playback_task != NULL) {
+                cancel_session(&rt);
+            }
+            close_connection(&rt);
+            release_pcm_buffer(&rt);
+            streaming = false;
+            s_stream_requested = false;
+            s_preconnect_requested = false;
+            s_tts_busy = false;
+            s_stop_requested = false;
+            app_ui_set_voice_status("TTS: stopped");
+            ESP_LOGI(TAG, "Volc TTS playback and pending queue stopped");
         }
     }
 }
@@ -973,6 +903,29 @@ void app_tts_stream_abort(void)
     (void)queue_message(&msg, pdMS_TO_TICKS(1000));
 }
 
+bool app_tts_stop(void)
+{
+    if (s_tts_queue == NULL) return false;
+
+    s_stop_requested = true;
+    tts_runtime_t *rt = s_active_runtime;
+    if (rt != NULL) {
+        rt->session_ok = false;
+        rt->session_done = true;
+        if (rt->events != NULL) {
+            xEventGroupSetBits(rt->events, TTS_EVENT_FAILED);
+        }
+    }
+
+    xQueueReset(s_tts_queue);
+    tts_msg_t msg = { .command = TTS_CMD_STOP };
+    if (xQueueSendToFront(s_tts_queue, &msg, pdMS_TO_TICKS(200)) != pdTRUE) {
+        s_stop_requested = false;
+        return false;
+    }
+    return true;
+}
+
 bool app_tts_speak_text(const char *text)
 {
     return queue_one_shot(text, true, TTS_VOLUME_CONVERSATION, 5, 1,
@@ -1025,24 +978,6 @@ bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone)
     }
     return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION,
                           rate, pitch, style, true);
-}
-
-bool app_tts_play_local_wav(const char *path)
-{
-    if (!CONFIG_SMART_POT_TTS_ENABLE || s_tts_queue == NULL || path == NULL || path[0] == '\0') {
-        return false;
-    }
-    if (s_tts_busy || uxQueueMessagesWaiting(s_tts_queue) > 0) {
-        ESP_LOGI(TAG, "Dropping low-priority offline WAV while TTS is busy");
-        return false;
-    }
-    tts_msg_t msg = {
-        .command = TTS_CMD_LOCAL_WAV,
-        .complete_conversation = true,
-        .volume = apply_user_volume(TTS_VOLUME_AUTOMATION),
-    };
-    utf8_strlcpy(msg.text, path, sizeof(msg.text));
-    return queue_message(&msg, 0);
 }
 
 bool app_tts_speak_stream_segment(const char *text)

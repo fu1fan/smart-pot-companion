@@ -134,6 +134,17 @@ i2c_master_bus_handle_t bsp_i2c_get_handle(void);
 esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config);
 
 /**
+ * @brief Stop the shared duplex I2S clock channel before switching sample rates
+ *
+ * The microphone uses the TX channel as the full-duplex clock master. Some
+ * esp_codec_dev versions leave that otherwise-unused TX channel enabled after
+ * recording stops, which prevents the speaker path from changing from 16 kHz
+ * capture to 24 kHz playback. Calling this after closing the active codec makes
+ * the following esp_codec_dev_open() reconfigure the playback path safely.
+ */
+esp_err_t bsp_audio_stop_channels(void);
+
+/**
  * @brief Initialize speaker codec device
  *
  * @return Pointer to codec device handle or NULL when error occurred

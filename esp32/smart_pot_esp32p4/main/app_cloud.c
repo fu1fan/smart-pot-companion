@@ -510,7 +510,12 @@ static void handle_command(const char *json)
     } else if (strcmp(type->valuestring, "SPEAK_TEXT") == 0) {
         cJSON *text = cJSON_GetObjectItem(payload, "text");
         ok = cJSON_IsString(text);
-        if (ok) ok = app_tts_speak_once(text->valuestring);
+        if (ok) {
+            /* Empty SPEAK_TEXT is a backward-compatible stop command, so the
+             * installed server does not need a protocol rollout first. */
+            ok = text->valuestring[0] == '\0' ?
+                 app_tts_stop() : app_tts_speak_once(text->valuestring);
+        }
     } else if (strcmp(type->valuestring, "RESTART") == 0) {
         publish_ack(id->valuestring, "COMPLETED", "restarting");
         cJSON_Delete(root);
