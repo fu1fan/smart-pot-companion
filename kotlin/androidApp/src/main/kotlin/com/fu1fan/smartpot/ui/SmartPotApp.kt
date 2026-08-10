@@ -2257,8 +2257,6 @@ private fun CareAffinityHeader(
                         },
                         fontSize = SmartPotTypeScale.labelSmall,
                         color = Color(0xFF5C513D),
-                        maxLines = 1,
-                        softWrap = false,
                     )
                     AffinityImpactContent(state, metrics, expanded, onToggle)
                 }
