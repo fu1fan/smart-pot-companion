@@ -2251,9 +2251,9 @@ private fun CareAffinityHeader(
                     PixelProgressBar(levelProgress, Modifier.fillMaxWidth())
                     Text(
                         if (level >= 30) {
-                            "好感度已达到最高等级（最高等级30级）"
+                            "好感度已达到最高等级（最高等级为30级）"
                         } else {
-                            "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度（最高等级30级）"
+                            "距离下一级还需 ${affinityPointsToNextLevel(affinity.score)} 点好感度（最高等级为30级）"
                         },
                         fontSize = SmartPotTypeScale.labelSmall,
                         color = Color(0xFF5C513D),
