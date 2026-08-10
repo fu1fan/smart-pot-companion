@@ -49,10 +49,10 @@
 #define TTS_TEXT_MAX 256
 #define TTS_STYLE_MAX 160
 #define TTS_PCM_CAPACITY (1024 * 1024)
-#define TTS_PREBUFFER_BYTES (24 * 1024)
+#define TTS_PREBUFFER_BYTES (192 * 1024)
 #define TTS_PLAY_CHUNK 2048
 #define TTS_CONNECT_TIMEOUT_MS 8000
-#define TTS_SESSION_TIMEOUT_MS 15000
+#define TTS_SESSION_TIMEOUT_MS 45000
 #define TTS_ONE_SHOT_MAX_RETRIES 2
 #define TTS_ONE_SHOT_RETRY_DELAY_MS 1500
 #define TTS_VOLUME_CONVERSATION 100
@@ -104,6 +104,7 @@ typedef struct {
     char text[TTS_TEXT_MAX];
     char style[TTS_STYLE_MAX];
     bool complete_conversation;
+    bool low_priority;
     uint8_t volume;
     uint8_t retry_count;
     int16_t speech_rate;
@@ -126,6 +127,7 @@ typedef struct {
     volatile bool overflow;
     volatile bool playback_ok;
     volatile bool playback_started;
+    volatile bool preempted;
     volatile uint32_t tasks_sent;
     volatile uint32_t tasks_finished;
     uint8_t volume;
@@ -143,6 +145,8 @@ static volatile bool s_stream_requested;
 static volatile bool s_preconnect_requested;
 static volatile bool s_chime_busy;
 static volatile bool s_stop_requested;
+static volatile bool s_conversation_priority_active;
+static volatile bool s_active_low_priority;
 static tts_runtime_t *s_active_runtime;
 static esp_codec_dev_handle_t s_chime_spk;
 
@@ -459,11 +463,11 @@ static bool ensure_connection(tts_runtime_t *rt)
 static void playback_task(void *arg)
 {
     tts_runtime_t *rt = (tts_runtime_t *)arg;
-    while (!rt->session_done && !rt->overflow && !s_stop_requested &&
+    while (!rt->session_done && !rt->overflow && !rt->preempted && !s_stop_requested &&
            rt->pcm_len < TTS_PREBUFFER_BYTES) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    if (rt->overflow || (rt->session_done && !rt->session_ok)) goto done;
+    if (rt->preempted || rt->overflow || (rt->session_done && !rt->session_ok)) goto done;
     if (!app_voice_pause_microphone(10000)) {
         snprintf(rt->error, sizeof(rt->error), "microphone pause timeout");
         goto done;
@@ -491,7 +495,7 @@ static void playback_task(void *arg)
     app_ui_set_voice_status("TTS: speaking");
     ESP_LOGI(TAG, "Volc TTS playback starting buffered=%u", (unsigned int)rt->pcm_len);
     size_t offset = 0;
-    while (!rt->overflow && !s_stop_requested) {
+    while (!rt->overflow && !rt->preempted && !s_stop_requested) {
         size_t available = rt->pcm_len;
         if (offset < available) {
             size_t chunk = available - offset;
@@ -550,18 +554,21 @@ static char *build_start_session_json(const tts_msg_t *msg, const char *section_
 
 static bool start_session(tts_runtime_t *rt, const tts_msg_t *msg)
 {
-    if (s_stop_requested) return false;
+    if (s_stop_requested || rt->preempted) return false;
     if (!allocate_pcm_buffer(rt)) return false;
     bool started = false;
-    for (int attempt = 1; attempt <= 2 && !started && !s_stop_requested; attempt++) {
+    for (int attempt = 1; attempt <= 2 && !started && !s_stop_requested &&
+         !rt->preempted; attempt++) {
         if (!ensure_connection(rt)) {
             if (rt->error[0] == '\0') {
                 snprintf(rt->error, sizeof(rt->error), "TTS connection attempt %d failed", attempt);
             }
             continue;
         }
+        if (rt->preempted) return false;
         xEventGroupClearBits(rt->events, TTS_EVENT_SESSION_STARTED |
                                         TTS_EVENT_SESSION_FINISHED | TTS_EVENT_FAILED);
+        if (rt->preempted) return false;
         make_uuid(rt->session_id);
         make_uuid(rt->section_id);
         rt->pcm_len = 0;
@@ -630,6 +637,10 @@ static bool finish_session(tts_runtime_t *rt)
                                            pdFALSE, pdFALSE,
                                            pdMS_TO_TICKS(TTS_SESSION_TIMEOUT_MS));
     if ((bits & TTS_EVENT_SESSION_FINISHED) == 0) {
+        if (rt->error[0] == '\0') {
+            snprintf(rt->error, sizeof(rt->error), "TTS session timeout after %u ms",
+                     (unsigned int)TTS_SESSION_TIMEOUT_MS);
+        }
         rt->session_done = true;
         rt->session_ok = false;
     }
@@ -685,14 +696,23 @@ static void tts_task(void *arg)
             s_preconnect_requested = false;
             ESP_LOGI(TAG, "Volc TTS connection prewarm %s", ok ? "ready" : "failed");
         } else if (msg.command == TTS_CMD_ONE_SHOT) {
+            if (msg.low_priority && s_conversation_priority_active) {
+                ESP_LOGI(TAG, "Dropping queued background TTS during conversation");
+                continue;
+            }
             s_tts_busy = true;
+            s_active_low_priority = msg.low_priority;
+            rt.preempted = false;
             bool ok = play_one_shot(&rt, &msg);
             bool retry_queued = false;
             if (!ok) {
-                ESP_LOGW(TAG, "Volc TTS one-shot failed: %s", rt.error);
+                ESP_LOGW(TAG, "Volc TTS one-shot failed%s: %s",
+                         rt.preempted ? " (preempted)" : "", rt.error);
                 close_connection(&rt);
                 release_pcm_buffer(&rt);
-                if (!s_stop_requested && msg.retry_count < TTS_ONE_SHOT_MAX_RETRIES) {
+                if (!s_stop_requested && !rt.preempted && !msg.low_priority &&
+                    !rt.playback_started &&
+                    msg.retry_count < TTS_ONE_SHOT_MAX_RETRIES) {
                     msg.retry_count++;
                     ESP_LOGW(TAG, "Retrying Volc TTS one-shot attempt=%u/%u after %u ms",
                              (unsigned int)msg.retry_count,
@@ -709,6 +729,7 @@ static void tts_task(void *arg)
                 }
             }
             if (retry_queued) {
+                s_active_low_priority = false;
                 s_tts_busy = false;
                 continue;
             }
@@ -716,6 +737,7 @@ static void tts_task(void *arg)
                 app_voice_conversation_complete();
             }
             release_pcm_buffer(&rt);
+            s_active_low_priority = false;
             s_tts_busy = false;
         } else if (msg.command == TTS_CMD_STREAM_BEGIN) {
             if (streaming) {
@@ -838,13 +860,15 @@ static bool queue_one_shot(const char *text, bool complete,
 {
     if (s_tts_queue == NULL || CONFIG_SMART_POT_VOLC_API_KEY[0] == '\0' ||
         text == NULL || text[0] == '\0') return false;
-    if (low_priority && (s_tts_busy || uxQueueMessagesWaiting(s_tts_queue) > 0)) {
+    if (low_priority && (s_conversation_priority_active || s_tts_busy ||
+                         uxQueueMessagesWaiting(s_tts_queue) > 0)) {
         ESP_LOGI(TAG, "Dropping low-priority TTS while busy");
         return false;
     }
     tts_msg_t msg = {
         .command = TTS_CMD_ONE_SHOT,
         .complete_conversation = complete,
+        .low_priority = low_priority,
         .volume = apply_user_volume(volume),
         .speech_rate = rate,
         .pitch = pitch,
@@ -873,7 +897,7 @@ void app_tts_start(void)
     } else if (CONFIG_SMART_POT_TTS_STARTUP_TEST) {
         (void)queue_one_shot("你好，我是小麦。", false,
                              TTS_VOLUME_COMMAND, 5, 1,
-                             "请用自然、亲切、活泼的语气说话。", false);
+                             "请用自然、亲切、活泼的语气说话。", true);
     }
 }
 
@@ -968,9 +992,14 @@ bool app_tts_speak_once(const char *text)
                           "请用清楚、轻快的语气说话。", false);
 }
 
+bool app_tts_speak_notification(const char *text)
+{
+    return queue_one_shot(text, false, TTS_VOLUME_COMMAND, 8, 2, "", true);
+}
+
 bool app_tts_speak_text_quietly(const char *text)
 {
-    return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION, 5, 1,
+    return queue_one_shot(text, false, TTS_VOLUME_AUTOMATION, 5, 1,
                           "请用温柔、俏皮的植物伙伴语气说话。", true);
 }
 
@@ -999,7 +1028,7 @@ bool app_tts_speak_text_with_tone(const char *text, app_tts_tone_t tone)
     default:
         break;
     }
-    return queue_one_shot(text, true, TTS_VOLUME_AUTOMATION,
+    return queue_one_shot(text, false, TTS_VOLUME_AUTOMATION,
                           rate, pitch, style, true);
 }
 
@@ -1015,6 +1044,30 @@ bool app_tts_finish_stream(void)
 
 bool app_tts_play_success_chime(void)
 {
-    if (s_tts_busy || s_chime_busy) return false;
+    if (s_conversation_priority_active || app_voice_conversation_is_active() ||
+        s_tts_busy || s_chime_busy) return false;
     return xTaskCreate(chime_task, "smart_pot_chime", 3072, NULL, 5, NULL) == pdPASS;
+}
+
+void app_tts_prioritize_conversation(void)
+{
+    s_conversation_priority_active = true;
+    tts_runtime_t *rt = s_active_runtime;
+    if (!s_tts_busy || !s_active_low_priority || rt == NULL) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Preempting background TTS for voice conversation");
+    rt->preempted = true;
+    rt->session_ok = false;
+    rt->session_done = true;
+    snprintf(rt->error, sizeof(rt->error), "preempted by voice conversation");
+    if (rt->events != NULL) {
+        xEventGroupSetBits(rt->events, TTS_EVENT_FAILED);
+    }
+}
+
+void app_tts_release_conversation_priority(void)
+{
+    s_conversation_priority_active = false;
 }

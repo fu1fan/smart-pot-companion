@@ -572,6 +572,7 @@ static void transcribe_and_reply_with_prefix(esp_codec_dev_handle_t mic,
                                              size_t prefix_sample_count)
 {
     s_conversation_busy = true;
+    app_tts_prioritize_conversation();
     if (!app_wifi_is_connected()) {
         ESP_LOGW(TAG, "Voice conversation skipped: Wi-Fi offline");
         app_ui_set_voice_status("ASR: Wi-Fi offline");
@@ -689,8 +690,14 @@ void app_voice_request_conversation(void)
 void app_voice_conversation_complete(void)
 {
     s_conversation_busy = false;
+    app_tts_release_conversation_priority();
     s_wakenet_rearm_requested = true;
     app_ui_set_voice_status(VOICE_WAKE_HINT);
+}
+
+bool app_voice_conversation_is_active(void)
+{
+    return s_conversation_busy;
 }
 
 static bool wait_for_microphone_state(bool paused, uint32_t timeout_ms)

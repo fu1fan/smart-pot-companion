@@ -149,7 +149,7 @@ static void motion_event_cb(app_motion_event_t event,
         break;
     }
 
-    if (!app_tts_speak_once(motion_voice_text(event))) {
+    if (!app_tts_speak_notification(motion_voice_text(event))) {
         ESP_LOGW(TAG, "Motion voice feedback queue failed for event=%d", event);
     }
     app_ui_set_motion_debug_event(motion_event_name(event), motion_reaction_name(event));

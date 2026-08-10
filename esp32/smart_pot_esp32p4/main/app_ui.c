@@ -600,7 +600,7 @@ static void check_schedule_reminders(void)
         if (seconds_left <= 0) {
             char text[160];
             snprintf(text, sizeof(text), "日程提醒，%s。", s_schedule_items[i]);
-            if (app_tts_speak_once(text)) {
+            if (app_tts_speak_notification(text)) {
                 s_schedule_reminded[i] = true;
             }
         }
